@@ -20,6 +20,10 @@ public interface IWalletService
 }
 public sealed record AiRoute(string Provider, string Model, string PriceCatalogVersion);
 public sealed record PriceEstimate(long MaximumCostMinor);
+public sealed record ChatExecutionPlan(
+    string Prompt,
+    AiRoute Route,
+    long MaximumCostMinor);
 public sealed record AiProviderRequest(string Prompt, AiRoute Route);
 public sealed record AiProviderResult(string Content, long InputUnits, long OutputUnits, long ActualCostMinor);
 

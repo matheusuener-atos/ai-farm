@@ -13,7 +13,11 @@ public sealed class ChatWorkflow(
         CancellationToken cancellationToken = default)
     {
         var conversation = await chat.GetOrCreateCurrentConversationAsync(cancellationToken);
-        return await SendAsync(conversation.Id, prompt, idempotencyKey, cancellationToken);
+        return await SendAsync(
+            conversation.Id,
+            prompt,
+            idempotencyKey,
+            cancellationToken);
     }
 
     public async Task<ChatExecutionResult> SendAsync(
@@ -22,9 +26,47 @@ public sealed class ChatWorkflow(
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
+        var plan = await PrepareAsync(prompt, cancellationToken);
+        return await SendAsync(
+            conversationId,
+            plan,
+            idempotencyKey,
+            cancellationToken);
+    }
+
+    public async Task<ChatExecutionPlan> PrepareAsync(
+        string prompt,
+        CancellationToken cancellationToken = default)
+    {
         if (string.IsNullOrWhiteSpace(prompt))
         {
             throw new ArgumentException("Digite uma mensagem antes de enviar.", nameof(prompt));
+        }
+
+        var normalizedPrompt = prompt.Trim();
+        var route = await router.SelectAsync(normalizedPrompt, cancellationToken);
+        var estimate = await pricing.EstimateAsync(normalizedPrompt, cancellationToken);
+        if (estimate.MaximumCostMinor <= 0)
+        {
+            throw new InvalidOperationException("A estimativa de custo deve ser positiva.");
+        }
+
+        return new ChatExecutionPlan(
+            normalizedPrompt,
+            route,
+            estimate.MaximumCostMinor);
+    }
+
+    public async Task<ChatExecutionResult> SendAsync(
+        Guid conversationId,
+        ChatExecutionPlan plan,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (string.IsNullOrWhiteSpace(plan.Prompt) || plan.MaximumCostMinor <= 0)
+        {
+            throw new ArgumentException("O plano de execução é inválido.", nameof(plan));
         }
 
         var replay = await chat.FindAsync(idempotencyKey, cancellationToken);
@@ -34,15 +76,17 @@ public sealed class ChatWorkflow(
         }
 
         var operationId = Guid.NewGuid();
-        var route = await router.SelectAsync(prompt, cancellationToken);
-        var estimate = await pricing.EstimateAsync(prompt, cancellationToken);
         var reservation = await wallet.ReservePromotionalAsync(
-            operationId, estimate.MaximumCostMinor, $"{idempotencyKey}:reserve", cancellationToken);
+            operationId,
+            plan.MaximumCostMinor,
+            $"{idempotencyKey}:reserve",
+            cancellationToken);
 
         try
         {
             var providerResult = await provider.ExecuteAsync(
-                new AiProviderRequest(prompt, route), cancellationToken);
+                new AiProviderRequest(plan.Prompt, plan.Route),
+                cancellationToken);
             await wallet.CaptureAsync(
                 reservation.ReservationId,
                 providerResult.ActualCostMinor,
@@ -53,11 +97,15 @@ public sealed class ChatWorkflow(
                 conversationId,
                 operationId,
                 providerResult.Content,
-                route,
-                estimate.MaximumCostMinor,
+                plan.Route,
+                plan.MaximumCostMinor,
                 providerResult.ActualCostMinor,
                 false);
-            await chat.SaveCompletedAsync(prompt, idempotencyKey, result, CancellationToken.None);
+            await chat.SaveCompletedAsync(
+                plan.Prompt,
+                idempotencyKey,
+                result,
+                CancellationToken.None);
             return result;
         }
         catch

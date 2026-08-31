@@ -28,6 +28,38 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task PreparingShowsRouteAndLimitWithoutCallingProviderOrChangingLedger()
+    {
+        var wallet = await FundedWalletAsync();
+        var provider = new CountingProvider();
+        var chat = new InMemoryChatStore();
+        var workflow = NewWorkflow(wallet, provider, chat);
+        var conversation = await chat.GetOrCreateCurrentConversationAsync();
+
+        var plan = await workflow.PrepareAsync("  confirmar antes  ");
+        var afterPreparation = await wallet.GetSnapshotAsync();
+
+        Assert.Equal("confirmar antes", plan.Prompt);
+        Assert.Equal("atos Fake Provider", plan.Route.Provider);
+        Assert.Equal("atos-fake-chat-v1", plan.Route.Model);
+        Assert.Equal(Aic.FromAic(20), plan.MaximumCostMinor);
+        Assert.Equal(0, provider.CallCount);
+        Assert.Single(afterPreparation.Transactions);
+        Assert.Equal(Aic.FromAic(1_000), afterPreparation.Balance.AvailableMinor);
+
+        var result = await workflow.SendAsync(
+            conversation.Id,
+            plan,
+            "confirmed-request");
+        var afterConfirmation = await wallet.GetSnapshotAsync();
+
+        Assert.Equal(1, provider.CallCount);
+        Assert.Equal(plan.Route, result.Route);
+        Assert.Equal(plan.MaximumCostMinor, result.EstimatedCostMinor);
+        Assert.Equal(Aic.FromAic(999), afterConfirmation.Balance.AvailableMinor);
+    }
+
+    [Fact]
     public async Task ProviderFailureReleasesReservationWithoutCharge()
     {
         var wallet = await FundedWalletAsync();

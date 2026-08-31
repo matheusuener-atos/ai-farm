@@ -88,6 +88,8 @@ Implementado:
 - persistência idempotente de AiRequest e AiExecution;
 - persistência de Conversation e Message com correlação à execução;
 - recuperação do histórico do Chat após restart;
+- preflight do Chat com rota, catálogo e limite em AIC antes da reserva;
+- confirmação explícita antes de executar o Provider e alterar o Ledger;
 - teste de persistência real do Chat contra PostgreSQL;
 - concorrência de reservas serializada por Wallet no PostgreSQL;
 - recuperação de saldo disponível e reservado após restart;

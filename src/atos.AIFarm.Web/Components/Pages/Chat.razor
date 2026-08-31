@@ -42,12 +42,55 @@
 
     <div class="composer">
         <label for="prompt">MENSAGEM</label>
-        <textarea id="prompt" @bind="_prompt" disabled="@_sending" placeholder="Digite sua tarefa..." rows="3"></textarea>
+        <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Digite sua tarefa..." rows="3"></textarea>
+
+        @if (_pendingPlan is not null)
+        {
+            <section class="execution-plan" aria-live="polite" aria-label="Confirmação da execução">
+                <div class="execution-plan-header">
+                    <span class="amber">[ PRÉVIA DA EXECUÇÃO ]</span>
+                    <span>CATÁLOGO // @_pendingPlan.Route.PriceCatalogVersion</span>
+                </div>
+                <dl>
+                    <div>
+                        <dt>ROTA</dt>
+                        <dd>@_pendingPlan.Route.Provider / @_pendingPlan.Route.Model</dd>
+                    </div>
+                    <div>
+                        <dt>LIMITE DESTA TAREFA</dt>
+                        <dd>@Aic.Format(_pendingPlan.MaximumCostMinor)</dd>
+                    </div>
+                    <div>
+                        <dt>SALDO APÓS RESERVA</dt>
+                        <dd>@ProjectedBalance</dd>
+                    </div>
+                </dl>
+                @if (!CanAffordPendingPlan)
+                {
+                    <p class="plan-warning">[ SALDO INSUFICIENTE ] A execução não pode ser confirmada.</p>
+                }
+            </section>
+        }
+
         <div class="composer-footer">
             <span>DISPONÍVEL // @(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</span>
-            <button @onclick="SendAsync" disabled="@_sending">
-                @(_sending ? "[ EXECUTANDO... ]" : "[ ENVIAR ]")
-            </button>
+            <div class="composer-actions">
+                @if (_pendingPlan is null)
+                {
+                    <button type="button" @onclick="PrepareAsync" disabled="@_working">
+                        @(_working ? "[ CALCULANDO... ]" : "[ CALCULAR CUSTO ]")
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
+                        [ ALTERAR ]
+                    </button>
+                    <button type="button" @onclick="ConfirmAsync" disabled="@(_working || !CanAffordPendingPlan)">
+                        @(_working ? "[ EXECUTANDO... ]" : $"[ CONFIRMAR {Aic.Format(_pendingPlan.MaximumCostMinor)} ]")
+                    </button>
+                }
+            </div>
         </div>
     </div>
 </section>
@@ -57,8 +100,9 @@
     private Guid _conversationId;
     private string _prompt = string.Empty;
     private string? _error;
-    private bool _sending;
+    private bool _working;
     private WalletSnapshot? _snapshot;
+    private ChatExecutionPlan? _pendingPlan;
 
     private string SessionCode => _conversationId == Guid.Empty
         ? "----"
@@ -70,21 +114,57 @@
         await RefreshWalletAsync();
     }
 
-    private async Task SendAsync()
+    private bool CanAffordPendingPlan =>
+        _pendingPlan is not null &&
+        _snapshot is not null &&
+        _snapshot.Balance.AvailableMinor >= _pendingPlan.MaximumCostMinor;
+
+    private string ProjectedBalance => _pendingPlan is null || _snapshot is null
+        ? "---"
+        : Aic.Format(Math.Max(
+            0,
+            _snapshot.Balance.AvailableMinor - _pendingPlan.MaximumCostMinor));
+
+    private async Task PrepareAsync()
     {
-        if (string.IsNullOrWhiteSpace(_prompt) || _sending)
+        if (string.IsNullOrWhiteSpace(_prompt) || _working)
         {
             return;
         }
 
-        _sending = true;
+        _working = true;
         _error = null;
-        var prompt = _prompt.Trim();
-        _prompt = string.Empty;
+
+        try
+        {
+            await RefreshWalletAsync();
+            _pendingPlan = await Workflow.PrepareAsync(_prompt);
+            _prompt = _pendingPlan.Prompt;
+        }
+        catch (Exception)
+        {
+            _pendingPlan = null;
+            _error = "Não foi possível calcular rota e custo. Tente novamente.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_pendingPlan is not { } plan || _working || !CanAffordPendingPlan)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
         _messages.Add(new ChatMessageSnapshot(
             Guid.NewGuid(),
             ChatMessageRole.User,
-            prompt,
+            plan.Prompt,
             ChatMessageStatus.Completed,
             Guid.Empty,
             DateTimeOffset.UtcNow));
@@ -93,23 +173,38 @@
         {
             await Workflow.SendAsync(
                 _conversationId,
-                prompt,
+                plan,
                 Guid.NewGuid().ToString("N"));
             await RefreshConversationAsync();
+            _prompt = string.Empty;
+            _pendingPlan = null;
         }
         catch (InsufficientBalanceException exception)
         {
             _error = exception.Message;
+            await RefreshConversationAsync();
         }
         catch (Exception)
         {
             _error = "A execução falhou. A reserva foi liberada e nenhum custo foi capturado.";
+            await RefreshConversationAsync();
         }
         finally
         {
             await RefreshWalletAsync();
-            _sending = false;
+            _working = false;
         }
+    }
+
+    private void CancelPlan()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _pendingPlan = null;
+        _error = null;
     }
 
     private async Task RefreshWalletAsync() =>
