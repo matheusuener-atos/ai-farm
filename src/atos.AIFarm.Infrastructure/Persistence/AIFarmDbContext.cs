@@ -9,6 +9,8 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options) :
     public DbSet<LedgerTransactionRecord> LedgerTransactions => Set<LedgerTransactionRecord>();
     public DbSet<LedgerEntryRecord> LedgerEntries => Set<LedgerEntryRecord>();
     public DbSet<BalanceReservationRecord> BalanceReservations => Set<BalanceReservationRecord>();
+    public DbSet<ConversationRecord> Conversations => Set<ConversationRecord>();
+    public DbSet<MessageRecord> Messages => Set<MessageRecord>();
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
 
@@ -77,6 +79,18 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options) :
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<ConversationRecord>(entity =>
+        {
+            entity.ToTable("conversations");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.UpdatedAtUtc });
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.HasOne<AccountRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<AiRequestRecord>(entity =>
         {
             entity.ToTable("ai_requests");
@@ -89,6 +103,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options) :
             entity.HasOne<AccountRecord>()
                 .WithMany()
                 .HasForeignKey(x => x.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ConversationRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.ConversationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -105,6 +123,25 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options) :
             entity.HasOne<AiRequestRecord>()
                 .WithOne()
                 .HasForeignKey<AiExecutionRecord>(x => x.AiRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<MessageRecord>(entity =>
+        {
+            entity.ToTable("messages");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ConversationId, x.IdempotencyKey }).IsUnique();
+            entity.Property(x => x.Role).HasMaxLength(32);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(220);
+            entity.Property(x => x.Content).HasColumnType("text");
+            entity.HasOne<ConversationRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.ConversationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AiExecutionRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.AiExecutionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
@@ -166,10 +203,33 @@ public sealed class AiRequestRecord
     public Guid Id { get; set; }
     public Guid AccountId { get; set; }
     public Guid ConversationId { get; set; }
+    public Guid OperationId { get; set; }
     public string Modality { get; set; } = "Chat";
     public string DataClassification { get; set; } = "Standard";
     public string? RequestedRoute { get; set; }
     public long MaxCostMinor { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class ConversationRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class MessageRecord
+{
+    public Guid Id { get; set; }
+    public Guid ConversationId { get; set; }
+    public Guid OperationId { get; set; }
+    public Guid? AiExecutionId { get; set; }
+    public string Role { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string IdempotencyKey { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }

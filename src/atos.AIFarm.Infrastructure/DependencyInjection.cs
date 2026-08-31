@@ -13,7 +13,7 @@ public static class DependencyInjection
     public static IServiceCollection AddAIFarmDevelopment(this IServiceCollection services)
     {
         services.AddSingleton<IWalletService, InMemoryWalletService>();
-        services.AddSingleton<IChatResultStore, InMemoryChatResultStore>();
+        services.AddSingleton<IChatStore, InMemoryChatStore>();
         services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
         services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
         services.AddSingleton<IAiProvider, FakeAiProvider>();
@@ -29,9 +29,9 @@ public static class DependencyInjection
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         services.RemoveAll<IWalletService>();
-        services.RemoveAll<IChatResultStore>();
+        services.RemoveAll<IChatStore>();
         services.AddSingleton<IWalletService, PostgresWalletService>();
-        services.AddSingleton<IChatResultStore, PostgresChatResultStore>();
+        services.AddSingleton<IChatStore, PostgresChatStore>();
         return services;
     }
 

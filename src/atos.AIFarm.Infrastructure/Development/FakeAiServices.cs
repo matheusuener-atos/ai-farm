@@ -27,9 +27,29 @@ public sealed class FakeAiProvider : IAiProvider
     }
 }
 
-public sealed class InMemoryChatResultStore : IChatResultStore
+public sealed class InMemoryChatStore : IChatStore
 {
+    private readonly object _sync = new();
     private readonly ConcurrentDictionary<string, ChatExecutionResult> _results = new(StringComparer.Ordinal);
+    private readonly List<ChatMessageSnapshot> _messages = [];
+    private Guid? _conversationId;
+    private DateTimeOffset _createdAtUtc;
+    private DateTimeOffset _updatedAtUtc;
+
+    public Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (_conversationId is null)
+            {
+                _conversationId = Guid.NewGuid();
+                _createdAtUtc = _updatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            return Task.FromResult(Snapshot());
+        }
+    }
 
     public Task<ChatExecutionResult?> FindAsync(string idempotencyKey, CancellationToken cancellationToken)
     {
@@ -37,12 +57,51 @@ public sealed class InMemoryChatResultStore : IChatResultStore
         return Task.FromResult(result);
     }
 
-    public Task SaveAsync(
+    public Task SaveCompletedAsync(
+        string prompt,
         string idempotencyKey,
         ChatExecutionResult result,
         CancellationToken cancellationToken)
     {
-        _results.TryAdd(idempotencyKey, result);
+        lock (_sync)
+        {
+            if (!_results.TryAdd(idempotencyKey, result))
+            {
+                return Task.CompletedTask;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (_conversationId is null)
+            {
+                _conversationId = result.ConversationId;
+                _createdAtUtc = now;
+            }
+            _messages.Add(new ChatMessageSnapshot(
+                Guid.NewGuid(),
+                ChatMessageRole.User,
+                prompt,
+                ChatMessageStatus.Completed,
+                result.OperationId,
+                now));
+            _messages.Add(new ChatMessageSnapshot(
+                Guid.NewGuid(),
+                ChatMessageRole.Assistant,
+                result.Response,
+                ChatMessageStatus.Completed,
+                result.OperationId,
+                now,
+                result.Route,
+                result.EstimatedCostMinor,
+                result.ActualCostMinor));
+            _updatedAtUtc = now;
+        }
+
         return Task.CompletedTask;
     }
+
+    private ConversationSnapshot Snapshot() => new(
+        _conversationId!.Value,
+        _createdAtUtc,
+        _updatedAtUtc,
+        [.. _messages.OrderBy(x => x.CreatedAtUtc)]);
 }

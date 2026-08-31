@@ -86,12 +86,14 @@ Implementado:
 - falha e cancelamento liberam a reserva;
 - repository PostgreSQL transacional e migrations aplicadas no Neon;
 - persistência idempotente de AiRequest e AiExecution;
+- persistência de Conversation e Message com correlação à execução;
+- recuperação do histórico do Chat após restart;
+- teste de persistência real do Chat contra PostgreSQL;
 - UI responsiva no sistema visual terminal/ASCII.
 
 Pendente para concluir o Marco 1:
 
-- execução dos testes de persistência contra PostgreSQL real;
-- persistência de Conversation e Message;
+- ampliar testes PostgreSQL reais para concorrência e restart da Wallet;
 - expiração automática de reservas e recuperação após restart;
 - autenticação mínima e isolamento por conta;
 - endpoints/erros e observabilidade.

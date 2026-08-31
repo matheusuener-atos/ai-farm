@@ -86,8 +86,52 @@ public sealed class ChatWorkflowTests
         Assert.Equal(0, provider.CallCount);
     }
 
-    private static ChatWorkflow NewWorkflow(IWalletService wallet, IAiProvider provider) =>
-        new(wallet, new FixedPriceEstimator(), new BestAvailableRouteSelector(), provider, new InMemoryChatResultStore());
+    [Fact]
+    public async Task ConversationHistorySurvivesWorkflowRecreation()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.GetOrCreateCurrentConversationAsync();
+        var firstWorkflow = NewWorkflow(wallet, new FakeAiProvider(), chat);
+
+        var result = await firstWorkflow.SendAsync(
+            conversation.Id,
+            "persista esta conversa",
+            "persistent-request");
+
+        var recreatedWorkflow = NewWorkflow(wallet, new FakeAiProvider(), chat);
+        var restored = await chat.GetOrCreateCurrentConversationAsync();
+
+        Assert.Equal(result.ConversationId, restored.Id);
+        Assert.Equal(2, restored.Messages.Count);
+        Assert.Collection(
+            restored.Messages,
+            message =>
+            {
+                Assert.Equal(ChatMessageRole.User, message.Role);
+                Assert.Equal(result.OperationId, message.OperationId);
+                Assert.Equal("persista esta conversa", message.Content);
+            },
+            message =>
+            {
+                Assert.Equal(ChatMessageRole.Assistant, message.Role);
+                Assert.Equal(result.OperationId, message.OperationId);
+                Assert.NotNull(message.Route);
+                Assert.Equal(result.ActualCostMinor, message.ActualCostMinor);
+            });
+        _ = recreatedWorkflow;
+    }
+
+    private static ChatWorkflow NewWorkflow(
+        IWalletService wallet,
+        IAiProvider provider,
+        IChatStore? chat = null) =>
+        new(
+            wallet,
+            new FixedPriceEstimator(),
+            new BestAvailableRouteSelector(),
+            provider,
+            chat ?? new InMemoryChatStore());
 
     private static async Task<InMemoryWalletService> FundedWalletAsync()
     {
