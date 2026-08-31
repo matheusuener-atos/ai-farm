@@ -89,11 +89,12 @@ Implementado:
 - persistência de Conversation e Message com correlação à execução;
 - recuperação do histórico do Chat após restart;
 - teste de persistência real do Chat contra PostgreSQL;
+- concorrência de reservas serializada por Wallet no PostgreSQL;
+- recuperação de saldo disponível e reservado após restart;
 - UI responsiva no sistema visual terminal/ASCII.
 
 Pendente para concluir o Marco 1:
 
-- ampliar testes PostgreSQL reais para concorrência e restart da Wallet;
 - expiração automática de reservas e recuperação após restart;
 - autenticação mínima e isolamento por conta;
 - endpoints/erros e observabilidade.

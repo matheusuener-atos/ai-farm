@@ -23,11 +23,13 @@ public static class DependencyInjection
 
     public static IServiceCollection AddAIFarmPostgres(
         this IServiceCollection services,
-        string connectionString)
+        string connectionString,
+        AIFarmIdentity? identity = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
+        services.TryAddSingleton(identity ?? AIFarmIdentity.Development);
         services.RemoveAll<IWalletService>();
         services.RemoveAll<IChatStore>();
         services.AddSingleton<IWalletService, PostgresWalletService>();

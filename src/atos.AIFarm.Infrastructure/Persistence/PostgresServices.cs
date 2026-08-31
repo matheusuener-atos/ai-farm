@@ -5,20 +5,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace atos.AIFarm.Infrastructure.Persistence;
 
-internal static class DevelopmentIdentity
+public sealed record AIFarmIdentity(Guid AccountId, Guid WalletId, string DisplayName)
 {
-    public static readonly Guid AccountId = Guid.Parse("a7a0a7a0-0000-4000-8000-000000000001");
-    public static readonly Guid WalletId = Guid.Parse("a7a0a7a0-0000-4000-8000-000000000002");
+    public static AIFarmIdentity Development { get; } = new(
+        Guid.Parse("a7a0a7a0-0000-4000-8000-000000000001"),
+        Guid.Parse("a7a0a7a0-0000-4000-8000-000000000002"),
+        "atos Development");
 }
 
-public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> factory) : IWalletService
+public sealed class PostgresWalletService(
+    IDbContextFactory<AIFarmDbContext> factory,
+    AIFarmIdentity identity) : IWalletService
 {
     public async Task<WalletSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var transactionRecords = await db.LedgerTransactions
-            .Where(x => x.WalletId == DevelopmentIdentity.WalletId)
+            .Where(x => x.WalletId == identity.WalletId)
             .OrderBy(x => x.CreatedAtUtc)
             .ToListAsync(cancellationToken);
         var transactionIds = transactionRecords.Select(x => x.Id).ToArray();
@@ -46,7 +50,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         var reserved = Enum.GetValues<CreditBucket>()
             .Sum(bucket => BalanceFor(entryRecords, ReservedAccount(bucket)));
         return new WalletSnapshot(
-            DevelopmentIdentity.WalletId,
+            identity.WalletId,
             new WalletBalance(availableByBucket.Values.Sum(), reserved, availableByBucket),
             transactions);
     }
@@ -59,7 +63,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         EnsurePositive(amountMinor);
         await using var db = await OpenLockedAsync(cancellationToken);
         if (await db.LedgerTransactions.AnyAsync(
-                x => x.WalletId == DevelopmentIdentity.WalletId &&
+                x => x.WalletId == identity.WalletId &&
                      x.IdempotencyKey == idempotencyKey,
                 cancellationToken))
         {
@@ -88,7 +92,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         EnsurePositive(amountMinor);
         await using var db = await OpenLockedAsync(cancellationToken);
         var existing = await db.BalanceReservations.SingleOrDefaultAsync(
-            x => x.WalletId == DevelopmentIdentity.WalletId &&
+            x => x.WalletId == identity.WalletId &&
                  x.IdempotencyKey == idempotencyKey,
             cancellationToken);
         if (existing is not null)
@@ -101,7 +105,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         var available = await (
             from entry in db.LedgerEntries
             join transaction in db.LedgerTransactions on entry.TransactionId equals transaction.Id
-            where transaction.WalletId == DevelopmentIdentity.WalletId &&
+            where transaction.WalletId == identity.WalletId &&
                   entry.AccountCode == availableCode
             select entry.Direction == nameof(LedgerDirection.Debit)
                 ? entry.AmountMinor
@@ -115,7 +119,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         var reservation = new BalanceReservationRecord
         {
             Id = Guid.NewGuid(),
-            WalletId = DevelopmentIdentity.WalletId,
+            WalletId = identity.WalletId,
             OperationId = operationId,
             Bucket = nameof(CreditBucket.Promotional),
             ReservedAmountMinor = amountMinor,
@@ -151,7 +155,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         }
 
         var reservation = await db.BalanceReservations.SingleAsync(
-            x => x.Id == reservationId && x.WalletId == DevelopmentIdentity.WalletId,
+            x => x.Id == reservationId && x.WalletId == identity.WalletId,
             cancellationToken);
         if (reservation.Status != nameof(ReservationStatus.Active) ||
             actualAmountMinor <= 0 ||
@@ -205,7 +209,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         }
 
         var reservation = await db.BalanceReservations.SingleAsync(
-            x => x.Id == reservationId && x.WalletId == DevelopmentIdentity.WalletId,
+            x => x.Id == reservationId && x.WalletId == identity.WalletId,
             cancellationToken);
         if (reservation.Status == nameof(ReservationStatus.Released))
         {
@@ -235,19 +239,19 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        if (!await db.Accounts.AnyAsync(x => x.Id == DevelopmentIdentity.AccountId, cancellationToken))
+        if (!await db.Accounts.AnyAsync(x => x.Id == identity.AccountId, cancellationToken))
         {
             db.Accounts.Add(new AccountRecord
             {
-                Id = DevelopmentIdentity.AccountId,
-                DisplayName = "atos Development",
+                Id = identity.AccountId,
+                DisplayName = identity.DisplayName,
                 Status = "Active",
                 CreatedAtUtc = DateTimeOffset.UtcNow
             });
             db.Wallets.Add(new WalletRecord
             {
-                Id = DevelopmentIdentity.WalletId,
-                AccountId = DevelopmentIdentity.AccountId,
+                Id = identity.WalletId,
+                AccountId = identity.AccountId,
                 Unit = "AIC",
                 CreatedAtUtc = DateTimeOffset.UtcNow
             });
@@ -259,9 +263,9 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
     {
         await EnsureInitializedAsync(cancellationToken);
         var db = await factory.CreateDbContextAsync(cancellationToken);
-        await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         _ = await db.Wallets.FromSqlInterpolated(
-                $"SELECT * FROM aifarm.wallets WHERE \"Id\" = {DevelopmentIdentity.WalletId} FOR UPDATE")
+                $"SELECT * FROM aifarm.wallets WHERE \"Id\" = {identity.WalletId} FOR UPDATE")
             .SingleAsync(cancellationToken);
         return db;
     }
@@ -274,16 +278,16 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         await db.Database.CommitTransactionAsync(cancellationToken);
     }
 
-    private static Task<bool> TransactionExistsAsync(
+    private Task<bool> TransactionExistsAsync(
         AIFarmDbContext db,
         string idempotencyKey,
         CancellationToken cancellationToken) =>
         db.LedgerTransactions.AnyAsync(
-            x => x.WalletId == DevelopmentIdentity.WalletId &&
+            x => x.WalletId == identity.WalletId &&
                  x.IdempotencyKey == idempotencyKey,
             cancellationToken);
 
-    private static void AddBalancedTransaction(
+    private void AddBalancedTransaction(
         AIFarmDbContext db,
         LedgerTransactionType type,
         Guid correlationId,
@@ -301,7 +305,7 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
         db.LedgerTransactions.Add(new LedgerTransactionRecord
         {
             Id = transactionId,
-            WalletId = DevelopmentIdentity.WalletId,
+            WalletId = identity.WalletId,
             Type = type.ToString(),
             CorrelationId = correlationId,
             IdempotencyKey = idempotencyKey,
@@ -335,11 +339,11 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
                 ? x.AmountMinor
                 : -x.AmountMinor);
 
-    private static string AvailableAccount(CreditBucket bucket) =>
-        $"WALLET:{DevelopmentIdentity.WalletId}:{bucket}:AVAILABLE";
+    private string AvailableAccount(CreditBucket bucket) =>
+        $"WALLET:{identity.WalletId}:{bucket}:AVAILABLE";
 
-    private static string ReservedAccount(CreditBucket bucket) =>
-        $"WALLET:{DevelopmentIdentity.WalletId}:{bucket}:RESERVED";
+    private string ReservedAccount(CreditBucket bucket) =>
+        $"WALLET:{identity.WalletId}:{bucket}:RESERVED";
 
     private static void EnsurePositive(long amountMinor)
     {
@@ -350,7 +354,9 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
     }
 }
 
-public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory)
+public sealed class PostgresChatStore(
+    IDbContextFactory<AIFarmDbContext> factory,
+    AIFarmIdentity identity)
     : IChatStore
 {
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
@@ -358,7 +364,7 @@ public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var conversation = await db.Conversations
-            .Where(x => x.AccountId == DevelopmentIdentity.AccountId && x.Status == "Active")
+            .Where(x => x.AccountId == identity.AccountId && x.Status == "Active")
             .OrderByDescending(x => x.UpdatedAtUtc)
             .FirstOrDefaultAsync(cancellationToken);
         if (conversation is null)
@@ -367,7 +373,7 @@ public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory
             conversation = new ConversationRecord
             {
                 Id = Guid.NewGuid(),
-                AccountId = DevelopmentIdentity.AccountId,
+                AccountId = identity.AccountId,
                 Status = "Active",
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
@@ -387,7 +393,7 @@ public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory
         var stored = await (
             from request in db.AiRequests
             join execution in db.AiExecutions on request.Id equals execution.AiRequestId
-            where request.AccountId == DevelopmentIdentity.AccountId &&
+            where request.AccountId == identity.AccountId &&
                   request.IdempotencyKey == idempotencyKey
             select new { request, execution }).SingleOrDefaultAsync(cancellationToken);
         if (stored is null)
@@ -416,7 +422,7 @@ public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (await db.AiRequests.AnyAsync(
-                x => x.AccountId == DevelopmentIdentity.AccountId &&
+                x => x.AccountId == identity.AccountId &&
                      x.IdempotencyKey == idempotencyKey,
                 cancellationToken))
         {
@@ -425,7 +431,7 @@ public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory
 
         var conversation = await db.Conversations.SingleAsync(
             x => x.Id == result.ConversationId &&
-                 x.AccountId == DevelopmentIdentity.AccountId,
+                 x.AccountId == identity.AccountId,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var requestId = Guid.NewGuid();
@@ -433,7 +439,7 @@ public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory
         db.AiRequests.Add(new AiRequestRecord
         {
             Id = requestId,
-            AccountId = DevelopmentIdentity.AccountId,
+            AccountId = identity.AccountId,
             ConversationId = result.ConversationId,
             OperationId = result.OperationId,
             Modality = "Chat",
