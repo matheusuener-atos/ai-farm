@@ -74,6 +74,17 @@ Neon `development`. O plano gratuito está declarado para evitar cobrança
 acidental e pode ser alterado no Dashboard quando forem necessários uptime e
 recursos de produção.
 
+## Operação HTTP
+
+- /health/live: confirma que o processo web está respondendo;
+- /health/ready: confirma que as dependências, incluindo PostgreSQL, estão disponíveis;
+- /health: alias de prontidão mantido para o health check atual do Render;
+- X-Correlation-ID: acompanha cada requisição e também é devolvido na resposta.
+
+Quando o cliente não envia um identificador de correlação válido, a aplicação
+gera um automaticamente. Os health checks não retornam credenciais nem detalhes
+internos de exceções.
+
 ## Estado do Marco 1
 
 Implementado:
@@ -95,11 +106,12 @@ Implementado:
 - recuperação de saldo disponível e reservado após restart;
 - expiração auditável de reservas, recuperada no startup e verificada a cada 30 segundos;
 - rejeição de captura tardia após o vencimento da reserva;
+- health checks separados para processo vivo e dependências prontas;
+- correlação de requisições HTTP sem registrar prompts ou corpos;
 - UI responsiva no sistema visual terminal/ASCII.
 
 Pendente para concluir o Marco 1:
 
 - autenticação mínima e isolamento por conta;
-- endpoints/erros e observabilidade.
 
 Consulte [ADR 0001](docs/ADR/0001-ledger-experimental.md) para as decisões experimentais deste incremento.

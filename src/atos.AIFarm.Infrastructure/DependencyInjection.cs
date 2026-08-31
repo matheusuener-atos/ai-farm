@@ -13,6 +13,7 @@ public static class DependencyInjection
     public static IServiceCollection AddAIFarmDevelopment(this IServiceCollection services)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<IAIFarmReadinessProbe, InMemoryReadinessProbe>();
         services.AddSingleton<IWalletService, InMemoryWalletService>();
         services.AddSingleton<IChatStore, InMemoryChatStore>();
         services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
@@ -35,8 +36,10 @@ public static class DependencyInjection
         services.TryAddSingleton(identity ?? AIFarmIdentity.Development);
         services.RemoveAll<IWalletService>();
         services.RemoveAll<IChatStore>();
+        services.RemoveAll<IAIFarmReadinessProbe>();
         services.AddSingleton<IWalletService, PostgresWalletService>();
         services.AddSingleton<IChatStore, PostgresChatStore>();
+        services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();
         return services;
     }
 

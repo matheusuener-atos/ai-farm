@@ -1,7 +1,10 @@
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Infrastructure;
+using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
@@ -23,6 +26,8 @@ if (builder.Environment.IsDevelopment())
         .PersistKeysToFileSystem(new DirectoryInfo(developmentKeys));
 }
 builder.Services.AddAIFarmDevelopment();
+builder.Services.AddHealthChecks()
+    .AddCheck<AIFarmReadinessHealthCheck>("aifarm_dependencies", tags: ["ready"]);
 
 var postgresConnection =
     builder.Configuration["DATABASE_URL"] ??
@@ -55,6 +60,7 @@ if (runMigrations)
 }
 
 // Configure the HTTP request pipeline.
+app.UseMiddleware<RequestCorrelationMiddleware>();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
@@ -72,15 +78,42 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
-app.MapGet("/health", async (IWalletService wallet, CancellationToken cancellationToken) =>
+app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
-    await wallet.GetSnapshotAsync(cancellationToken);
-    return Results.Ok(new { status = "ok" });
+    Predicate = _ => false,
+    ResponseWriter = (context, report) => WriteHealthResponse(context, report, "live"),
 });
+var readinessOptions = new HealthCheckOptions
+{
+    Predicate = registration => registration.Tags.Contains("ready"),
+    ResponseWriter = (context, report) => WriteHealthResponse(context, report, "ready"),
+};
+app.MapHealthChecks("/health/ready", readinessOptions);
+app.MapHealthChecks("/health", readinessOptions);
 
 await app.Services.InitializeAIFarmAsync();
 
 app.Run();
+
+static Task WriteHealthResponse(HttpContext context, HealthReport report, string check)
+{
+    context.Response.ContentType = "application/json; charset=utf-8";
+    var checks = report.Entries.Select(entry => new
+    {
+        name = entry.Key,
+        status = entry.Value.Status.ToString().ToLowerInvariant(),
+    });
+    return context.Response.WriteAsJsonAsync(new
+    {
+        status = report.Status == HealthStatus.Healthy ? "ok" : "unavailable",
+        check,
+        timestampUtc = context.RequestServices
+            .GetRequiredService<TimeProvider>()
+            .GetUtcNow(),
+        correlationId = context.TraceIdentifier,
+        checks,
+    });
+}
 
 static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string contentRootPath)
 {
