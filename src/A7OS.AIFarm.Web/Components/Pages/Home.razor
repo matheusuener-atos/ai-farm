@@ -1,0 +1,41 @@
+@page "/"
+@inject IWalletService Wallet
+
+<PageTitle>A7OS AI Farm</PageTitle>
+
+<section class="hero">
+    <p class="eyebrow">A7OS:/HOME</p>
+    <h1>SEU COMPUTADOR.<br /><span>SUA INTELIGÊNCIA.</span></h1>
+    <p class="thesis">Eu farmo créditos com o computador que já tenho e gasto esses créditos nas ferramentas de IA que realmente quero usar.</p>
+</section>
+
+<section class="balance-panel" aria-live="polite">
+    <div>
+        <span class="label">SALDO DISPONÍVEL</span>
+        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong>
+        <span class="muted">PROMOTIONAL // AMBIENTE DE TESTE</span>
+    </div>
+    <span class="status"><span aria-hidden="true">●</span> SISTEMA ONLINE</span>
+</section>
+
+<div class="action-grid">
+    <a class="action action-ai" href="/chat">
+        <span class="index">[ U ]</span>
+        <strong>USAR IA</strong>
+        <small>CONVERSAR COM O FAKE PROVIDER →</small>
+    </a>
+    <a class="action action-farm" href="/farm">
+        <span class="index">[ F ]</span>
+        <strong>FARMAR</strong>
+        <small>PRÓXIMA FASE: COMPUTE ÚTIL →</small>
+    </a>
+</div>
+
+<p class="statement">“Meu computador está pagando minha própria IA.”</p>
+
+@code {
+    private WalletSnapshot? _snapshot;
+
+    protected override async Task OnInitializedAsync() =>
+        _snapshot = await Wallet.GetSnapshotAsync();
+}
