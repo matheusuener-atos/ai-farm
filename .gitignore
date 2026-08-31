@@ -7,3 +7,5 @@ obj/
 .env
 appsettings.Local.json
 .aifarm-keys/
+.neon
+.env.local

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: atos-ai-farm
+    runtime: docker
+    plan: free
+    region: ohio
+    branch: main
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: AIFarm__LoadLocalEnvironment
+        value: "false"
+      - key: AIFarm__RunMigrationsOnStartup
+        value: "true"
+      - key: NEON_BRANCH
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false

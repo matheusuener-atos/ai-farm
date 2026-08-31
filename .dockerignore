@@ -1,0 +1,14 @@
+.git
+.github
+.agents
+.neon
+.aifarm-keys
+.env
+.env.*
+**/bin
+**/obj
+**/.vs
+**/.vscode
+TestResults
+*.user
+*.suo

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/atos.AIFarm.Core/atos.AIFarm.Core.csproj" />
+    <Project Path="src/atos.AIFarm.Infrastructure/atos.AIFarm.Infrastructure.csproj" />
+    <Project Path="src/atos.AIFarm.Web/atos.AIFarm.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/atos.AIFarm.IntegrationTests/atos.AIFarm.IntegrationTests.csproj" />
+    <Project Path="tests/atos.AIFarm.UnitTests/atos.AIFarm.UnitTests.csproj" />
+  </Folder>
+</Solution>
