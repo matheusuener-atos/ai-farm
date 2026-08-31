@@ -11,6 +11,8 @@ services:
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
+      - key: DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE
+        value: "false"
       - key: AIFarm__LoadLocalEnvironment
         value: "false"
       - key: AIFarm__RunMigrationsOnStartup

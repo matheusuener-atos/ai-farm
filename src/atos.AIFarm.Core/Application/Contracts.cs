@@ -22,6 +22,34 @@ public sealed record PriceEstimate(long MaximumCostMinor);
 public sealed record AiProviderRequest(string Prompt, AiRoute Route);
 public sealed record AiProviderResult(string Content, long InputUnits, long OutputUnits, long ActualCostMinor);
 
+public enum ChatMessageRole
+{
+    User,
+    Assistant
+}
+
+public enum ChatMessageStatus
+{
+    Completed
+}
+
+public sealed record ChatMessageSnapshot(
+    Guid Id,
+    ChatMessageRole Role,
+    string Content,
+    ChatMessageStatus Status,
+    Guid OperationId,
+    DateTimeOffset CreatedAtUtc,
+    AiRoute? Route = null,
+    long? EstimatedCostMinor = null,
+    long? ActualCostMinor = null);
+
+public sealed record ConversationSnapshot(
+    Guid Id,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    IReadOnlyList<ChatMessageSnapshot> Messages);
+
 public interface IPriceEstimator
 {
     Task<PriceEstimate> EstimateAsync(string prompt, CancellationToken cancellationToken);
@@ -38,6 +66,7 @@ public interface IAiProvider
 }
 
 public sealed record ChatExecutionResult(
+    Guid ConversationId,
     Guid OperationId,
     string Response,
     AiRoute Route,
@@ -45,8 +74,14 @@ public sealed record ChatExecutionResult(
     long ActualCostMinor,
     bool WasReplayed);
 
-public interface IChatResultStore
+public interface IChatStore
 {
+    Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
+        CancellationToken cancellationToken = default);
     Task<ChatExecutionResult?> FindAsync(string idempotencyKey, CancellationToken cancellationToken);
-    Task SaveAsync(string idempotencyKey, ChatExecutionResult result, CancellationToken cancellationToken);
+    Task SaveCompletedAsync(
+        string prompt,
+        string idempotencyKey,
+        ChatExecutionResult result,
+        CancellationToken cancellationToken);
 }

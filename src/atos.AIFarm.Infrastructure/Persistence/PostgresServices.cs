@@ -350,9 +350,35 @@ public sealed class PostgresWalletService(IDbContextFactory<AIFarmDbContext> fac
     }
 }
 
-public sealed class PostgresChatResultStore(IDbContextFactory<AIFarmDbContext> factory)
-    : IChatResultStore
+public sealed class PostgresChatStore(IDbContextFactory<AIFarmDbContext> factory)
+    : IChatStore
 {
+    public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations
+            .Where(x => x.AccountId == DevelopmentIdentity.AccountId && x.Status == "Active")
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (conversation is null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            conversation = new ConversationRecord
+            {
+                Id = Guid.NewGuid(),
+                AccountId = DevelopmentIdentity.AccountId,
+                Status = "Active",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            db.Conversations.Add(conversation);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return await LoadConversationAsync(db, conversation, cancellationToken);
+    }
+
     public async Task<ChatExecutionResult?> FindAsync(
         string idempotencyKey,
         CancellationToken cancellationToken)
@@ -371,6 +397,7 @@ public sealed class PostgresChatResultStore(IDbContextFactory<AIFarmDbContext> f
 
         return new ChatExecutionResult(
             stored.request.ConversationId,
+            stored.request.OperationId,
             stored.execution.Response,
             new AiRoute(
                 stored.execution.Provider,
@@ -381,7 +408,8 @@ public sealed class PostgresChatResultStore(IDbContextFactory<AIFarmDbContext> f
             true);
     }
 
-    public async Task SaveAsync(
+    public async Task SaveCompletedAsync(
+        string prompt,
         string idempotencyKey,
         ChatExecutionResult result,
         CancellationToken cancellationToken)
@@ -395,13 +423,19 @@ public sealed class PostgresChatResultStore(IDbContextFactory<AIFarmDbContext> f
             return;
         }
 
+        var conversation = await db.Conversations.SingleAsync(
+            x => x.Id == result.ConversationId &&
+                 x.AccountId == DevelopmentIdentity.AccountId,
+            cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var requestId = Guid.NewGuid();
+        var executionId = Guid.NewGuid();
         db.AiRequests.Add(new AiRequestRecord
         {
             Id = requestId,
             AccountId = DevelopmentIdentity.AccountId,
-            ConversationId = result.OperationId,
+            ConversationId = result.ConversationId,
+            OperationId = result.OperationId,
             Modality = "Chat",
             DataClassification = "Standard",
             RequestedRoute = $"{result.Route.Provider}/{result.Route.Model}",
@@ -412,7 +446,7 @@ public sealed class PostgresChatResultStore(IDbContextFactory<AIFarmDbContext> f
         });
         db.AiExecutions.Add(new AiExecutionRecord
         {
-            Id = Guid.NewGuid(),
+            Id = executionId,
             AiRequestId = requestId,
             Provider = result.Route.Provider,
             Model = result.Route.Model,
@@ -424,6 +458,78 @@ public sealed class PostgresChatResultStore(IDbContextFactory<AIFarmDbContext> f
             StartedAtUtc = now,
             FinishedAtUtc = now
         });
+        db.Messages.AddRange(
+            new MessageRecord
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = result.ConversationId,
+                OperationId = result.OperationId,
+                Role = nameof(ChatMessageRole.User),
+                Content = prompt,
+                Status = nameof(ChatMessageStatus.Completed),
+                IdempotencyKey = $"{idempotencyKey}:user",
+                CreatedAtUtc = now
+            },
+            new MessageRecord
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = result.ConversationId,
+                OperationId = result.OperationId,
+                AiExecutionId = executionId,
+                Role = nameof(ChatMessageRole.Assistant),
+                Content = result.Response,
+                Status = nameof(ChatMessageStatus.Completed),
+                IdempotencyKey = $"{idempotencyKey}:assistant",
+                CreatedAtUtc = now.AddMilliseconds(1)
+            });
+        conversation.UpdatedAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task<ConversationSnapshot> LoadConversationAsync(
+        AIFarmDbContext db,
+        ConversationRecord conversation,
+        CancellationToken cancellationToken)
+    {
+        var records = await db.Messages
+            .Where(x => x.ConversationId == conversation.Id)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ThenBy(x => x.Role == nameof(ChatMessageRole.User) ? 0 : 1)
+            .ThenBy(x => x.Id)
+            .ToListAsync(cancellationToken);
+        var executionIds = records
+            .Where(x => x.AiExecutionId.HasValue)
+            .Select(x => x.AiExecutionId!.Value)
+            .Distinct()
+            .ToArray();
+        var executions = await db.AiExecutions
+            .Where(x => executionIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var messages = records.Select(record =>
+        {
+            var execution = record.AiExecutionId is Guid executionId
+                ? executions.GetValueOrDefault(executionId)
+                : null;
+            var route = execution is null
+                ? null
+                : new AiRoute(execution.Provider, execution.Model, execution.PriceCatalogVersion);
+            return new ChatMessageSnapshot(
+                record.Id,
+                Enum.Parse<ChatMessageRole>(record.Role),
+                record.Content,
+                Enum.Parse<ChatMessageStatus>(record.Status),
+                record.OperationId,
+                record.CreatedAtUtc,
+                route,
+                execution?.EstimatedCostMinor,
+                execution?.ActualCostMinor);
+        }).ToArray();
+
+        return new ConversationSnapshot(
+            conversation.Id,
+            conversation.CreatedAtUtc,
+            conversation.UpdatedAtUtc,
+            messages);
     }
 }

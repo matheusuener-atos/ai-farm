@@ -5,9 +5,19 @@ public sealed class ChatWorkflow(
     IPriceEstimator pricing,
     IAiRouteSelector router,
     IAiProvider provider,
-    IChatResultStore results)
+    IChatStore chat)
 {
     public async Task<ChatExecutionResult> SendAsync(
+        string prompt,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        var conversation = await chat.GetOrCreateCurrentConversationAsync(cancellationToken);
+        return await SendAsync(conversation.Id, prompt, idempotencyKey, cancellationToken);
+    }
+
+    public async Task<ChatExecutionResult> SendAsync(
+        Guid conversationId,
         string prompt,
         string idempotencyKey,
         CancellationToken cancellationToken = default)
@@ -17,7 +27,7 @@ public sealed class ChatWorkflow(
             throw new ArgumentException("Digite uma mensagem antes de enviar.", nameof(prompt));
         }
 
-        var replay = await results.FindAsync(idempotencyKey, cancellationToken);
+        var replay = await chat.FindAsync(idempotencyKey, cancellationToken);
         if (replay is not null)
         {
             return replay with { WasReplayed = true };
@@ -40,13 +50,14 @@ public sealed class ChatWorkflow(
                 CancellationToken.None);
 
             var result = new ChatExecutionResult(
+                conversationId,
                 operationId,
                 providerResult.Content,
                 route,
                 estimate.MaximumCostMinor,
                 providerResult.ActualCostMinor,
                 false);
-            await results.SaveAsync(idempotencyKey, result, CancellationToken.None);
+            await chat.SaveCompletedAsync(prompt, idempotencyKey, result, CancellationToken.None);
             return result;
         }
         catch

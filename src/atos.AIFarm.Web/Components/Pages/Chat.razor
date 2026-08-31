@@ -1,5 +1,6 @@
 @page "/chat"
 @inject ChatWorkflow Workflow
+@inject IChatStore ChatStore
 @inject IWalletService Wallet
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
@@ -11,7 +12,7 @@
 </div>
 
 <section class="terminal chat-terminal" aria-label="Conversa com IA">
-    <div class="terminal-title">[ SESSÃO_01 ] <span class="status">● ONLINE</span></div>
+    <div class="terminal-title">[ SESSÃO_@SessionCode ] <span class="status">● ONLINE</span></div>
 
     @if (_messages.Count == 0)
     {
@@ -25,11 +26,11 @@
     @foreach (var message in _messages)
     {
         <article class="message">
-            <span class="@(message.Role == "VOCÊ" ? "amber" : "purple")">@message.Role&gt;</span>
+            <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@RoleLabel(message.Role)&gt;</span>
             <p>@message.Content</p>
-            @if (message.Meta is not null)
+            @if (MessageMeta(message) is string meta)
             {
-                <small>@message.Meta</small>
+                <small>@meta</small>
             }
         </article>
     }
@@ -52,13 +53,22 @@
 </section>
 
 @code {
-    private readonly List<UiMessage> _messages = [];
+    private readonly List<ChatMessageSnapshot> _messages = [];
+    private Guid _conversationId;
     private string _prompt = string.Empty;
     private string? _error;
     private bool _sending;
     private WalletSnapshot? _snapshot;
 
-    protected override async Task OnInitializedAsync() => await RefreshWalletAsync();
+    private string SessionCode => _conversationId == Guid.Empty
+        ? "----"
+        : _conversationId.ToString("N")[..4].ToUpperInvariant();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshConversationAsync();
+        await RefreshWalletAsync();
+    }
 
     private async Task SendAsync()
     {
@@ -71,15 +81,21 @@
         _error = null;
         var prompt = _prompt.Trim();
         _prompt = string.Empty;
-        _messages.Add(new UiMessage("VOCÊ", prompt, null));
+        _messages.Add(new ChatMessageSnapshot(
+            Guid.NewGuid(),
+            ChatMessageRole.User,
+            prompt,
+            ChatMessageStatus.Completed,
+            Guid.Empty,
+            DateTimeOffset.UtcNow));
 
         try
         {
-            var result = await Workflow.SendAsync(prompt, Guid.NewGuid().ToString("N"));
-            _messages.Add(new UiMessage(
-                "atos_AI",
-                result.Response,
-                $"{result.Route.Provider} // {result.Route.Model} // RESERVADO {Aic.Format(result.EstimatedCostMinor)} // LIQUIDADO {Aic.Format(result.ActualCostMinor)}"));
+            await Workflow.SendAsync(
+                _conversationId,
+                prompt,
+                Guid.NewGuid().ToString("N"));
+            await RefreshConversationAsync();
         }
         catch (InsufficientBalanceException exception)
         {
@@ -99,5 +115,21 @@
     private async Task RefreshWalletAsync() =>
         _snapshot = await Wallet.GetSnapshotAsync();
 
-    private sealed record UiMessage(string Role, string Content, string? Meta);
+    private async Task RefreshConversationAsync()
+    {
+        var conversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+        _conversationId = conversation.Id;
+        _messages.Clear();
+        _messages.AddRange(conversation.Messages);
+    }
+
+    private static string RoleLabel(ChatMessageRole role) =>
+        role == ChatMessageRole.User ? "VOCÊ" : "atos_AI";
+
+    private static string? MessageMeta(ChatMessageSnapshot message) =>
+        message.Route is null ||
+        message.EstimatedCostMinor is null ||
+        message.ActualCostMinor is null
+            ? null
+            : $"{message.Route.Provider} // {message.Route.Model} // RESERVADO {Aic.Format(message.EstimatedCostMinor.Value)} // LIQUIDADO {Aic.Format(message.ActualCostMinor.Value)}";
 }
