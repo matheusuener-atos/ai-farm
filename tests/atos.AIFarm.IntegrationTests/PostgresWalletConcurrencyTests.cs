@@ -9,6 +9,9 @@ namespace atos.AIFarm.IntegrationTests;
 
 public sealed class PostgresWalletConcurrencyTests
 {
+    private static readonly DateTimeOffset TestNow =
+        new(2026, 8, 31, 21, 0, 0, TimeSpan.Zero);
+
     [Fact]
     [Trait("Category", "Postgres")]
     public async Task ConcurrentReservationsCannotOverspendAndStateSurvivesRecreation()
@@ -68,6 +71,67 @@ public sealed class PostgresWalletConcurrencyTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task StartupReleasesReservationThatExpiredWhileApplicationWasStopped()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var identity = new AIFarmIdentity(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "atos PostgreSQL expiration test");
+        var clock = new ManualTimeProvider(TestNow);
+        ReservationResult reservation = null!;
+
+        try
+        {
+            await using (var firstProvider = BuildProvider(connectionString, identity, clock))
+            {
+                await firstProvider.InitializeAIFarmAsync();
+                var wallet = firstProvider.GetRequiredService<IWalletService>();
+                reservation = await wallet.ReservePromotionalAsync(
+                    Guid.NewGuid(),
+                    Aic.FromAic(800),
+                    $"integration:wallet:expiring:{identity.WalletId:N}");
+
+                var beforeRestart = await wallet.GetSnapshotAsync();
+                Assert.Equal(Aic.FromAic(200), beforeRestart.Balance.AvailableMinor);
+                Assert.Equal(Aic.FromAic(800), beforeRestart.Balance.ReservedMinor);
+            }
+
+            clock.Advance(TimeSpan.FromMinutes(6));
+
+            await using var recreatedProvider = BuildProvider(connectionString, identity, clock);
+            await recreatedProvider.InitializeAIFarmAsync();
+            var recreatedWallet = recreatedProvider.GetRequiredService<IWalletService>();
+            var restored = await recreatedWallet.GetSnapshotAsync();
+
+            Assert.Equal(Aic.FromAic(1_000), restored.Balance.AvailableMinor);
+            Assert.Equal(0, restored.Balance.ReservedMinor);
+            Assert.Collection(
+                restored.Transactions.OrderBy(x => x.CreatedAtUtc),
+                grant => Assert.Equal(LedgerTransactionType.Grant, grant.Type),
+                reserve => Assert.Equal(LedgerTransactionType.Reserve, reserve.Type),
+                release => Assert.Equal(LedgerTransactionType.Release, release.Type));
+
+            var factory = recreatedProvider
+                .GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var storedReservation = await db.BalanceReservations
+                .SingleAsync(x => x.Id == reservation.ReservationId);
+            Assert.Equal(nameof(ReservationStatus.Expired), storedReservation.Status);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, identity);
+        }
+    }
+
     private static async Task<ReservationAttempt> TryReserveAsync(
         IWalletService wallet,
         Guid walletId,
@@ -90,10 +154,15 @@ public sealed class PostgresWalletConcurrencyTests
 
     private static ServiceProvider BuildProvider(
         string connectionString,
-        AIFarmIdentity identity)
+        AIFarmIdentity identity,
+        TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        if (timeProvider is not null)
+        {
+            services.AddSingleton(timeProvider);
+        }
         services.AddAIFarmDevelopment();
         services.AddAIFarmPostgres(connectionString, identity);
         return services.BuildServiceProvider();
@@ -148,4 +217,13 @@ public sealed class PostgresWalletConcurrencyTests
     private sealed record ReservationAttempt(
         ReservationResult? Reservation,
         Exception? Error);
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan duration) => _utcNow += duration;
+    }
 }

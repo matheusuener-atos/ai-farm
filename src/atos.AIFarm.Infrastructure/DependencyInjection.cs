@@ -12,12 +12,14 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddAIFarmDevelopment(this IServiceCollection services)
     {
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IWalletService, InMemoryWalletService>();
         services.AddSingleton<IChatStore, InMemoryChatStore>();
         services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
         services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
         services.AddSingleton<IAiProvider, FakeAiProvider>();
         services.AddSingleton<ChatWorkflow>();
+        services.AddHostedService<ReservationExpirationWorker>();
         return services;
     }
 
@@ -27,6 +29,7 @@ public static class DependencyInjection
         AIFarmIdentity? identity = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
+        services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         services.TryAddSingleton(identity ?? AIFarmIdentity.Development);
@@ -45,6 +48,10 @@ public static class DependencyInjection
         await wallet.GrantPromotionalAsync(
             Aic.FromAic(1_000),
             "development:promotional-grant:v1",
+            cancellationToken);
+        var timeProvider = services.GetRequiredService<TimeProvider>();
+        await wallet.ExpireReservationsAsync(
+            timeProvider.GetUtcNow(),
             cancellationToken);
     }
 

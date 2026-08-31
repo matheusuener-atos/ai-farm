@@ -16,6 +16,7 @@ public interface IWalletService
     Task<ReservationResult> ReservePromotionalAsync(Guid operationId, long amountMinor, string idempotencyKey, CancellationToken cancellationToken = default);
     Task CaptureAsync(Guid reservationId, long actualAmountMinor, string idempotencyKey, CancellationToken cancellationToken = default);
     Task ReleaseAsync(Guid reservationId, string idempotencyKey, string reason, CancellationToken cancellationToken = default);
+    Task<int> ExpireReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default);
 }
 public sealed record AiRoute(string Provider, string Model, string PriceCatalogVersion);
 public sealed record PriceEstimate(long MaximumCostMinor);

@@ -15,7 +15,8 @@ public sealed record AIFarmIdentity(Guid AccountId, Guid WalletId, string Displa
 
 public sealed class PostgresWalletService(
     IDbContextFactory<AIFarmDbContext> factory,
-    AIFarmIdentity identity) : IWalletService
+    AIFarmIdentity identity,
+    TimeProvider timeProvider) : IWalletService
 {
     public async Task<WalletSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -77,7 +78,7 @@ public sealed class PostgresWalletService(
             Guid.NewGuid(),
             idempotencyKey,
             "Crédito promocional de desenvolvimento",
-            DateTimeOffset.UtcNow,
+            timeProvider.GetUtcNow(),
             (AvailableAccount(CreditBucket.Promotional), CreditBucket.Promotional, LedgerDirection.Debit, amountMinor),
             ("atos:PROMOTIONAL_POOL", CreditBucket.Promotional, LedgerDirection.Credit, amountMinor));
         await SaveAndCommitAsync(db, cancellationToken);
@@ -115,7 +116,7 @@ public sealed class PostgresWalletService(
             throw new InsufficientBalanceException(available, amountMinor);
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = timeProvider.GetUtcNow();
         var reservation = new BalanceReservationRecord
         {
             Id = Guid.NewGuid(),
@@ -157,7 +158,9 @@ public sealed class PostgresWalletService(
         var reservation = await db.BalanceReservations.SingleAsync(
             x => x.Id == reservationId && x.WalletId == identity.WalletId,
             cancellationToken);
+        var now = timeProvider.GetUtcNow();
         if (reservation.Status != nameof(ReservationStatus.Active) ||
+            reservation.ExpiresAtUtc <= now ||
             actualAmountMinor <= 0 ||
             actualAmountMinor > reservation.ReservedAmountMinor)
         {
@@ -165,7 +168,6 @@ public sealed class PostgresWalletService(
         }
 
         var bucket = Enum.Parse<CreditBucket>(reservation.Bucket);
-        var now = DateTimeOffset.UtcNow;
         AddBalancedTransaction(
             db,
             LedgerTransactionType.Capture,
@@ -211,7 +213,7 @@ public sealed class PostgresWalletService(
         var reservation = await db.BalanceReservations.SingleAsync(
             x => x.Id == reservationId && x.WalletId == identity.WalletId,
             cancellationToken);
-        if (reservation.Status == nameof(ReservationStatus.Released))
+        if (reservation.Status is nameof(ReservationStatus.Released) or nameof(ReservationStatus.Expired))
         {
             await db.Database.CommitTransactionAsync(cancellationToken);
             return;
@@ -229,11 +231,43 @@ public sealed class PostgresWalletService(
             reservation.OperationId,
             idempotencyKey,
             reason,
-            DateTimeOffset.UtcNow,
+            timeProvider.GetUtcNow(),
             (AvailableAccount(bucket), bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor),
             (ReservedAccount(bucket), bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor));
         reservation.Status = nameof(ReservationStatus.Released);
         await SaveAndCommitAsync(db, cancellationToken);
+    }
+
+    public async Task<int> ExpireReservationsAsync(
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await OpenLockedAsync(cancellationToken);
+        var expired = await db.BalanceReservations
+            .Where(x =>
+                x.WalletId == identity.WalletId &&
+                x.Status == nameof(ReservationStatus.Active) &&
+                x.ExpiresAtUtc <= utcNow)
+            .OrderBy(x => x.ExpiresAtUtc)
+            .ToListAsync(cancellationToken);
+
+        foreach (var reservation in expired)
+        {
+            var bucket = Enum.Parse<CreditBucket>(reservation.Bucket);
+            AddBalancedTransaction(
+                db,
+                LedgerTransactionType.Release,
+                reservation.OperationId,
+                $"reservation:{reservation.Id:N}:expiry",
+                "Liberação automática de reserva expirada",
+                utcNow,
+                (AvailableAccount(bucket), bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor),
+                (ReservedAccount(bucket), bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor));
+            reservation.Status = nameof(ReservationStatus.Expired);
+        }
+
+        await SaveAndCommitAsync(db, cancellationToken);
+        return expired.Count;
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
@@ -246,14 +280,14 @@ public sealed class PostgresWalletService(
                 Id = identity.AccountId,
                 DisplayName = identity.DisplayName,
                 Status = "Active",
-                CreatedAtUtc = DateTimeOffset.UtcNow
+                CreatedAtUtc = timeProvider.GetUtcNow()
             });
             db.Wallets.Add(new WalletRecord
             {
                 Id = identity.WalletId,
                 AccountId = identity.AccountId,
                 Unit = "AIC",
-                CreatedAtUtc = DateTimeOffset.UtcNow
+                CreatedAtUtc = timeProvider.GetUtcNow()
             });
             await db.SaveChangesAsync(cancellationToken);
         }

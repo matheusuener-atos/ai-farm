@@ -98,6 +98,11 @@ public sealed class WalletAggregate
         }
 
         var reservation = FindActiveReservation(reservationId);
+        if (reservation.ExpiresAtUtc <= now)
+        {
+            throw new InvalidOperationException("A reserva expirou e não pode ser capturada.");
+        }
+
         if (actualAmountMinor <= 0 || actualAmountMinor > reservation.ReservedAmountMinor)
         {
             throw new ArgumentOutOfRangeException(nameof(actualAmountMinor));
@@ -143,9 +148,11 @@ public sealed class WalletAggregate
         }
 
         var reservation = _reservations.Single(x => x.Id == reservationId);
-        if (reservation.Status == ReservationStatus.Released)
+        if (reservation.Status is ReservationStatus.Released or ReservationStatus.Expired)
         {
-            return _transactions.Single(x => x.Type == LedgerTransactionType.Release && x.CorrelationId == reservation.OperationId);
+            return _transactions.Last(x =>
+                x.Type == LedgerTransactionType.Release &&
+                x.CorrelationId == reservation.OperationId);
         }
 
         if (reservation.Status != ReservationStatus.Active)
@@ -162,6 +169,35 @@ public sealed class WalletAggregate
             Entry(AccountCode.Available(Id, reservation.Bucket), reservation.Bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor, now),
             Entry(AccountCode.Reserved(Id, reservation.Bucket), reservation.Bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor, now));
         reservation.Status = ReservationStatus.Released;
+        return release;
+    }
+
+    public LedgerTransaction Expire(
+        Guid reservationId,
+        string idempotencyKey,
+        DateTimeOffset now)
+    {
+        var existing = FindTransaction(idempotencyKey);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var reservation = FindActiveReservation(reservationId);
+        if (reservation.ExpiresAtUtc > now)
+        {
+            throw new InvalidOperationException("A reserva ainda não expirou.");
+        }
+
+        var release = AddBalancedTransaction(
+            LedgerTransactionType.Release,
+            reservation.OperationId,
+            idempotencyKey,
+            "Liberação automática de reserva expirada",
+            now,
+            Entry(AccountCode.Available(Id, reservation.Bucket), reservation.Bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor, now),
+            Entry(AccountCode.Reserved(Id, reservation.Bucket), reservation.Bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor, now));
+        reservation.Status = ReservationStatus.Expired;
         return release;
     }
 

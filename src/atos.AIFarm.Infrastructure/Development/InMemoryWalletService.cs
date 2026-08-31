@@ -7,6 +7,17 @@ public sealed class InMemoryWalletService : IWalletService
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly WalletAggregate _wallet = new(Guid.NewGuid(), Guid.NewGuid());
+    private readonly TimeProvider _timeProvider;
+
+    public InMemoryWalletService()
+        : this(TimeProvider.System)
+    {
+    }
+
+    public InMemoryWalletService(TimeProvider timeProvider)
+    {
+        _timeProvider = timeProvider;
+    }
 
     public async Task<WalletSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -29,7 +40,7 @@ public sealed class InMemoryWalletService : IWalletService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            _wallet.GrantPromotional(amountMinor, Guid.NewGuid(), idempotencyKey, DateTimeOffset.UtcNow);
+            _wallet.GrantPromotional(amountMinor, Guid.NewGuid(), idempotencyKey, _timeProvider.GetUtcNow());
         }
         finally
         {
@@ -46,12 +57,13 @@ public sealed class InMemoryWalletService : IWalletService
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            var now = _timeProvider.GetUtcNow();
             var reservation = _wallet.ReservePromotional(
                 amountMinor,
                 operationId,
                 idempotencyKey,
-                DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow.AddMinutes(5));
+                now,
+                now.AddMinutes(5));
             return new ReservationResult(reservation.Id, reservation.ReservedAmountMinor);
         }
         finally
@@ -69,7 +81,7 @@ public sealed class InMemoryWalletService : IWalletService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            _wallet.Capture(reservationId, actualAmountMinor, idempotencyKey, DateTimeOffset.UtcNow);
+            _wallet.Capture(reservationId, actualAmountMinor, idempotencyKey, _timeProvider.GetUtcNow());
         }
         finally
         {
@@ -86,7 +98,33 @@ public sealed class InMemoryWalletService : IWalletService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            _wallet.Release(reservationId, idempotencyKey, reason, DateTimeOffset.UtcNow);
+            _wallet.Release(reservationId, idempotencyKey, reason, _timeProvider.GetUtcNow());
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<int> ExpireReservationsAsync(
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var expired = _wallet.Reservations
+                .Where(x => x.Status == ReservationStatus.Active && x.ExpiresAtUtc <= utcNow)
+                .ToArray();
+            foreach (var reservation in expired)
+            {
+                _wallet.Expire(
+                    reservation.Id,
+                    $"reservation:{reservation.Id:N}:expiry",
+                    utcNow);
+            }
+
+            return expired.Length;
         }
         finally
         {

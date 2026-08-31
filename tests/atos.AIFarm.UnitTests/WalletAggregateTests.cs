@@ -86,6 +86,43 @@ public sealed class WalletAggregateTests
     }
 
     [Fact]
+    public void ExpirationOnlyReleasesReservationAtOrAfterDeadline()
+    {
+        var wallet = FundedWallet();
+        var reservation = wallet.ReservePromotional(
+            Aic.FromAic(20), Guid.NewGuid(), "reserve-1", Now, Now.AddMinutes(5));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            wallet.Expire(
+                reservation.Id,
+                "expire-1",
+                Now.AddMinutes(5).AddTicks(-1)));
+        Assert.Throws<InvalidOperationException>(() =>
+            wallet.Capture(
+                reservation.Id,
+                Aic.FromAic(12),
+                "late-capture",
+                Now.AddMinutes(5)));
+
+        wallet.Expire(reservation.Id, "expire-1", Now.AddMinutes(5));
+        wallet.Expire(reservation.Id, "expire-1", Now.AddMinutes(6));
+        wallet.Release(
+            reservation.Id,
+            "release-after-expiry",
+            "Liberação repetida",
+            Now.AddMinutes(6));
+
+        Assert.Equal(Aic.FromAic(1_000), wallet.GetBalance().AvailableMinor);
+        Assert.Equal(0, wallet.GetBalance().ReservedMinor);
+        Assert.Equal(ReservationStatus.Expired, reservation.Status);
+        Assert.Single(
+            wallet.Transactions,
+            x => x.Type == LedgerTransactionType.Release &&
+                 x.IdempotencyKey == "expire-1");
+        Assert.All(wallet.Transactions, AssertBalanced);
+    }
+
+    [Fact]
     public void RepeatedIdempotencyKeysDoNotDuplicateFinancialEffects()
     {
         var wallet = NewWallet();

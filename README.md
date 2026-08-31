@@ -91,11 +91,12 @@ Implementado:
 - teste de persistência real do Chat contra PostgreSQL;
 - concorrência de reservas serializada por Wallet no PostgreSQL;
 - recuperação de saldo disponível e reservado após restart;
+- expiração auditável de reservas, recuperada no startup e verificada a cada 30 segundos;
+- rejeição de captura tardia após o vencimento da reserva;
 - UI responsiva no sistema visual terminal/ASCII.
 
 Pendente para concluir o Marco 1:
 
-- expiração automática de reservas e recuperação após restart;
 - autenticação mínima e isolamento por conta;
 - endpoints/erros e observabilidade.
 
