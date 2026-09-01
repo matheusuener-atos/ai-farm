@@ -10,19 +10,29 @@ namespace atos.AIFarm.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddAIFarmDevelopment(this IServiceCollection services)
+    public static IServiceCollection AddAIFarmDevelopment(
+        this IServiceCollection services,
+        ChatExecutionLimits? executionLimits = null,
+        AiProviderProtectionOptions? providerProtection = null)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton(executionLimits ?? ChatExecutionLimits.Default);
+        services.TryAddSingleton(providerProtection ?? AiProviderProtectionOptions.Default);
         services.TryAddSingleton<IAIFarmIdentityAccessor>(
             new FixedAIFarmIdentityAccessor(AIFarmIdentity.Development));
         services.AddSingleton<IAIFarmReadinessProbe, InMemoryReadinessProbe>();
         services.AddSingleton<IWalletService, InMemoryWalletService>();
         services.AddScoped<IReservationExpirationService,
             CurrentWalletReservationExpirationService>();
-        services.AddSingleton<IChatStore, InMemoryChatStore>();
+        services.AddSingleton<InMemoryChatStore>();
+        services.AddSingleton<IChatStore>(provider =>
+            provider.GetRequiredService<InMemoryChatStore>());
+        services.AddSingleton<IAiUsageQuery>(provider =>
+            provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
         services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
-        services.AddSingleton<IAiProvider, FakeAiProvider>();
+        services.AddSingleton<IAiProviderClient, FakeAiProvider>();
+        services.AddSingleton<IAiProvider, ProtectedAiProvider>();
         services.AddScoped<ChatWorkflow>();
         services.AddHostedService<ReservationExpirationWorker>();
         return services;
@@ -45,10 +55,12 @@ public static class DependencyInjection
         }
         services.RemoveAll<IWalletService>();
         services.RemoveAll<IChatStore>();
+        services.RemoveAll<IAiUsageQuery>();
         services.RemoveAll<IReservationExpirationService>();
         services.RemoveAll<IAIFarmReadinessProbe>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
+        services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
         services.AddSingleton<IReservationExpirationService,
             PostgresReservationExpirationService>();
         services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();

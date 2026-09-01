@@ -1,0 +1,181 @@
+@page "/operations"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IAiUsageQuery Usage
+
+<PageTitle>Operações // atos AI Farm</PageTitle>
+
+<div class="page-heading">
+    <p class="eyebrow">atos:/AI/OPERATIONS</p>
+    <h1>OPERAÇÕES</h1>
+    <p>USO MEDIDO // CUSTO AUDITÁVEL // ISOLADO POR CONTA</p>
+</div>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else if (_dashboard is null)
+{
+    <p>CARREGANDO TELEMETRIA...</p>
+}
+else
+{
+    <div class="operations-grid">
+        <section class="metric purple-border">
+            <span>EXECUÇÕES</span>
+            <strong>@_dashboard.Totals.ExecutionCount</strong>
+            <small>@_dashboard.Totals.ConversationCount conversa(s)</small>
+        </section>
+        <section class="metric">
+            <span>UNIDADES MEDIDAS</span>
+            <strong>@(_dashboard.Totals.InputUnits + _dashboard.Totals.OutputUnits)</strong>
+            <small>IN @_dashboard.Totals.InputUnits // OUT @_dashboard.Totals.OutputUnits</small>
+        </section>
+        <section class="metric amber-border">
+            <span>CUSTO LIQUIDADO</span>
+            <strong>@Aic.Format(_dashboard.Totals.ActualCostMinor)</strong>
+            <small>ESTIMADO @Aic.Format(_dashboard.Totals.EstimatedCostMinor)</small>
+        </section>
+        <section class="metric green-border">
+            <span>AIC LIBERADO</span>
+            <strong>@Aic.Format(_dashboard.Totals.ReleasedCostMinor)</strong>
+            <small>ESTIMATIVA NÃO CONSUMIDA</small>
+        </section>
+    </div>
+
+    <section class="ledger operations-ledger">
+        <div class="section-heading">
+            <div>
+                <h2>EXECUÇÕES RECENTES</h2>
+                <p class="muted">ATÉ 50 OPERAÇÕES // PROMPTS E RESPOSTAS NÃO SÃO EXIBIDOS</p>
+            </div>
+            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">
+                @(_loading ? "[ ATUALIZANDO... ]" : "[ ATUALIZAR ]")
+            </button>
+        </div>
+
+        <div class="operations-filters">
+            <label>
+                BUSCAR
+                <input type="search" @bind="_search" @bind:event="oninput" placeholder="conversa, modelo ou operação" />
+            </label>
+            <label>
+                PROVIDER
+                <select @bind="_provider">
+                    <option value="">TODOS</option>
+                    @foreach (var provider in Providers)
+                    {
+                        <option value="@provider">@provider</option>
+                    }
+                </select>
+            </label>
+        </div>
+
+        @if (FilteredExecutions.Count == 0)
+        {
+            <div class="terminal empty-operations">
+                <p>NENHUMA EXECUÇÃO ENCONTRADA.</p>
+                <a class="text-link" href="/chat">[ INICIAR CONVERSA ]</a>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="operations-table">
+                    <thead>
+                        <tr>
+                            <th>UTC</th>
+                            <th>CONVERSA</th>
+                            <th>ROTA</th>
+                            <th>UNIDADES</th>
+                            <th>ESTIMADO</th>
+                            <th>REAL</th>
+                            <th>DURAÇÃO</th>
+                            <th>OPERAÇÃO</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var execution in FilteredExecutions)
+                        {
+                            <tr>
+                                <td>@execution.StartedAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td>
+                                    <a href="@($"/chat/{execution.ConversationId}")">
+                                        @(execution.ConversationTitle ?? "CONVERSA SEM TÍTULO")
+                                    </a>
+                                </td>
+                                <td><span class="purple">@execution.Provider</span><br /><small>@execution.Model // @execution.PriceCatalogVersion</small></td>
+                                <td>@execution.InputUnits IN<br />@execution.OutputUnits OUT</td>
+                                <td>@Aic.Format(execution.EstimatedCostMinor)</td>
+                                <td class="amber">@Aic.Format(execution.ActualCostMinor)</td>
+                                <td>@FormatDuration(execution)</td>
+                                <td><code>@execution.OperationId.ToString()[..8]</code><br /><small class="green">@execution.Status.ToUpperInvariant()</small></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private AiUsageDashboard? _dashboard;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _provider = string.Empty;
+    private bool _loading;
+
+    private IReadOnlyList<string> Providers => _dashboard?.RecentExecutions
+        .Select(x => x.Provider)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray() ?? [];
+
+    private IReadOnlyList<AiExecutionSummary> FilteredExecutions =>
+        _dashboard?.RecentExecutions
+            .Where(x => string.IsNullOrWhiteSpace(_provider) ||
+                x.Provider.Equals(_provider, StringComparison.OrdinalIgnoreCase))
+            .Where(x => string.IsNullOrWhiteSpace(_search) || Matches(x, _search.Trim()))
+            .ToArray() ?? [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _dashboard = await Usage.GetDashboardAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível carregar a telemetria de uso.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static bool Matches(AiExecutionSummary execution, string search) =>
+        (execution.ConversationTitle?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+        execution.Provider.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+        execution.Model.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+        execution.OperationId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatDuration(AiExecutionSummary execution)
+    {
+        if (execution.FinishedAtUtc is null)
+        {
+            return "EM CURSO";
+        }
+
+        var elapsed = execution.FinishedAtUtc.Value - execution.StartedAtUtc;
+        return elapsed.TotalSeconds < 1
+            ? $"{elapsed.TotalMilliseconds:N0} ms"
+            : $"{elapsed.TotalSeconds:N2} s";
+    }
+}

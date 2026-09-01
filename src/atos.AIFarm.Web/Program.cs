@@ -1,5 +1,6 @@
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Infrastructure;
+using atos.AIFarm.Infrastructure.Development;
 using atos.AIFarm.Infrastructure.Persistence;
 using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
@@ -42,7 +43,25 @@ if (builder.Environment.IsDevelopment())
         .SetApplicationName("atos.AIFarm.Development")
         .PersistKeysToFileSystem(new DirectoryInfo(developmentKeys));
 }
-builder.Services.AddAIFarmDevelopment();
+var executionLimits = new ChatExecutionLimits(
+    builder.Configuration.GetValue(
+        "AIFarm:Execution:MaximumPromptCharacters",
+        ChatExecutionLimits.Default.MaximumPromptCharacters),
+    builder.Configuration.GetValue(
+        "AIFarm:Execution:MaximumCostPerRequestMinor",
+        ChatExecutionLimits.Default.MaximumCostPerRequestMinor));
+var providerDefaults = AiProviderProtectionOptions.Default;
+var providerProtection = new AiProviderProtectionOptions(
+    TimeSpan.FromSeconds(builder.Configuration.GetValue(
+        "AIFarm:Execution:ProviderTimeoutSeconds",
+        providerDefaults.Timeout.TotalSeconds)),
+    builder.Configuration.GetValue(
+        "AIFarm:Execution:CircuitBreakerFailureThreshold",
+        providerDefaults.CircuitBreakerFailureThreshold),
+    TimeSpan.FromSeconds(builder.Configuration.GetValue(
+        "AIFarm:Execution:CircuitBreakerOpenSeconds",
+        providerDefaults.CircuitBreakerOpenDuration.TotalSeconds)));
+builder.Services.AddAIFarmDevelopment(executionLimits, providerProtection);
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();

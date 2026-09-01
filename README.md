@@ -15,7 +15,7 @@ Base inicial do produto atos AI Farm em .NET 10 e Blazor. O incremento atual dem
 
 - `atos.AIFarm.Core`: domínio, Ledger e contratos de aplicação sem dependência de UI ou EF Core.
 - `atos.AIFarm.Infrastructure`: adapters de desenvolvimento, Fake Provider e esquema EF Core/PostgreSQL.
-- `atos.AIFarm.Web`: Blazor Web App interativo com Início, Chat, Wallet e placeholder explícito da Farm.
+- `atos.AIFarm.Web`: Blazor Web App interativo com Início, Chat, Wallet, Operações e placeholder explícito da Farm.
 - `atos.AIFarm.UnitTests`: invariantes e operações do Ledger.
 - `atos.AIFarm.IntegrationTests`: ciclo completo de aplicação usando os adapters em memória.
 
@@ -85,6 +85,27 @@ Quando o cliente não envia um identificador de correlação válido, a aplicaç
 gera um automaticamente. Os health checks não retornam credenciais nem detalhes
 internos de exceções.
 
+## Proteção e observabilidade de IA
+
+A rota autenticada `/operations` consolida, por conta, execuções, conversas,
+unidades de entrada/saída, custo estimado, custo liquidado e AIC liberado. O
+painel não exibe prompts nem respostas e permite filtrar as 50 execuções mais
+recentes por Provider, modelo, conversa ou ID de operação.
+
+As políticas podem ser sobrescritas por ambiente usando a sintaxe de
+configuração do ASP.NET Core (por exemplo,
+`AIFarm__Execution__ProviderTimeoutSeconds` no Render):
+
+- `MaximumPromptCharacters`: 12.000;
+- `MaximumCostPerRequestMinor`: 100.000 mAIC (100 AIC);
+- `ProviderTimeoutSeconds`: 30;
+- `CircuitBreakerFailureThreshold`: 3;
+- `CircuitBreakerOpenSeconds`: 30.
+
+Cancelamentos solicitados pelo usuário não contam como falha do Provider. Uma
+estimativa acima do limite é rejeitada antes de reservar saldo, e timeout ou
+falha liberam a reserva normalmente.
+
 ## Autenticação
 
 A primeira versão usa ASP.NET Core Identity com cookies HTTP-only e usuários
@@ -112,6 +133,10 @@ Implementado:
 - falha e cancelamento liberam a reserva;
 - repository PostgreSQL transacional e migrations aplicadas no Neon;
 - persistência idempotente de AiRequest e AiExecution;
+- medição persistida de unidades de entrada/saída e duração da execução;
+- limite configurável de prompt e custo máximo por tarefa antes da reserva;
+- timeout e circuit breaker para isolar falhas repetidas do Provider;
+- painel operacional por conta, sem revelar prompts ou respostas;
 - persistência de Conversation e Message com correlação à execução;
 - recuperação do histórico do Chat após restart;
 - criação, listagem e seleção de múltiplas conversas por conta;

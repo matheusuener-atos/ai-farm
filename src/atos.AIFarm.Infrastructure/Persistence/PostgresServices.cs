@@ -604,7 +604,11 @@ public sealed class PostgresChatStore(
                 stored.execution.PriceCatalogVersion),
             stored.execution.EstimatedCostMinor,
             stored.execution.ActualCostMinor,
-            true);
+            true,
+            stored.execution.InputUnits,
+            stored.execution.OutputUnits,
+            stored.execution.StartedAtUtc,
+            stored.execution.FinishedAtUtc);
     }
 
     public async Task SaveCompletedAsync(
@@ -653,10 +657,12 @@ public sealed class PostgresChatStore(
             PriceCatalogVersion = result.Route.PriceCatalogVersion,
             EstimatedCostMinor = result.EstimatedCostMinor,
             ActualCostMinor = result.ActualCostMinor,
+            InputUnits = result.InputUnits,
+            OutputUnits = result.OutputUnits,
             Status = "Completed",
             Response = result.Response,
-            StartedAtUtc = now,
-            FinishedAtUtc = now
+            StartedAtUtc = result.StartedAtUtc ?? now,
+            FinishedAtUtc = result.FinishedAtUtc ?? now
         });
         db.Messages.AddRange(
             new MessageRecord
@@ -732,5 +738,86 @@ public sealed class PostgresChatStore(
             conversation.CreatedAtUtc,
             conversation.UpdatedAtUtc,
             messages);
+    }
+}
+
+public sealed class PostgresAiUsageQuery(
+    IDbContextFactory<AIFarmDbContext> factory,
+    IAIFarmIdentityAccessor identityAccessor) : IAiUsageQuery
+{
+    public async Task<AiUsageDashboard> GetDashboardAsync(
+        int recentLimit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (recentLimit is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(recentLimit));
+        }
+
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var executions =
+            from request in db.AiRequests
+            join execution in db.AiExecutions on request.Id equals execution.AiRequestId
+            join conversation in db.Conversations on request.ConversationId equals conversation.Id
+            where request.AccountId == identity.AccountId
+            select new
+            {
+                request.OperationId,
+                request.ConversationId,
+                ConversationTitle = conversation.Title,
+                execution.Provider,
+                execution.Model,
+                execution.PriceCatalogVersion,
+                execution.InputUnits,
+                execution.OutputUnits,
+                execution.EstimatedCostMinor,
+                execution.ActualCostMinor,
+                execution.Status,
+                execution.StartedAtUtc,
+                execution.FinishedAtUtc
+            };
+
+        var aggregate = await executions
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                ExecutionCount = group.Count(),
+                ConversationCount = group.Select(x => x.ConversationId).Distinct().Count(),
+                InputUnits = group.Sum(x => x.InputUnits),
+                OutputUnits = group.Sum(x => x.OutputUnits),
+                EstimatedCostMinor = group.Sum(x => x.EstimatedCostMinor),
+                ActualCostMinor = group.Sum(x => x.ActualCostMinor)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+        var totals = aggregate is null
+            ? new AiUsageTotals(0, 0, 0, 0, 0, 0)
+            : new AiUsageTotals(
+                aggregate.ExecutionCount,
+                aggregate.ConversationCount,
+                aggregate.InputUnits,
+                aggregate.OutputUnits,
+                aggregate.EstimatedCostMinor,
+                aggregate.ActualCostMinor);
+        var recent = await executions
+            .OrderByDescending(x => x.StartedAtUtc)
+            .Take(recentLimit)
+            .Select(x => new AiExecutionSummary(
+                x.OperationId,
+                x.ConversationId,
+                x.ConversationTitle,
+                x.Provider,
+                x.Model,
+                x.PriceCatalogVersion,
+                x.InputUnits,
+                x.OutputUnits,
+                x.EstimatedCostMinor,
+                x.ActualCostMinor,
+                x.Status,
+                x.StartedAtUtc,
+                x.FinishedAtUtc))
+            .ToArrayAsync(cancellationToken);
+
+        return new AiUsageDashboard(totals, recent);
     }
 }

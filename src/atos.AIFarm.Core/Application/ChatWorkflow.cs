@@ -1,3 +1,5 @@
+using atos.AIFarm.Core.Wallet;
+
 namespace atos.AIFarm.Core.Application;
 
 public sealed class ChatWorkflow(
@@ -5,8 +7,14 @@ public sealed class ChatWorkflow(
     IPriceEstimator pricing,
     IAiRouteSelector router,
     IAiProvider provider,
-    IChatStore chat)
+    IChatStore chat,
+    ChatExecutionLimits? executionLimits = null,
+    TimeProvider? timeProvider = null)
 {
+    private readonly ChatExecutionLimits _executionLimits =
+        ValidateLimits(executionLimits ?? ChatExecutionLimits.Default);
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public async Task<ChatExecutionResult> SendAsync(
         string prompt,
         string idempotencyKey,
@@ -44,11 +52,22 @@ public sealed class ChatWorkflow(
         }
 
         var normalizedPrompt = prompt.Trim();
+        if (normalizedPrompt.Length > _executionLimits.MaximumPromptCharacters)
+        {
+            throw new InvalidOperationException(
+                $"A mensagem excede o limite de {_executionLimits.MaximumPromptCharacters:N0} caracteres.");
+        }
+
         var route = await router.SelectAsync(normalizedPrompt, cancellationToken);
         var estimate = await pricing.EstimateAsync(normalizedPrompt, cancellationToken);
         if (estimate.MaximumCostMinor <= 0)
         {
             throw new InvalidOperationException("A estimativa de custo deve ser positiva.");
+        }
+        if (estimate.MaximumCostMinor > _executionLimits.MaximumCostPerRequestMinor)
+        {
+            throw new InvalidOperationException(
+                $"A estimativa excede o limite por tarefa de {Aic.Format(_executionLimits.MaximumCostPerRequestMinor)}.");
         }
 
         return new ChatExecutionPlan(
@@ -89,9 +108,12 @@ public sealed class ChatWorkflow(
 
         try
         {
+            var startedAtUtc = _timeProvider.GetUtcNow();
             var providerResult = await provider.ExecuteAsync(
                 new AiProviderRequest(plan.Prompt, plan.Route),
                 cancellationToken);
+            var finishedAtUtc = _timeProvider.GetUtcNow();
+            ValidateProviderResult(providerResult, plan.MaximumCostMinor);
             await wallet.CaptureAsync(
                 reservation.ReservationId,
                 providerResult.ActualCostMinor,
@@ -105,7 +127,11 @@ public sealed class ChatWorkflow(
                 plan.Route,
                 plan.MaximumCostMinor,
                 providerResult.ActualCostMinor,
-                false);
+                false,
+                providerResult.InputUnits,
+                providerResult.OutputUnits,
+                startedAtUtc,
+                finishedAtUtc);
             await chat.SaveCompletedAsync(
                 plan.Prompt,
                 idempotencyKey,
@@ -122,5 +148,31 @@ public sealed class ChatWorkflow(
                 CancellationToken.None);
             throw;
         }
+    }
+
+    private static void ValidateProviderResult(
+        AiProviderResult result,
+        long reservedAmountMinor)
+    {
+        if (result.InputUnits < 0 || result.OutputUnits < 0)
+        {
+            throw new InvalidOperationException("O Provider retornou unidades de uso inválidas.");
+        }
+        if (result.ActualCostMinor <= 0 || result.ActualCostMinor > reservedAmountMinor)
+        {
+            throw new InvalidOperationException("O custo real retornado pelo Provider é inválido.");
+        }
+    }
+
+    private static ChatExecutionLimits ValidateLimits(ChatExecutionLimits limits)
+    {
+        if (limits.MaximumPromptCharacters <= 0 || limits.MaximumCostPerRequestMinor <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(limits),
+                "Os limites de execução devem ser positivos.");
+        }
+
+        return limits;
     }
 }

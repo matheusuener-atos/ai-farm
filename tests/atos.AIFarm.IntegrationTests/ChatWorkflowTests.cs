@@ -17,6 +17,10 @@ public sealed class ChatWorkflowTests
 
         Assert.Equal(Aic.FromAic(20), result.EstimatedCostMinor);
         Assert.Equal(Aic.FromAic(12), result.ActualCostMinor);
+        Assert.Equal("Olá, atos".Length, result.InputUnits);
+        Assert.True(result.OutputUnits > 0);
+        Assert.NotNull(result.StartedAtUtc);
+        Assert.NotNull(result.FinishedAtUtc);
         Assert.Equal(Aic.FromAic(988), snapshot.Balance.AvailableMinor);
         Assert.Equal(0, snapshot.Balance.ReservedMinor);
         Assert.Collection(
@@ -235,6 +239,119 @@ public sealed class ChatWorkflowTests
         Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
     }
 
+    [Fact]
+    public async Task UsageDashboardAggregatesMeasuredUnitsCostsAndExecutions()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var workflow = NewWorkflow(wallet, new FakeAiProvider(), chat);
+
+        var result = await workflow.SendAsync(
+            conversation.Id,
+            "medir esta execução",
+            "usage-dashboard");
+        var dashboard = await chat.GetDashboardAsync();
+
+        Assert.Equal(1, dashboard.Totals.ExecutionCount);
+        Assert.Equal(1, dashboard.Totals.ConversationCount);
+        Assert.Equal(result.InputUnits, dashboard.Totals.InputUnits);
+        Assert.Equal(result.OutputUnits, dashboard.Totals.OutputUnits);
+        Assert.Equal(Aic.FromAic(20), dashboard.Totals.EstimatedCostMinor);
+        Assert.Equal(Aic.FromAic(12), dashboard.Totals.ActualCostMinor);
+        Assert.Equal(Aic.FromAic(8), dashboard.Totals.ReleasedCostMinor);
+        Assert.Equal(result.OperationId, Assert.Single(dashboard.RecentExecutions).OperationId);
+    }
+
+    [Fact]
+    public async Task PromptAndCostLimitsAreEnforcedBeforeReservation()
+    {
+        var wallet = await FundedWalletAsync();
+        var provider = new CountingProvider();
+        var chat = new InMemoryChatStore();
+        var workflow = new ChatWorkflow(
+            wallet,
+            new FixedPriceEstimator(),
+            new BestAvailableRouteSelector(),
+            provider,
+            chat,
+            new ChatExecutionLimits(5, Aic.FromAic(10)));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.SendAsync("mensagem longa", "prompt-limit"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.SendAsync("curta", "cost-limit"));
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Single((await wallet.GetSnapshotAsync()).Transactions);
+    }
+
+    [Fact]
+    public async Task ProtectedProviderTimesOutAndOpensCircuitAfterRepeatedFailures()
+    {
+        var waiting = new WaitingProviderClient();
+        var timeoutProvider = new ProtectedAiProvider(
+            waiting,
+            new AiProviderProtectionOptions(
+                TimeSpan.FromMilliseconds(20),
+                2,
+                TimeSpan.FromMinutes(1)),
+            TimeProvider.System);
+        var request = new AiProviderRequest(
+            "timeout",
+            new AiRoute("test", "test", "v1"));
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            timeoutProvider.ExecuteAsync(request, CancellationToken.None));
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            timeoutProvider.ExecuteAsync(request, CancellationToken.None));
+        await Assert.ThrowsAsync<AiProviderUnavailableException>(() =>
+            timeoutProvider.ExecuteAsync(request, CancellationToken.None));
+
+        Assert.Equal(2, waiting.CallCount);
+    }
+
+    [Fact]
+    public async Task UserCancellationDoesNotCountAsProviderFailure()
+    {
+        var client = new CancelOnceProviderClient();
+        var provider = new ProtectedAiProvider(
+            client,
+            new AiProviderProtectionOptions(
+                TimeSpan.FromSeconds(5),
+                1,
+                TimeSpan.FromMinutes(1)),
+            TimeProvider.System);
+        var request = new AiProviderRequest(
+            "cancelar",
+            new AiRoute("test", "test", "v1"));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(20));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.ExecuteAsync(request, cancellation.Token));
+        var result = await provider.ExecuteAsync(request, CancellationToken.None);
+
+        Assert.Equal("ok", result.Content);
+        Assert.Equal(2, client.CallCount);
+    }
+
+    [Fact]
+    public async Task InvalidProviderCostReleasesReservationWithoutCapture()
+    {
+        var wallet = await FundedWalletAsync();
+        var workflow = NewWorkflow(wallet, new InvalidCostProvider());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.SendAsync("custo inválido", "invalid-provider-cost"));
+        var snapshot = await wallet.GetSnapshotAsync();
+
+        Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
+        Assert.Equal(0, snapshot.Balance.ReservedMinor);
+        Assert.DoesNotContain(
+            snapshot.Transactions,
+            transaction => transaction.Type == LedgerTransactionType.Capture);
+    }
+
     private static ChatWorkflow NewWorkflow(
         IWalletService wallet,
         IAiProvider provider,
@@ -277,5 +394,49 @@ public sealed class ChatWorkflowTests
             CallCount++;
             return Task.FromResult(new AiProviderResult("ok", 1, 1, Aic.FromAic(1)));
         }
+    }
+
+    private sealed class WaitingProviderClient : IAiProviderClient
+    {
+        public int CallCount { get; private set; }
+
+        public async Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Inalcançável");
+        }
+    }
+
+    private sealed class CancelOnceProviderClient : IAiProviderClient
+    {
+        public int CallCount { get; private set; }
+
+        public async Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (CallCount == 1)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+
+            return new AiProviderResult("ok", 1, 1, Aic.FromAic(1));
+        }
+    }
+
+    private sealed class InvalidCostProvider : IAiProvider
+    {
+        public Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new AiProviderResult(
+                "inválido",
+                1,
+                1,
+                Aic.FromAic(21)));
     }
 }

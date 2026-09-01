@@ -15,7 +15,7 @@ public sealed class BestAvailableRouteSelector : IAiRouteSelector
         Task.FromResult(new AiRoute("atos Fake Provider", "atos-fake-chat-v1", "demo-2026-08"));
 }
 
-public sealed class FakeAiProvider : IAiProvider
+public sealed class FakeAiProvider : IAiProviderClient, IAiProvider
 {
     public async Task<AiProviderResult> ExecuteAsync(
         AiProviderRequest request,
@@ -27,7 +27,7 @@ public sealed class FakeAiProvider : IAiProvider
     }
 }
 
-public sealed class InMemoryChatStore : IChatStore
+public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
 {
     private readonly object _sync = new();
     private readonly ConcurrentDictionary<string, ChatExecutionResult> _results = new(StringComparer.Ordinal);
@@ -188,12 +188,17 @@ public sealed class InMemoryChatStore : IChatStore
     {
         lock (_sync)
         {
-            if (!_results.TryAdd(idempotencyKey, result))
+            var now = DateTimeOffset.UtcNow;
+            var storedResult = result with
+            {
+                StartedAtUtc = result.StartedAtUtc ?? now,
+                FinishedAtUtc = result.FinishedAtUtc ?? now
+            };
+            if (!_results.TryAdd(idempotencyKey, storedResult))
             {
                 return Task.CompletedTask;
             }
 
-            var now = DateTimeOffset.UtcNow;
             if (!_conversations.TryGetValue(result.ConversationId, out var conversation)
                 || conversation.IsArchived)
             {
@@ -221,6 +226,47 @@ public sealed class InMemoryChatStore : IChatStore
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<AiUsageDashboard> GetDashboardAsync(
+        int recentLimit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (recentLimit is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(recentLimit));
+        }
+
+        lock (_sync)
+        {
+            var results = _results.Values.ToArray();
+            var totals = new AiUsageTotals(
+                results.Length,
+                results.Select(x => x.ConversationId).Distinct().Count(),
+                results.Sum(x => x.InputUnits),
+                results.Sum(x => x.OutputUnits),
+                results.Sum(x => x.EstimatedCostMinor),
+                results.Sum(x => x.ActualCostMinor));
+            var executions = results
+                .OrderByDescending(x => x.FinishedAtUtc)
+                .Take(recentLimit)
+                .Select(x => new AiExecutionSummary(
+                    x.OperationId,
+                    x.ConversationId,
+                    _conversations.GetValueOrDefault(x.ConversationId)?.Title,
+                    x.Route.Provider,
+                    x.Route.Model,
+                    x.Route.PriceCatalogVersion,
+                    x.InputUnits,
+                    x.OutputUnits,
+                    x.EstimatedCostMinor,
+                    x.ActualCostMinor,
+                    "Completed",
+                    x.StartedAtUtc ?? DateTimeOffset.MinValue,
+                    x.FinishedAtUtc))
+                .ToArray();
+            return Task.FromResult(new AiUsageDashboard(totals, executions));
+        }
     }
 
     private static ConversationSnapshot Snapshot(ConversationState conversation) => new(

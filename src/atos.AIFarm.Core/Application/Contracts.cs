@@ -120,7 +120,57 @@ public sealed record ChatExecutionResult(
     AiRoute Route,
     long EstimatedCostMinor,
     long ActualCostMinor,
-    bool WasReplayed);
+    bool WasReplayed,
+    long InputUnits = 0,
+    long OutputUnits = 0,
+    DateTimeOffset? StartedAtUtc = null,
+    DateTimeOffset? FinishedAtUtc = null);
+
+public sealed record ChatExecutionLimits(
+    int MaximumPromptCharacters,
+    long MaximumCostPerRequestMinor)
+{
+    public static ChatExecutionLimits Default { get; } = new(
+        12_000,
+        Aic.FromAic(100));
+}
+
+public sealed record AiUsageTotals(
+    int ExecutionCount,
+    int ConversationCount,
+    long InputUnits,
+    long OutputUnits,
+    long EstimatedCostMinor,
+    long ActualCostMinor)
+{
+    public long ReleasedCostMinor => EstimatedCostMinor - ActualCostMinor;
+}
+
+public sealed record AiExecutionSummary(
+    Guid OperationId,
+    Guid ConversationId,
+    string? ConversationTitle,
+    string Provider,
+    string Model,
+    string PriceCatalogVersion,
+    long InputUnits,
+    long OutputUnits,
+    long EstimatedCostMinor,
+    long ActualCostMinor,
+    string Status,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset? FinishedAtUtc);
+
+public sealed record AiUsageDashboard(
+    AiUsageTotals Totals,
+    IReadOnlyList<AiExecutionSummary> RecentExecutions);
+
+public interface IAiUsageQuery
+{
+    Task<AiUsageDashboard> GetDashboardAsync(
+        int recentLimit = 50,
+        CancellationToken cancellationToken = default);
+}
 
 public interface IChatStore
 {

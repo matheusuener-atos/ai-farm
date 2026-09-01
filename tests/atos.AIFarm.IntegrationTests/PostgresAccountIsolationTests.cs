@@ -63,6 +63,12 @@ public sealed class PostgresAccountIsolationTests
                 await firstStore.ListArchivedConversationsAsync();
             var secondArchivedSummaries =
                 await secondStore.ListArchivedConversationsAsync();
+            var firstUsage = await first
+                .GetRequiredService<IAiUsageQuery>()
+                .GetDashboardAsync();
+            var secondUsage = await second
+                .GetRequiredService<IAiUsageQuery>()
+                .GetDashboardAsync();
             var firstFactory = first.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
             await using var verificationDb = await firstFactory.CreateDbContextAsync();
             var archivedRecord = await verificationDb.Conversations
@@ -100,6 +106,11 @@ public sealed class PostgresAccountIsolationTests
                 "Projeto confidencial",
                 Assert.Single(firstArchivedSummaries).Title);
             Assert.Empty(secondArchivedSummaries);
+            Assert.Equal(1, firstUsage.Totals.ExecutionCount);
+            Assert.True(firstUsage.Totals.InputUnits > 0);
+            Assert.True(firstUsage.Totals.OutputUnits > 0);
+            Assert.Equal(Aic.FromAic(12), firstUsage.Totals.ActualCostMinor);
+            Assert.Empty(secondUsage.RecentExecutions);
             Assert.False(crossAccountRestore);
             Assert.True(restored);
             Assert.Equal(2, restoredConversation?.Messages.Count);
