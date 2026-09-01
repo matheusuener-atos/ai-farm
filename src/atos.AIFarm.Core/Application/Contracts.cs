@@ -57,10 +57,31 @@ public sealed record ConversationSnapshot(
 
 public sealed record ConversationSummary(
     Guid Id,
+    string? Title,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     int MessageCount,
     string? Preview);
+
+public static class ConversationTitle
+{
+    public const int MaximumLength = 80;
+
+    public static string FromPrompt(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            throw new ArgumentException("A mensagem não pode estar vazia.", nameof(prompt));
+        }
+
+        var normalized = string.Join(
+            ' ',
+            prompt.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return normalized.Length <= MaximumLength
+            ? normalized
+            : $"{normalized[..(MaximumLength - 1)]}…";
+    }
+}
 
 public interface IPriceEstimator
 {

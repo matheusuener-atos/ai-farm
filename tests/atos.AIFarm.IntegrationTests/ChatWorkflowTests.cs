@@ -180,6 +180,7 @@ public sealed class ChatWorkflowTests
 
         Assert.Equal(2, summaries.Count);
         Assert.Equal(first.Id, summaries[0].Id);
+        Assert.Equal("histórico da primeira", summaries[0].Title);
         Assert.Equal(2, summaries[0].MessageCount);
         Assert.Equal("resposta da primeira", summaries[0].Preview);
         Assert.Equal(2, restoredFirst?.Messages.Count);
@@ -192,6 +193,7 @@ public sealed class ChatWorkflowTests
         var archivedSummary = Assert.Single(
             await chat.ListArchivedConversationsAsync());
         Assert.Equal(first.Id, archivedSummary.Id);
+        Assert.Equal("histórico da primeira", archivedSummary.Title);
         Assert.Equal(2, archivedSummary.MessageCount);
 
         Assert.True(await chat.RestoreConversationAsync(first.Id));

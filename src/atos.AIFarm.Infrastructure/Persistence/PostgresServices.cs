@@ -413,6 +413,7 @@ public sealed class PostgresChatStore(
             .OrderByDescending(x => x.UpdatedAtUtc)
             .Select(x => new ConversationSummary(
                 x.Id,
+                x.Title,
                 x.CreatedAtUtc,
                 x.UpdatedAtUtc,
                 db.Messages.Count(message => message.ConversationId == x.Id),
@@ -434,6 +435,7 @@ public sealed class PostgresChatStore(
             .OrderByDescending(x => x.UpdatedAtUtc)
             .Select(x => new ConversationSummary(
                 x.Id,
+                x.Title,
                 x.CreatedAtUtc,
                 x.UpdatedAtUtc,
                 db.Messages.Count(message => message.ConversationId == x.Id),
@@ -656,6 +658,7 @@ public sealed class PostgresChatStore(
                 IdempotencyKey = $"{idempotencyKey}:assistant",
                 CreatedAtUtc = now.AddMilliseconds(1)
             });
+        conversation.Title ??= ConversationTitle.FromPrompt(prompt);
         conversation.UpdatedAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
     }

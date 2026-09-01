@@ -96,6 +96,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.ToTable("conversations");
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.UpdatedAtUtc });
+            entity.Property(x => x.Title).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(32);
             entity.HasOne<AccountRecord>()
                 .WithMany()
@@ -229,6 +230,7 @@ public sealed class ConversationRecord
 {
     public Guid Id { get; set; }
     public Guid AccountId { get; set; }
+    public string? Title { get; set; }
     public string Status { get; set; } = "Active";
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }

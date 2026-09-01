@@ -117,6 +117,7 @@ Implementado:
 - criação, listagem e seleção de múltiplas conversas por conta;
 - arquivamento não destrutivo, preservando mensagens e auditoria;
 - visualização e restauração de conversas arquivadas;
+- título automático derivado da primeira mensagem da conversa;
 - acesso a conversas validado antes de qualquer reserva no Ledger;
 - preflight do Chat com rota, catálogo e limite em AIC antes da reserva;
 - confirmação explícita antes de executar o Provider e alterar o Ledger;

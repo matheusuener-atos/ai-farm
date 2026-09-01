@@ -437,7 +437,9 @@
         conversationId == _conversationId ? "conversation-item active" : "conversation-item";
 
     private static string ConversationLabel(ConversationSummary conversation) =>
-        $"SESSÃO_{conversation.Id.ToString("N")[..4].ToUpperInvariant()}";
+        string.IsNullOrWhiteSpace(conversation.Title)
+            ? $"SESSÃO_{conversation.Id.ToString("N")[..4].ToUpperInvariant()}"
+            : conversation.Title;
 
     private static string ConversationPreview(ConversationSummary conversation)
     {

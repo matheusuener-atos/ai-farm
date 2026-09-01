@@ -43,6 +43,7 @@ public sealed class InMemoryChatStore : IChatStore
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => new ConversationSummary(
                     x.Id,
+                    x.Title,
                     x.CreatedAtUtc,
                     x.UpdatedAtUtc,
                     x.Messages.Count,
@@ -62,6 +63,7 @@ public sealed class InMemoryChatStore : IChatStore
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => new ConversationSummary(
                     x.Id,
+                    x.Title,
                     x.CreatedAtUtc,
                     x.UpdatedAtUtc,
                     x.Messages.Count,
@@ -195,6 +197,7 @@ public sealed class InMemoryChatStore : IChatStore
                 result.Route,
                 result.EstimatedCostMinor,
                 result.ActualCostMinor));
+            conversation.Title ??= ConversationTitle.FromPrompt(prompt);
             conversation.UpdatedAtUtc = now;
         }
 
@@ -215,6 +218,7 @@ public sealed class InMemoryChatStore : IChatStore
         public Guid Id { get; } = id;
         public DateTimeOffset CreatedAtUtc { get; } = createdAtUtc;
         public DateTimeOffset UpdatedAtUtc { get; set; } = updatedAtUtc;
+        public string? Title { get; set; }
         public bool IsArchived { get; set; }
         public List<ChatMessageSnapshot> Messages { get; } = [];
     }

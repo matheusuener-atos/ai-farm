@@ -88,10 +88,17 @@ public sealed class PostgresAccountIsolationTests
             Assert.Equal(additionalFirstConversation.Id, Assert.Single(firstSummaries).Id);
             Assert.Single(secondSummaries);
             Assert.Equal(firstConversation.Id, Assert.Single(firstArchivedSummaries).Id);
+            Assert.Equal(
+                "mensagem exclusiva da primeira conta",
+                Assert.Single(firstArchivedSummaries).Title);
             Assert.Empty(secondArchivedSummaries);
             Assert.False(crossAccountRestore);
             Assert.True(restored);
             Assert.Equal(2, restoredConversation?.Messages.Count);
+            Assert.Equal(
+                "mensagem exclusiva da primeira conta",
+                activeAfterRestore.Single(
+                    x => x.Id == firstConversation.Id).Title);
             Assert.Equal("Active", archivedRecord.Status);
             Assert.Equal(2, activeAfterRestore.Count);
             Assert.Empty(archivedAfterRestore);
