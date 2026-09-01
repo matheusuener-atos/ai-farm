@@ -459,6 +459,28 @@ public sealed class PostgresChatStore(
             : await LoadConversationAsync(db, conversation, cancellationToken);
     }
 
+    public async Task<bool> ArchiveConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 x.Status == "Active",
+            cancellationToken);
+        if (conversation is null)
+        {
+            return false;
+        }
+
+        conversation.Status = "Archived";
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {

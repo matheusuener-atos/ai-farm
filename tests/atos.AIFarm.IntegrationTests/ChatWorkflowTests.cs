@@ -184,6 +184,11 @@ public sealed class ChatWorkflowTests
         Assert.Equal("resposta da primeira", summaries[0].Preview);
         Assert.Equal(2, restoredFirst?.Messages.Count);
         Assert.Empty(restoredSecond!.Messages);
+
+        Assert.True(await chat.ArchiveConversationAsync(first.Id));
+        Assert.False(await chat.ArchiveConversationAsync(first.Id));
+        Assert.Null(await chat.GetConversationAsync(first.Id));
+        Assert.Equal(second.Id, Assert.Single(await chat.ListConversationsAsync()).Id);
     }
 
     [Fact]

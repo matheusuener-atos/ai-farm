@@ -52,6 +52,9 @@ h1 span { color: var(--purple); }
 .page-heading > p:last-child { color: var(--muted); font-size: .78rem; }
 .terminal { border: 1px solid #494946; }
 .terminal-title { border-bottom: 1px solid #494946; padding: .8rem 1rem; display: flex; justify-content: space-between; }
+.terminal-actions { display: flex; align-items: center; gap: .8rem; }
+.archive-button { padding: .35rem .55rem; border-color: var(--amber); color: var(--amber-bright); background: transparent; font-size: .65rem; }
+.archive-button:hover { color: var(--black); background: var(--amber); }
 .chat-workspace { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 1rem; align-items: start; }
 .conversation-panel { border: 1px solid #494946; min-width: 0; }
 .conversation-panel-header { min-height: 49px; padding: .55rem .7rem; display: flex; align-items: center; justify-content: space-between; gap: .6rem; border-bottom: 1px solid #494946; color: var(--muted); font-size: .72rem; }
@@ -131,6 +134,8 @@ code { color: var(--white); }
     .message small { grid-column: 1; }
     .execution-plan-header { flex-direction: column; }
     .execution-plan dl { grid-template-columns: 1fr; }
+    .terminal-title { align-items: flex-start; gap: .7rem; }
+    .terminal-actions { align-items: flex-end; flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }

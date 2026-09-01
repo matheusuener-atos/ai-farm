@@ -37,7 +37,18 @@
     </aside>
 
     <section class="terminal chat-terminal" aria-label="Conversa com IA">
-    <div class="terminal-title">[ SESSÃO_@SessionCode ] <span class="status">● ONLINE</span></div>
+    <div class="terminal-title">
+        <span>[ SESSÃO_@SessionCode ]</span>
+        <div class="terminal-actions">
+            <span class="status">● ONLINE</span>
+            <button type="button"
+                    class="archive-button"
+                    @onclick="ArchiveCurrentConversationAsync"
+                    disabled="@(_working || _conversationId == Guid.Empty)">
+                [ ARQUIVAR ]
+            </button>
+        </div>
+    </div>
 
     @if (_messages.Count == 0)
     {
@@ -293,6 +304,37 @@
         catch (Exception)
         {
             _error = "Não foi possível criar uma nova conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ArchiveCurrentConversationAsync()
+    {
+        if (_working || _conversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        _pendingPlan = null;
+        try
+        {
+            if (!await ChatStore.ArchiveConversationAsync(_conversationId))
+            {
+                _error = "Não foi possível arquivar esta conversa.";
+                return;
+            }
+
+            var nextConversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+            Navigation.NavigateTo($"/chat/{nextConversation.Id}", replace: true);
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível arquivar esta conversa.";
         }
         finally
         {

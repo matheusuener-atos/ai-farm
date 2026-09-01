@@ -39,6 +39,7 @@ public sealed class InMemoryChatStore : IChatStore
         lock (_sync)
         {
             IReadOnlyList<ConversationSummary> summaries = _conversations.Values
+                .Where(x => !x.IsArchived)
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => new ConversationSummary(
                     x.Id,
@@ -71,8 +72,27 @@ public sealed class InMemoryChatStore : IChatStore
         {
             return Task.FromResult(
                 _conversations.TryGetValue(conversationId, out var conversation)
+                    && !conversation.IsArchived
                     ? Snapshot(conversation)
                     : null);
+        }
+    }
+
+    public Task<bool> ArchiveConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_conversations.TryGetValue(conversationId, out var conversation)
+                || conversation.IsArchived)
+            {
+                return Task.FromResult(false);
+            }
+
+            conversation.IsArchived = true;
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            return Task.FromResult(true);
         }
     }
 
@@ -82,6 +102,7 @@ public sealed class InMemoryChatStore : IChatStore
         lock (_sync)
         {
             var conversation = _conversations.Values
+                .Where(x => !x.IsArchived)
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .FirstOrDefault();
             if (conversation is null)
@@ -115,7 +136,8 @@ public sealed class InMemoryChatStore : IChatStore
             }
 
             var now = DateTimeOffset.UtcNow;
-            if (!_conversations.TryGetValue(result.ConversationId, out var conversation))
+            if (!_conversations.TryGetValue(result.ConversationId, out var conversation)
+                || conversation.IsArchived)
             {
                 throw new InvalidOperationException("A conversa não existe.");
             }
@@ -156,6 +178,7 @@ public sealed class InMemoryChatStore : IChatStore
         public Guid Id { get; } = id;
         public DateTimeOffset CreatedAtUtc { get; } = createdAtUtc;
         public DateTimeOffset UpdatedAtUtc { get; set; } = updatedAtUtc;
+        public bool IsArchived { get; set; }
         public List<ChatMessageSnapshot> Messages { get; } = [];
     }
 }

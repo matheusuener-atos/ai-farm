@@ -95,6 +95,9 @@ public interface IChatStore
     Task<ConversationSnapshot?> GetConversationAsync(
         Guid conversationId,
         CancellationToken cancellationToken = default);
+    Task<bool> ArchiveConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);
     Task<ChatExecutionResult?> FindAsync(string idempotencyKey, CancellationToken cancellationToken);

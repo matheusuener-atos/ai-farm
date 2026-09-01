@@ -47,8 +47,18 @@ public sealed class PostgresAccountIsolationTests
             var additionalFirstConversation = await firstStore.CreateConversationAsync();
             var crossAccountLookup = await secondStore.GetConversationAsync(
                 additionalFirstConversation.Id);
+            var crossAccountArchive = await secondStore.ArchiveConversationAsync(
+                firstConversation.Id);
+            var archived = await firstStore.ArchiveConversationAsync(firstConversation.Id);
+            var archivedLookup = await firstStore.GetConversationAsync(firstConversation.Id);
             var firstSummaries = await firstStore.ListConversationsAsync();
             var secondSummaries = await secondStore.ListConversationsAsync();
+            var firstFactory = first.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var verificationDb = await firstFactory.CreateDbContextAsync();
+            var archivedRecord = await verificationDb.Conversations
+                .SingleAsync(x => x.Id == firstConversation.Id);
+            var preservedMessageCount = await verificationDb.Messages
+                .CountAsync(x => x.ConversationId == firstConversation.Id);
 
             Assert.Equal(Aic.FromAic(988), firstWallet.Balance.AvailableMinor);
             Assert.Equal(Aic.FromAic(1_000), secondWallet.Balance.AvailableMinor);
@@ -56,7 +66,12 @@ public sealed class PostgresAccountIsolationTests
             Assert.Empty(secondConversation.Messages);
             Assert.NotEqual(firstConversation.Id, secondConversation.Id);
             Assert.Null(crossAccountLookup);
-            Assert.Equal(2, firstSummaries.Count);
+            Assert.False(crossAccountArchive);
+            Assert.True(archived);
+            Assert.Null(archivedLookup);
+            Assert.Equal("Archived", archivedRecord.Status);
+            Assert.Equal(2, preservedMessageCount);
+            Assert.Equal(additionalFirstConversation.Id, Assert.Single(firstSummaries).Id);
             Assert.Single(secondSummaries);
             Assert.DoesNotContain(
                 secondSummaries,
