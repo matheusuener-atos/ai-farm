@@ -12,4 +12,8 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="atos.AIFarm.IntegrationTests" />
+  </ItemGroup>
+
 </Project>

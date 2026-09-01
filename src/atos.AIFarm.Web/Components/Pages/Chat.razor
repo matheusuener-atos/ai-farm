@@ -295,9 +295,24 @@
                 <div class="message-attachments">
                     @foreach (var attachment in message.Attachments)
                     {
-                        <a href="@($"/api/chat/attachments/{attachment.Id}")" target="_blank" rel="noopener">
-                            [ @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]
-                        </a>
+                        @if (IsImageAttachment(attachment))
+                        {
+                            <a class="attachment-preview"
+                               href="@AttachmentUrl(attachment.Id)"
+                               download="@attachment.FileName"
+                               aria-label="Baixar @attachment.FileName">
+                                <img src="@AttachmentUrl(attachment.Id, preview: true)"
+                                     alt="@attachment.FileName"
+                                     loading="lazy" />
+                                <span>[ BAIXAR // @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]</span>
+                            </a>
+                        }
+                        else
+                        {
+                            <a href="@AttachmentUrl(attachment.Id)" download="@attachment.FileName">
+                                [ BAIXAR // @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]
+                            </a>
+                        }
                     }
                 </div>
             }
@@ -1273,6 +1288,12 @@
     private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
         ? $"{bytes / 1024d / 1024d:0.##} MB"
         : $"{Math.Max(1, bytes / 1024d):0.##} KB";
+
+    private static bool IsImageAttachment(ChatAttachmentSnapshot attachment) =>
+        attachment.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+    private static string AttachmentUrl(Guid attachmentId, bool preview = false) =>
+        $"/api/chat/attachments/{attachmentId}{(preview ? "?preview=true" : string.Empty)}";
 
     private static string ClassificationLabel(AiDataClassification classification) => classification switch
     {

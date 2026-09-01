@@ -38,6 +38,7 @@ builder.Services.AddAuthentication(options =>
     })
     .AddIdentityCookies();
 builder.Services.AddAuthorization();
+builder.Services.AddHttpContextAccessor();
 if (builder.Environment.IsDevelopment())
 {
     var developmentKeys = Path.Combine(builder.Environment.ContentRootPath, ".aifarm-keys");
@@ -206,13 +207,25 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapGet("/api/chat/attachments/{attachmentId:guid}", async (
     Guid attachmentId,
+    bool? preview,
+    HttpContext httpContext,
     IChatAttachmentService attachments,
     CancellationToken cancellationToken) =>
 {
     var download = await attachments.DownloadAsync(attachmentId, cancellationToken);
-    return download is null
-        ? Results.NotFound()
-        : Results.File(download.Content, download.ContentType, download.FileName);
+    if (download is null)
+    {
+        return Results.NotFound();
+    }
+
+    httpContext.Response.Headers.CacheControl = "private, no-store";
+    httpContext.Response.Headers.XContentTypeOptions = "nosniff";
+    var showInline = preview is true &&
+        download.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+    return Results.File(
+        download.Content,
+        download.ContentType,
+        showInline ? null : download.FileName);
 }).RequireAuthorization();
 
 app.MapGet("/api/chat/conversations/{conversationId:guid}/export/{format}", async (
