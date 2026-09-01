@@ -156,6 +156,14 @@ public interface IAiStreamingProvider : IAiProvider
         CancellationToken cancellationToken);
 }
 
+public interface IAiFailureDetails
+{
+    string FailureCode { get; }
+    bool IsRetryable { get; }
+    string UserMessage { get; }
+    string? DiagnosticId { get; }
+}
+
 public sealed record ChatExecutionResult(
     Guid ConversationId,
     Guid OperationId,

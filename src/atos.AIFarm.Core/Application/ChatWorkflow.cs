@@ -241,6 +241,7 @@ public sealed class ChatWorkflow(
     {
         OperationCanceledException => "Cancelled",
         TimeoutException => "Timeout",
+        IAiFailureDetails details => details.FailureCode,
         _ => "ProviderFailure"
     };
 }

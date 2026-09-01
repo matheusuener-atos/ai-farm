@@ -94,6 +94,49 @@ public sealed class OpenAiResponsesProviderTests
     }
 
     [Fact]
+    public async Task FailedStreamExposesSafeRetryDetailsAfterPartialOutput()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    data: {"type":"response.output_text.delta","delta":"parcial"}
+
+                    data: {"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"conteúdo não deve vazar"}}}
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream")
+            };
+            response.Headers.Add("x-request-id", "req_stream_failure");
+            return response;
+        });
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("teste", CancellationToken.None);
+        var content = new StringBuilder();
+
+        var error = await Assert.ThrowsAsync<OpenAiStreamException>(() =>
+            provider.ExecuteStreamingAsync(
+                new AiProviderRequest("segredo", route),
+                (delta, _) =>
+                {
+                    content.Append(delta);
+                    return ValueTask.CompletedTask;
+                },
+                CancellationToken.None));
+
+        Assert.Equal("parcial", content.ToString());
+        Assert.Equal("ProviderUnavailable", error.FailureCode);
+        Assert.True(error.IsRetryable);
+        Assert.Equal("req_stream_failure", error.DiagnosticId);
+        Assert.DoesNotContain("conteúdo não deve vazar", error.Message);
+    }
+
+    [Fact]
     public async Task CatalogPinsRouteAndReservesMaximumOutput()
     {
         var options = Options();
@@ -138,8 +181,33 @@ public sealed class OpenAiResponsesProviderTests
 
         Assert.Equal(HttpStatusCode.TooManyRequests, error.StatusCode);
         Assert.Equal("req_safe_123", error.RequestId);
+        Assert.Equal("RateLimited", error.FailureCode);
+        Assert.True(error.IsRetryable);
+        Assert.Equal("req_safe_123", error.DiagnosticId);
+        Assert.Contains("limite temporário", error.UserMessage);
         Assert.DoesNotContain("segredo", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(options.ApiKey, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "InvalidRequest", false)]
+    [InlineData(HttpStatusCode.Unauthorized, "AuthenticationFailed", false)]
+    [InlineData(HttpStatusCode.Forbidden, "PermissionDenied", false)]
+    [InlineData(HttpStatusCode.RequestTimeout, "ProviderTimeout", true)]
+    [InlineData(HttpStatusCode.Conflict, "ProviderConflict", true)]
+    [InlineData(HttpStatusCode.TooManyRequests, "RateLimited", true)]
+    [InlineData(HttpStatusCode.InternalServerError, "ProviderUnavailable", true)]
+    public void ProviderErrorsExposeSafeRecoveryClassification(
+        HttpStatusCode statusCode,
+        string failureCode,
+        bool retryable)
+    {
+        var error = new OpenAiProviderException(statusCode, "req_diagnostic");
+
+        Assert.Equal(failureCode, error.FailureCode);
+        Assert.Equal(retryable, error.IsRetryable);
+        Assert.False(string.IsNullOrWhiteSpace(error.UserMessage));
+        Assert.Equal("req_diagnostic", error.DiagnosticId);
     }
 
     private static OpenAiProviderOptions Options() => new(

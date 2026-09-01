@@ -86,10 +86,81 @@ public sealed class OpenAiProviderException(
     string? requestId)
     : InvalidOperationException(
         $"A OpenAI recusou a execução ({(int)statusCode})." +
-        (string.IsNullOrWhiteSpace(requestId) ? string.Empty : $" Request ID: {requestId}."))
+        (string.IsNullOrWhiteSpace(requestId) ? string.Empty : $" Request ID: {requestId}.")),
+        IAiFailureDetails
 {
     public HttpStatusCode StatusCode { get; } = statusCode;
     public string? RequestId { get; } = requestId;
+    public string FailureCode { get; } = FailureCodeFor(statusCode);
+    public bool IsRetryable { get; } =
+        statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.Conflict
+            or HttpStatusCode.TooManyRequests ||
+        (int)statusCode >= 500;
+    public string UserMessage { get; } = UserMessageFor(statusCode);
+    public string? DiagnosticId => RequestId;
+
+    private static string FailureCodeFor(HttpStatusCode statusCode) => statusCode switch
+    {
+        HttpStatusCode.BadRequest => "InvalidRequest",
+        HttpStatusCode.Unauthorized => "AuthenticationFailed",
+        HttpStatusCode.Forbidden => "PermissionDenied",
+        HttpStatusCode.NotFound => "NotFound",
+        HttpStatusCode.RequestTimeout => "ProviderTimeout",
+        HttpStatusCode.Conflict => "ProviderConflict",
+        HttpStatusCode.UnprocessableEntity => "UnprocessableRequest",
+        HttpStatusCode.TooManyRequests => "RateLimited",
+        _ when (int)statusCode >= 500 => "ProviderUnavailable",
+        _ => "ProviderFailure"
+    };
+
+    private static string UserMessageFor(HttpStatusCode statusCode) => statusCode switch
+    {
+        HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity =>
+            "A OpenAI recusou os parâmetros desta solicitação.",
+        HttpStatusCode.Unauthorized =>
+            "A chave da OpenAI é inválida ou não está ativa.",
+        HttpStatusCode.Forbidden =>
+            "O projeto da OpenAI não tem permissão para esta operação.",
+        HttpStatusCode.NotFound =>
+            "O modelo ou recurso configurado não foi encontrado.",
+        HttpStatusCode.TooManyRequests =>
+            "A OpenAI atingiu um limite temporário. Aguarde e tente novamente.",
+        HttpStatusCode.RequestTimeout =>
+            "A OpenAI demorou demais para iniciar a resposta.",
+        HttpStatusCode.Conflict =>
+            "A OpenAI encontrou um conflito temporário. Tente novamente.",
+        _ when (int)statusCode >= 500 =>
+            "A OpenAI está temporariamente indisponível. Tente novamente.",
+        _ => "A OpenAI não conseguiu concluir esta solicitação."
+    };
+}
+
+public sealed class OpenAiStreamException(
+    string apiCode,
+    string? requestId)
+    : InvalidOperationException(
+        $"A OpenAI interrompeu o stream ({apiCode})." +
+        (string.IsNullOrWhiteSpace(requestId) ? string.Empty : $" Request ID: {requestId}.")),
+        IAiFailureDetails
+{
+    public string FailureCode { get; } = apiCode switch
+    {
+        "rate_limit_exceeded" => "RateLimited",
+        "server_error" => "ProviderUnavailable",
+        _ => "ProviderFailure"
+    };
+    public bool IsRetryable { get; } =
+        apiCode is "rate_limit_exceeded" or "server_error";
+    public string UserMessage { get; } = apiCode switch
+    {
+        "rate_limit_exceeded" =>
+            "A OpenAI atingiu um limite temporário. Aguarde e tente novamente.",
+        "server_error" =>
+            "A OpenAI interrompeu a resposta por uma falha temporária.",
+        _ => "A OpenAI interrompeu a resposta antes da conclusão."
+    };
+    public string? DiagnosticId { get; } = requestId;
 }
 
 public sealed class OpenAiResponsesProvider :
@@ -187,6 +258,7 @@ public sealed class OpenAiResponsesProvider :
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         EnsureSuccess(response);
+        var requestId = RequestId(response);
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
@@ -234,8 +306,10 @@ public sealed class OpenAiResponsesProvider :
                     break;
                 case "response.failed":
                 case "response.incomplete":
-                    throw new InvalidOperationException(
-                        "A OpenAI não concluiu a resposta em streaming.");
+                case "error":
+                    throw new OpenAiStreamException(
+                        ReadStreamErrorCode(root),
+                        requestId);
             }
         }
 
@@ -282,10 +356,31 @@ public sealed class OpenAiResponsesProvider :
             return;
         }
 
-        var requestId = response.Headers.TryGetValues("x-request-id", out var values)
+        throw new OpenAiProviderException(response.StatusCode, RequestId(response));
+    }
+
+    private static string? RequestId(HttpResponseMessage response) =>
+        response.Headers.TryGetValues("x-request-id", out var values)
             ? values.FirstOrDefault()
             : null;
-        throw new OpenAiProviderException(response.StatusCode, requestId);
+
+    private static string ReadStreamErrorCode(JsonElement root)
+    {
+        if (root.TryGetProperty("code", out var directCode) &&
+            directCode.GetString() is { Length: > 0 } direct)
+        {
+            return direct;
+        }
+        if (root.TryGetProperty("response", out var response) &&
+            response.TryGetProperty("error", out var responseError) &&
+            responseError.ValueKind == JsonValueKind.Object &&
+            responseError.TryGetProperty("code", out var nestedCode) &&
+            nestedCode.GetString() is { Length: > 0 } nested)
+        {
+            return nested;
+        }
+
+        return "unknown_error";
     }
 
     public void Dispose() => _httpClient.Dispose();

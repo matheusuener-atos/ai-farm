@@ -99,6 +99,74 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task RepeatedStreamingAttemptReplaysWithoutCallingProviderOrChargingAgain()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var provider = new CountingStreamingProvider();
+        var workflow = NewWorkflow(wallet, provider, chat);
+        var plan = await workflow.PrepareAsync("não duplique");
+        var firstContent = new StringBuilder();
+        var replayContent = new StringBuilder();
+
+        var first = await workflow.SendStreamingAsync(
+            conversation.Id,
+            plan,
+            "same-stream-attempt",
+            (delta, _) =>
+            {
+                firstContent.Append(delta);
+                return ValueTask.CompletedTask;
+            });
+        var replay = await workflow.SendStreamingAsync(
+            conversation.Id,
+            plan,
+            "same-stream-attempt",
+            (delta, _) =>
+            {
+                replayContent.Append(delta);
+                return ValueTask.CompletedTask;
+            });
+        var snapshot = await wallet.GetSnapshotAsync();
+
+        Assert.False(first.WasReplayed);
+        Assert.True(replay.WasReplayed);
+        Assert.Equal(first.Response, firstContent.ToString());
+        Assert.Equal(first.Response, replayContent.ToString());
+        Assert.Equal(1, provider.CallCount);
+        Assert.Single(snapshot.Transactions, x => x.Type == LedgerTransactionType.Capture);
+    }
+
+    [Fact]
+    public async Task RetryingFailedExecutionWithNewAttemptChargesOnlySuccessfulAttempt()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var provider = new FailOnceProvider();
+        var workflow = NewWorkflow(wallet, provider, chat);
+        var plan = await workflow.PrepareAsync("tente de novo");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.SendAsync(conversation.Id, plan, "attempt-1"));
+        var result = await workflow.SendAsync(
+            conversation.Id,
+            plan,
+            "attempt-2");
+        var snapshot = await wallet.GetSnapshotAsync();
+        var dashboard = await chat.GetDashboardAsync();
+
+        Assert.Equal(2, provider.CallCount);
+        Assert.Equal(Aic.FromAic(12), result.ActualCostMinor);
+        Assert.Equal(Aic.FromAic(988), snapshot.Balance.AvailableMinor);
+        Assert.Single(snapshot.Transactions, x => x.Type == LedgerTransactionType.Capture);
+        Assert.Equal(2, dashboard.Totals.ExecutionCount);
+        Assert.Contains(dashboard.RecentExecutions, x => x.Status == "ProviderFailure");
+        Assert.Contains(dashboard.RecentExecutions, x => x.Status == "Completed");
+    }
+
+    [Fact]
     public async Task CancellationReleasesReservation()
     {
         var wallet = await FundedWalletAsync();
@@ -479,6 +547,52 @@ public sealed class ChatWorkflowTests
         {
             CallCount++;
             return Task.FromResult(new AiProviderResult("ok", 1, 1, Aic.FromAic(1)));
+        }
+    }
+
+    private sealed class CountingStreamingProvider : IAiStreamingProvider
+    {
+        public int CallCount { get; private set; }
+
+        public Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public async Task<AiProviderResult> ExecuteStreamingAsync(
+            AiProviderRequest request,
+            AiTextDeltaHandler onDelta,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            await onDelta("resposta única", cancellationToken);
+            return new AiProviderResult(
+                "resposta única",
+                1,
+                1,
+                Aic.FromAic(12));
+        }
+    }
+
+    private sealed class FailOnceProvider : IAiProvider
+    {
+        public int CallCount { get; private set; }
+
+        public Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (CallCount == 1)
+            {
+                throw new InvalidOperationException("falha temporária");
+            }
+
+            return Task.FromResult(new AiProviderResult(
+                "recuperado",
+                1,
+                1,
+                Aic.FromAic(12)));
         }
     }
 
