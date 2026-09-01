@@ -70,6 +70,7 @@ public sealed class AgentClientTests
     [Fact]
     public async Task HeartbeatUsesBearerCredentialAndReadsTextualStatus()
     {
+        var activeJobId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         HttpRequestMessage? captured = null;
         string? body = null;
         using var handler = new StubHandler(async request =>
@@ -77,7 +78,7 @@ public sealed class AgentClientTests
             captured = request;
             body = await request.Content!.ReadAsStringAsync();
             return Json(HttpStatusCode.OK, """
-                {"nodeId":"11111111-1111-1111-1111-111111111111","status":"Online","acceptJobs":true,"serverTimeUtc":"2026-09-01T12:00:00Z","heartbeatIntervalSeconds":30}
+                {"nodeId":"11111111-1111-1111-1111-111111111111","status":"Online","acceptJobs":true,"serverTimeUtc":"2026-09-01T12:00:00Z","heartbeatIntervalSeconds":30,"activeHeartbeatIntervalSeconds":2,"activeJobId":"22222222-2222-2222-2222-222222222222","leaseExpiresAtUtc":"2026-09-01T12:00:10Z","cancelActiveJob":true}
                 """);
         });
         using var http = new HttpClient(handler);
@@ -89,15 +90,23 @@ public sealed class AgentClientTests
             AgentInventory.Version,
             30);
 
-        var result = await client.HeartbeatAsync(configuration, "secret-value", CancellationToken.None);
+        var result = await client.HeartbeatAsync(
+            configuration,
+            "secret-value",
+            CancellationToken.None,
+            activeJobId);
 
         Assert.Equal(FarmNodeStatus.Online, result.Status);
         Assert.Equal("Bearer", captured!.Headers.Authorization!.Scheme);
         Assert.Equal("secret-value", captured.Headers.Authorization.Parameter);
-        Assert.Contains("\"agentVersion\":\"atos-agent/0.2.0\"", body);
+        Assert.Contains("\"agentVersion\":\"atos-agent/0.3.0\"", body);
         Assert.Contains("\"acceptJobs\":true", body);
         Assert.Contains("\"maxLogicalProcessors\":1", body);
         Assert.Contains("\"maxMemoryBytes\":268435456", body);
+        Assert.Contains($"\"activeJobId\":\"{activeJobId}\"", body);
+        Assert.Equal(activeJobId, result.ActiveJobId);
+        Assert.Equal(2, result.ActiveHeartbeatIntervalSeconds);
+        Assert.True(result.CancelActiveJob);
         Assert.Equal("https://farm.example.com/api/farm/agents/heartbeat", captured.RequestUri!.ToString());
     }
 

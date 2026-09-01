@@ -13,6 +13,8 @@ internal sealed class PostgresFarmAgentService(
     FarmManifestSigningOptions signingOptions) : IFarmAgentService
 {
     internal const int HeartbeatIntervalSeconds = 30;
+    internal const int ActiveHeartbeatIntervalSeconds = 2;
+    internal static readonly TimeSpan AgentLeaseLifetime = TimeSpan.FromSeconds(10);
     internal static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
     private const string SignatureAlgorithm = "HMAC-SHA256-NODE-V1";
     private const string Workload = "SHA256_CHAIN";
@@ -148,6 +150,34 @@ internal sealed class PostgresFarmAgentService(
         node.LastSeenAtUtc = now;
         if (node.Status == FarmNodeStatus.Offline.ToString())
             node.Status = FarmNodeStatus.Online.ToString();
+
+        DateTimeOffset? leaseExpiresAtUtc = null;
+        var cancelActiveJob = false;
+        if (normalized.ActiveJobId is not null)
+        {
+            await FarmJobLifecycle.ExpireAsync(
+                db,
+                now,
+                cancellationToken,
+                nodeId: node.Id);
+            var activeJob = await db.FarmJobs.SingleOrDefaultAsync(
+                x => x.Id == normalized.ActiveJobId && x.NodeId == node.Id &&
+                     (x.Status == "Running" ||
+                      x.Status == "Uploading" ||
+                      x.Status == "Verifying"),
+                cancellationToken);
+            if (activeJob is null)
+            {
+                cancelActiveJob = true;
+            }
+            else
+            {
+                activeJob.AgentLeaseRenewedAtUtc = now;
+                activeJob.AgentLeaseExpiresAtUtc = now.Add(AgentLeaseLifetime);
+                leaseExpiresAtUtc = activeJob.AgentLeaseExpiresAtUtc;
+                cancelActiveJob = activeJob.CancellationRequestedAtUtc is not null;
+            }
+        }
         await db.SaveChangesAsync(cancellationToken);
 
         var status = Enum.Parse<FarmNodeStatus>(node.Status);
@@ -156,7 +186,11 @@ internal sealed class PostgresFarmAgentService(
             status,
             status == FarmNodeStatus.Online && node.AgentAcceptJobs,
             now,
-            HeartbeatIntervalSeconds);
+            HeartbeatIntervalSeconds,
+            ActiveHeartbeatIntervalSeconds,
+            normalized.ActiveJobId,
+            leaseExpiresAtUtc,
+            cancelActiveJob);
     }
 
     public async Task<FarmAgentTrust?> GetTrustAsync(
@@ -255,11 +289,14 @@ internal sealed class PostgresFarmAgentService(
         var now = timeProvider.GetUtcNow();
         var updated = await db.FarmJobs
             .Where(x => x.Id == jobId && x.NodeId == node.Id &&
-                        x.Status == "Accepted" && x.ManifestExpiresAtUtc > now)
+                        x.Status == "Accepted" && x.ManifestExpiresAtUtc > now &&
+                        x.CancellationRequestedAtUtc == null)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(x => x.Status, FarmJobStatus.Running.ToString())
-                    .SetProperty(x => x.StartedAtUtc, now),
+                    .SetProperty(x => x.StartedAtUtc, now)
+                    .SetProperty(x => x.AgentLeaseRenewedAtUtc, now)
+                    .SetProperty(x => x.AgentLeaseExpiresAtUtc, now.Add(AgentLeaseLifetime)),
                 cancellationToken);
         if (updated == 1)
         {
@@ -360,6 +397,15 @@ internal sealed class PostgresFarmAgentService(
                 FarmJobStatus.Completed,
                 true,
                 existing.ComputeUnitsMilli);
+        }
+        if (existing.CancellationRequestedAtUtc is not null)
+        {
+            return await TerminateAndAcknowledgeAsync(
+                db,
+                existing.Id,
+                FarmJobStatus.Cancelled,
+                "O Agent confirmou o cancelamento antes do envio da evidência.",
+                cancellationToken);
         }
         if (FarmJobLifecycle.ActiveStatuses.Contains(existing.Status) &&
             existing.ManifestExpiresAtUtc <= timeProvider.GetUtcNow())
@@ -599,7 +645,8 @@ internal sealed class PostgresFarmAgentService(
             Required(request.AgentVersion, nameof(request.AgentVersion), 1, 80),
             request.AcceptJobs,
             maxLogicalProcessors,
-            maxMemoryBytes);
+            maxMemoryBytes,
+            request.ActiveJobId);
     }
 
     private static string Required(string value, string name, int minimum, int maximum)

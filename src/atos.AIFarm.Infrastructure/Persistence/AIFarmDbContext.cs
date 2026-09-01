@@ -285,6 +285,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
                 table.HasCheckConstraint(
+                    "CK_farm_jobs_agent_lease",
+                    "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR " +
+                    "(\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
+                table.HasCheckConstraint(
                     "CK_farm_jobs_manifest_complete",
                     "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR " +
                     "(\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
@@ -398,6 +402,9 @@ public sealed class FarmJobRecord
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? StartedAtUtc { get; set; }
     public DateTimeOffset? FinishedAtUtc { get; set; }
+    public DateTimeOffset? CancellationRequestedAtUtc { get; set; }
+    public DateTimeOffset? AgentLeaseRenewedAtUtc { get; set; }
+    public DateTimeOffset? AgentLeaseExpiresAtUtc { get; set; }
 }
 
 public sealed class FarmJobEventRecord

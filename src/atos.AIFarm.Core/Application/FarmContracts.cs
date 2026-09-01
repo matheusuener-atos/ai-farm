@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.2.0";
+    public const string CurrentAgentVersion = "atos-agent/0.3.0";
 }
 
 public sealed record FarmNodeSnapshot(
@@ -66,14 +66,19 @@ public sealed record FarmAgentHeartbeatRequest(
     string AgentVersion,
     bool AcceptJobs = true,
     int MaxLogicalProcessors = 0,
-    long MaxMemoryBytes = 0);
+    long MaxMemoryBytes = 0,
+    Guid? ActiveJobId = null);
 
 public sealed record FarmAgentHeartbeatResult(
     Guid NodeId,
     FarmNodeStatus Status,
     bool AcceptJobs,
     DateTimeOffset ServerTimeUtc,
-    int HeartbeatIntervalSeconds);
+    int HeartbeatIntervalSeconds,
+    int ActiveHeartbeatIntervalSeconds,
+    Guid? ActiveJobId,
+    DateTimeOffset? LeaseExpiresAtUtc,
+    bool CancelActiveJob);
 
 public sealed record FarmAgentTrust(
     string Algorithm,
@@ -135,6 +140,8 @@ public sealed record FarmJobSnapshot(
     string? ResultDigest,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? FinishedAtUtc,
+    DateTimeOffset? CancellationRequestedAtUtc,
+    DateTimeOffset? AgentLeaseExpiresAtUtc,
     FarmJobManifestSnapshot? Manifest,
     IReadOnlyList<FarmJobEventSnapshot> Events);
 

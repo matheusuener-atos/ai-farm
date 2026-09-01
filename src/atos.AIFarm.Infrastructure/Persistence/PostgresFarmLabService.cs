@@ -256,18 +256,46 @@ internal sealed class PostgresFarmLabService(
             ?? throw new InvalidOperationException("Job não encontrado para esta conta.");
         if (job.Status == FarmJobStatus.Cancelled.ToString())
             return await BuildDashboardAsync(db, node, cancellationToken);
+        if (job.CancellationRequestedAtUtc is not null)
+            return await BuildDashboardAsync(db, node, cancellationToken);
         if (job.Status is not ("Offered" or "Accepted" or "Running"))
             throw new InvalidOperationException("Este Job não pode mais ser cancelado.");
 
-        var cancelled = await FarmJobLifecycle.TryTerminateAsync(
-            db,
-            job.Id,
-            FarmJobStatus.Cancelled,
-            "Cancelado pelo usuário; nenhum CU ou AIC emitido.",
-            timeProvider.GetUtcNow(),
-            cancellationToken);
-        if (!cancelled)
-            throw new InvalidOperationException("O estado do Job mudou antes do cancelamento.");
+        var now = timeProvider.GetUtcNow();
+        if (job.Status == FarmJobStatus.Offered.ToString() &&
+            await FarmJobLifecycle.TryTerminateAsync(
+                db,
+                job.Id,
+                FarmJobStatus.Cancelled,
+                "Oferta cancelada pelo usuário antes do aceite do Agent; nenhum CU ou AIC emitido.",
+                now,
+                cancellationToken))
+            return await BuildDashboardAsync(db, node, cancellationToken);
+
+        var requested = await db.FarmJobs
+            .Where(x => x.Id == job.Id &&
+                        (x.Status == "Accepted" || x.Status == "Running") &&
+                        x.CancellationRequestedAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(x => x.CancellationRequestedAtUtc, now),
+                cancellationToken);
+        if (requested != 1)
+            throw new InvalidOperationException("O estado do Job mudou antes do pedido de cancelamento.");
+        var current = await db.FarmJobs.AsNoTracking()
+            .SingleAsync(x => x.Id == job.Id, cancellationToken);
+        var sequence = await db.FarmJobEvents
+            .Where(x => x.JobId == job.Id)
+            .MaxAsync(x => (int?)x.Sequence, cancellationToken) ?? 0;
+        db.FarmJobEvents.Add(new FarmJobEventRecord
+        {
+            Id = Guid.NewGuid(),
+            JobId = job.Id,
+            Sequence = sequence + 1,
+            Status = current.Status,
+            Detail = "Cancelamento solicitado pelo usuário; aguardando confirmação do Compute Agent.",
+            OccurredAtUtc = now
+        });
+        await db.SaveChangesAsync(cancellationToken);
         return await BuildDashboardAsync(db, node, cancellationToken);
     }
 
@@ -483,6 +511,8 @@ internal sealed class PostgresFarmLabService(
             job.ResultDigest,
             job.CreatedAtUtc,
             job.FinishedAtUtc,
+            job.CancellationRequestedAtUtc,
+            job.AgentLeaseExpiresAtUtc,
             manifestSnapshot,
             events.Select(x => new FarmJobEventSnapshot(
                 x.Sequence,

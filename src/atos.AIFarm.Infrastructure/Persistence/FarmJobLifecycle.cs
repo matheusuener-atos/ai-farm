@@ -20,6 +20,7 @@ internal static class FarmJobLifecycle
         FarmJobStatus.Uploading.ToString(),
         FarmJobStatus.Verifying.ToString()
     ];
+    internal static readonly TimeSpan CancellationGracePeriod = TimeSpan.FromSeconds(10);
 
     public static bool IsActive(FarmJobStatus status) =>
         ActiveStatuses.Contains(status.ToString(), StringComparer.Ordinal);
@@ -33,9 +34,15 @@ internal static class FarmJobLifecycle
     {
         var legacyDeadline = now.AddMinutes(-10);
         var executionDeadline = now.AddSeconds(-30);
+        var cancellationDeadline = now.Subtract(CancellationGracePeriod);
         var query = db.FarmJobs.Where(x =>
             ActiveStatuses.Contains(x.Status) &&
-            ((ExecutingStatuses.Contains(x.Status) &&
+            ((x.CancellationRequestedAtUtc != null &&
+              x.CancellationRequestedAtUtc <= cancellationDeadline) ||
+             (ExecutingStatuses.Contains(x.Status) &&
+              x.AgentLeaseExpiresAtUtc != null &&
+              x.AgentLeaseExpiresAtUtc <= now) ||
+             (ExecutingStatuses.Contains(x.Status) &&
               x.StartedAtUtc != null &&
               x.StartedAtUtc <= executionDeadline) ||
              (x.ManifestExpiresAtUtc != null && x.ManifestExpiresAtUtc <= now) ||
@@ -44,18 +51,32 @@ internal static class FarmJobLifecycle
         if (nodeId is not null) query = query.Where(x => x.NodeId == nodeId);
 
         var candidates = await query
-            .Select(x => new { x.Id, x.Status })
+            .Select(x => new
+            {
+                x.Id,
+                x.Status,
+                x.CancellationRequestedAtUtc,
+                x.AgentLeaseExpiresAtUtc
+            })
             .ToArrayAsync(cancellationToken);
         var expired = 0;
         foreach (var candidate in candidates)
         {
-            var detail = ExecutingStatuses.Contains(candidate.Status, StringComparer.Ordinal)
-                ? "O runtime excedeu o timeout autorizado de 30 segundos."
-                : "A validade do manifesto terminou antes da conclusão do Job.";
+            var cancellationRequested = candidate.CancellationRequestedAtUtc is not null;
+            var terminalStatus = cancellationRequested
+                ? FarmJobStatus.Cancelled
+                : FarmJobStatus.TimedOut;
+            var detail = cancellationRequested
+                ? "Cancelamento remoto não foi confirmado dentro do prazo; o lease foi encerrado pelo servidor."
+                : candidate.AgentLeaseExpiresAtUtc is not null && candidate.AgentLeaseExpiresAtUtc <= now
+                    ? "O lease do Compute Agent expirou durante a execução."
+                    : ExecutingStatuses.Contains(candidate.Status, StringComparer.Ordinal)
+                        ? "O runtime excedeu o timeout autorizado de 30 segundos."
+                        : "A validade do manifesto terminou antes da conclusão do Job.";
             if (await TryTerminateAsync(
                     db,
                     candidate.Id,
-                    FarmJobStatus.TimedOut,
+                    terminalStatus,
                     detail,
                     now,
                     cancellationToken))

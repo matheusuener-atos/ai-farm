@@ -174,7 +174,9 @@ internal static class AgentInventory
         MemoryBytes,
         Version);
 
-    public static FarmAgentHeartbeatRequest Heartbeat(AgentLocalPolicy? policy = null)
+    public static FarmAgentHeartbeatRequest Heartbeat(
+        AgentLocalPolicy? policy = null,
+        Guid? activeJobId = null)
     {
         var effective = AgentLocalPolicy.Normalize(policy ?? AgentLocalPolicy.Default());
         return new(
@@ -184,7 +186,8 @@ internal static class AgentInventory
         Version,
         effective.AcceptJobs,
         effective.MaxLogicalProcessors,
-        effective.MaxMemoryBytes);
+        effective.MaxMemoryBytes,
+        activeJobId);
     }
 
     private static string Runtime() =>

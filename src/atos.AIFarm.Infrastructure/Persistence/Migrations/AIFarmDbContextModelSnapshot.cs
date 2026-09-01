@@ -668,8 +668,17 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("AgentLeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("AgentLeaseRenewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("AttemptId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CancellationRequestedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<long>("ComputeUnitsMilli")
                         .HasColumnType("bigint");
@@ -763,6 +772,8 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.ToTable("farm_jobs", "aifarm", t =>
                         {
+                            t.HasCheckConstraint("CK_farm_jobs_agent_lease", "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR (\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
+
                             t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
 
                             t.HasCheckConstraint("CK_farm_jobs_manifest_complete", "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR (\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");

@@ -36,14 +36,15 @@ internal sealed class AgentClient(HttpClient httpClient)
     public async Task<FarmAgentHeartbeatResult> HeartbeatAsync(
         AgentConfiguration configuration,
         string credential,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? activeJobId = null)
     {
         using var message = new HttpRequestMessage(
             HttpMethod.Post,
             $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/heartbeat")
         {
             Content = JsonContent.Create(
-                AgentInventory.Heartbeat(configuration.EffectivePolicy),
+                AgentInventory.Heartbeat(configuration.EffectivePolicy, activeJobId),
                 options: JsonOptions)
         };
         message.Headers.Authorization = new("Bearer", credential);
@@ -89,7 +90,7 @@ internal sealed class AgentClient(HttpClient httpClient)
             ?? throw new InvalidOperationException("O servidor retornou uma oferta vazia.");
     }
 
-    public async Task MarkJobStartedAsync(
+    public async Task<bool> MarkJobStartedAsync(
         AgentConfiguration configuration,
         string credential,
         Guid jobId,
@@ -102,7 +103,9 @@ internal sealed class AgentClient(HttpClient httpClient)
         message.Content = JsonContent.Create(new { }, options: JsonOptions);
         using var response = await httpClient.SendAsync(message, cancellationToken);
         EnsureAuthorized(response);
+        if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.NotFound) return false;
         response.EnsureSuccessStatusCode();
+        return true;
     }
 
     public async Task RejectJobAsync(

@@ -300,15 +300,23 @@ public sealed class PostgresFarmLabTests
             var runtimeClaim = await agents.ClaimJobAsync(linked.Credential);
             Assert.NotNull(runtimeClaim);
             Assert.True(await agents.MarkJobStartedAsync(linked.Credential, runtimeClaim.JobId));
-            clock.Advance(TimeSpan.FromSeconds(31));
             heartbeat = await agents.HeartbeatAsync(
                 linked.Credential,
-                new FarmAgentHeartbeatRequest(request.Runtime, 8, request.MemoryBytes, request.AgentVersion));
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime,
+                    8,
+                    request.MemoryBytes,
+                    request.AgentVersion,
+                    ActiveJobId: runtimeClaim.JobId));
             Assert.NotNull(heartbeat);
+            Assert.Equal(runtimeClaim.JobId, heartbeat.ActiveJobId);
+            Assert.NotNull(heartbeat.LeaseExpiresAtUtc);
+            Assert.False(heartbeat.CancelActiveJob);
+            clock.Advance(TimeSpan.FromSeconds(11));
             var runtimeTimedOut = (await lab.GetDashboardAsync()).RecentJobs
                 .Single(x => x.Id == runtimeOffer.Id);
             Assert.Equal(FarmJobStatus.TimedOut, runtimeTimedOut.Status);
-            Assert.Contains("30 segundos", runtimeTimedOut.Events[^1].Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("lease", runtimeTimedOut.Events[^1].Detail, StringComparison.OrdinalIgnoreCase);
 
             var expiringOffer = await lab.RunBenchmarkAsync();
             clock.Advance(TimeSpan.FromMinutes(6));
@@ -323,8 +331,30 @@ public sealed class PostgresFarmLabTests
             Assert.Equal(0, timedOut.ComputeUnitsMilli);
 
             var cancellable = await lab.RunBenchmarkAsync();
+            var cancellableClaim = await agents.ClaimJobAsync(linked.Credential);
+            Assert.NotNull(cancellableClaim);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, cancellableClaim.JobId));
             var afterCancellation = await lab.CancelJobAsync(cancellable.Id);
-            var cancelled = afterCancellation.RecentJobs.Single(x => x.Id == cancellable.Id);
+            var cancellationRequested = afterCancellation.RecentJobs.Single(x => x.Id == cancellable.Id);
+            Assert.Equal(FarmJobStatus.Running, cancellationRequested.Status);
+            Assert.NotNull(cancellationRequested.CancellationRequestedAtUtc);
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime,
+                    8,
+                    request.MemoryBytes,
+                    request.AgentVersion,
+                    ActiveJobId: cancellableClaim.JobId));
+            Assert.NotNull(heartbeat);
+            Assert.True(heartbeat.CancelActiveJob);
+            Assert.True(await agents.RejectJobAsync(
+                linked.Credential,
+                cancellableClaim.JobId,
+                new FarmRemoteJobRejection(
+                    "Cancelamento cooperativo confirmado.",
+                    FarmRemoteJobRejectionKind.Cancelled)));
+            var cancelled = (await lab.GetDashboardAsync()).RecentJobs.Single(x => x.Id == cancellable.Id);
             Assert.Equal(FarmJobStatus.Cancelled, cancelled.Status);
             Assert.Equal(FarmJobStatus.Cancelled, cancelled.Events[^1].Status);
             Assert.Equal(

@@ -256,8 +256,10 @@ Para manter o node online, inicie o processo e deixe o terminal aberto:
 dotnet run --project src/atos.AIFarm.Agent -- run
 ```
 
-O Agent envia o inventário e um heartbeat a cada 30 segundos, aplica retry com
-espera crescente quando o Web Service fica indisponível e encerra com `Ctrl+C`.
+O Agent envia o inventário e um heartbeat a cada 30 segundos. Durante um Job, o
+protocolo `0.3.0` passa a enviar heartbeats a cada 2 segundos e renova um lease
+de execução com validade de 10 segundos. Ele aplica retry com espera crescente
+quando o Web Service fica indisponível e encerra com `Ctrl+C`.
 HTTP sem TLS é aceito somente em localhost; servidores remotos exigem HTTPS.
 Após 90 segundos sem heartbeat o painel marca o Agent como `OFFLINE`. Nenhuma
 credencial ou código deve ser colocado no Git, em screenshots ou em logs.
@@ -306,9 +308,12 @@ inválido encerram a tentativa sem emitir CU ou AIC. Reenvios idempotentes só s
 aceitos quando apresentam exatamente a mesma evidência já concluída. O watchdog
 terminaliza ofertas abandonadas ao fim da validade assinada e runtimes que
 ultrapassam 30 segundos, liberando o índice de Job ativo para um novo despacho.
-Enquanto a oferta estiver em `OFFERED`, `ACCEPTED` ou `RUNNING`, o usuário
-pode cancelá-la no painel; a atualização condicional impede corrida com o envio
-da evidência pelo Agent.
+Enquanto a oferta estiver em `OFFERED`, `ACCEPTED` ou `RUNNING`, o usuário pode
+cancelá-la no painel. Uma oferta ainda não aceita é encerrada imediatamente; um
+Job já aceito recebe um pedido cooperativo, permanece ativo até o Agent
+confirmar o cancelamento e é encerrado pelo watchdog se a confirmação ou o
+lease não chegar. O painel atualiza esses estados automaticamente a cada 2
+segundos, e a transição condicional impede corrida com o envio da evidência.
 
 ## Estado do Marco 1
 

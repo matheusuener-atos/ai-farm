@@ -1,6 +1,7 @@
 @page "/farm"
 @rendermode InteractiveServer
 @attribute [Authorize]
+@implements IAsyncDisposable
 @inject IFarmLabService FarmLab
 @inject IFarmAgentService FarmAgent
 
@@ -151,7 +152,7 @@ else
                         <strong>@job.Workload // @ShortId(job.Id)</strong>
                         <div class="farm-job-actions">
                             <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
-                            @if (!IsEmbedded && CanCancel(job.Status))
+                            @if (!IsEmbedded && CanCancel(job))
                             {
                                 <button type="button"
                                         class="button-secondary"
@@ -159,6 +160,10 @@ else
                                         disabled="@_working">
                                     [ CANCELAR ]
                                 </button>
+                            }
+                            else if (job.CancellationRequestedAtUtc is not null && CanCancelStatus(job.Status))
+                            {
+                                <span class="amber">[ CANCELAMENTO SOLICITADO ]</span>
                             }
                         </div>
                     </header>
@@ -168,6 +173,12 @@ else
                         <div><dt>CU</dt><dd>@FormatCu(job.ComputeUnitsMilli)</dd></div>
                         <div><dt>DIGEST</dt><dd>@(job.ResultDigest is null ? "---" : job.ResultDigest[..12])</dd></div>
                     </dl>
+                    @if (job.AgentLeaseExpiresAtUtc is not null && CanCancelStatus(job.Status))
+                    {
+                        <p class="farm-manifest-legacy">
+                            LEASE // RENOVADO ATÉ @job.AgentLeaseExpiresAtUtc.Value.ToLocalTime().ToString("HH:mm:ss")
+                        </p>
+                    }
                     @if (job.Manifest is null)
                     {
                         <p class="farm-manifest-legacy">MANIFESTO // JOB LEGADO SEM ASSINATURA</p>
@@ -217,11 +228,17 @@ else
     private bool _working;
     private string? _error;
     private FarmAgentEnrollment? _enrollment;
+    private readonly CancellationTokenSource _pollCancellation = new();
+    private Task? _pollTask;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
     private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
     private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        _pollTask = PollDashboardAsync(_pollCancellation.Token);
+    }
 
     private async Task PauseAsync() =>
         await ChangeStatusAsync(FarmNodeStatus.Paused);
@@ -284,6 +301,37 @@ else
         { _error = exception.Message; }
     }
 
+    private async Task PollDashboardAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_working) continue;
+                await InvokeAsync(async () =>
+                {
+                    await ReloadAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _pollCancellation.CancelAsync();
+        if (_pollTask is not null)
+        {
+            try { await _pollTask; }
+            catch (OperationCanceledException) { }
+        }
+        _pollCancellation.Dispose();
+    }
+
     private static string NodeStatusLabel(FarmNodeStatus status) => status switch
     {
         FarmNodeStatus.Online => "ONLINE",
@@ -318,7 +366,10 @@ else
         status == FarmJobStatus.Completed ? "green" :
         status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? "error-text" : "amber";
 
-    private static bool CanCancel(FarmJobStatus status) =>
+    private static bool CanCancel(FarmJobSnapshot job) =>
+        job.CancellationRequestedAtUtc is null && CanCancelStatus(job.Status);
+
+    private static bool CanCancelStatus(FarmJobStatus status) =>
         status is FarmJobStatus.Offered or FarmJobStatus.Accepted or FarmJobStatus.Running;
 
     private static string FormatCu(long milli) => $"{milli / 1000d:0.000} CU";
