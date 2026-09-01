@@ -13,6 +13,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<LedgerEntryRecord> LedgerEntries => Set<LedgerEntryRecord>();
     public DbSet<BalanceReservationRecord> BalanceReservations => Set<BalanceReservationRecord>();
     public DbSet<ConversationRecord> Conversations => Set<ConversationRecord>();
+    public DbSet<ChatPresetRecord> ChatPresets => Set<ChatPresetRecord>();
     public DbSet<MessageRecord> Messages => Set<MessageRecord>();
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
@@ -93,13 +94,28 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
 
         modelBuilder.Entity<ConversationRecord>(entity =>
         {
-            entity.ToTable("conversations");
+            entity.ToTable("conversations", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_conversations_temperature",
+                    "\"Temperature\" >= 0 AND \"Temperature\" <= 2");
+                table.HasCheckConstraint(
+                    "CK_conversations_maximum_output_tokens",
+                    "\"MaximumOutputTokens\" >= 64 AND \"MaximumOutputTokens\" <= 128000");
+                table.HasCheckConstraint(
+                    "CK_conversations_system_instruction_length",
+                    "\"SystemInstruction\" IS NULL OR length(\"SystemInstruction\") <= 8000");
+            });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.UpdatedAtUtc });
             entity.HasIndex(x => x.ParentConversationId);
             entity.HasIndex(x => x.BranchedFromMessageId);
             entity.Property(x => x.Title).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.ModelPreference).HasMaxLength(120).HasDefaultValue("auto");
+            entity.Property(x => x.SystemInstruction).HasColumnType("text");
+            entity.Property(x => x.Temperature).HasPrecision(3, 2).HasDefaultValue(1.0m);
+            entity.Property(x => x.MaximumOutputTokens).HasDefaultValue(512);
             entity.HasOne<AccountRecord>()
                 .WithMany()
                 .HasForeignKey(x => x.AccountId)
@@ -107,6 +123,34 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<ConversationRecord>()
                 .WithMany()
                 .HasForeignKey(x => x.ParentConversationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ChatPresetRecord>(entity =>
+        {
+            entity.ToTable("chat_presets", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_chat_presets_temperature",
+                    "\"Temperature\" >= 0 AND \"Temperature\" <= 2");
+                table.HasCheckConstraint(
+                    "CK_chat_presets_maximum_output_tokens",
+                    "\"MaximumOutputTokens\" >= 64 AND \"MaximumOutputTokens\" <= 128000");
+                table.HasCheckConstraint(
+                    "CK_chat_presets_system_instruction_length",
+                    "\"SystemInstruction\" IS NULL OR length(\"SystemInstruction\") <= 8000");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.NormalizedName }).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.NormalizedName).HasMaxLength(80);
+            entity.Property(x => x.ModelPreference).HasMaxLength(120).HasDefaultValue("auto");
+            entity.Property(x => x.SystemInstruction).HasColumnType("text");
+            entity.Property(x => x.Temperature).HasPrecision(3, 2).HasDefaultValue(1.0m);
+            entity.Property(x => x.MaximumOutputTokens).HasDefaultValue(512);
+            entity.HasOne<AccountRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -240,6 +284,24 @@ public sealed class ConversationRecord
     public Guid? ParentConversationId { get; set; }
     public Guid? BranchedFromMessageId { get; set; }
     public string Status { get; set; } = "Active";
+    public string ModelPreference { get; set; } = "auto";
+    public string? SystemInstruction { get; set; }
+    public decimal Temperature { get; set; } = 1.0m;
+    public int MaximumOutputTokens { get; set; } = 512;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class ChatPresetRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string NormalizedName { get; set; } = string.Empty;
+    public string ModelPreference { get; set; } = "auto";
+    public string? SystemInstruction { get; set; }
+    public decimal Temperature { get; set; } = 1.0m;
+    public int MaximumOutputTokens { get; set; } = 512;
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }

@@ -10,7 +10,8 @@ public sealed class ChatWorkflow(
     IChatStore chat,
     ChatExecutionLimits? executionLimits = null,
     TimeProvider? timeProvider = null,
-    IChatContextPlanner? contextPlanner = null)
+    IChatContextPlanner? contextPlanner = null,
+    IAiModelCatalog? modelCatalog = null)
 {
     private readonly ChatExecutionLimits _executionLimits =
         ValidateLimits(executionLimits ?? ChatExecutionLimits.Default);
@@ -53,6 +54,7 @@ public sealed class ChatWorkflow(
             prompt,
             null,
             null,
+            ConversationAiSettings.Default,
             cancellationToken);
     }
 
@@ -85,6 +87,7 @@ public sealed class ChatWorkflow(
             prompt,
             messages,
             maximumContextMessages,
+            conversation.AiSettings ?? ConversationAiSettings.Default,
             cancellationToken);
     }
 
@@ -92,6 +95,7 @@ public sealed class ChatWorkflow(
         string prompt,
         IReadOnlyList<ChatMessageSnapshot>? messages,
         int? maximumContextMessages,
+        ConversationAiSettings settings,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -106,16 +110,40 @@ public sealed class ChatWorkflow(
                 $"A mensagem excede o limite de {_executionLimits.MaximumPromptCharacters:N0} caracteres.");
         }
 
-        var route = await router.SelectAsync(normalizedPrompt, cancellationToken);
+        var normalizedSettings = settings.Normalize();
+        if (modelCatalog is not null)
+        {
+            var option = modelCatalog.GetOptions().FirstOrDefault(x =>
+                string.Equals(x.Value, normalizedSettings.ModelPreference, StringComparison.Ordinal) ||
+                string.Equals(normalizedSettings.ModelPreference, ConversationAiSettings.AutomaticModel, StringComparison.OrdinalIgnoreCase));
+            if (option is null)
+            {
+                throw new InvalidOperationException("O modelo escolhido não está disponível neste ambiente.");
+            }
+            if (normalizedSettings.MaximumOutputTokens > option.MaximumOutputTokens)
+            {
+                throw new InvalidOperationException(
+                    $"O modelo escolhido aceita no máximo {option.MaximumOutputTokens:N0} tokens nesta instalação.");
+            }
+        }
+
+        var route = await router.SelectAsync(
+            normalizedPrompt,
+            normalizedSettings.ModelPreference,
+            cancellationToken);
         var context = _contextPlanner.Plan(
             messages ?? [],
             normalizedPrompt,
-            maximumContextMessages);
+            maximumContextMessages,
+            normalizedSettings.SystemInstruction);
         var request = new AiProviderRequest(
             normalizedPrompt,
             route,
             context.Messages,
-            context.EstimatedInputTokens);
+            context.EstimatedInputTokens,
+            normalizedSettings.SystemInstruction,
+            normalizedSettings.Temperature,
+            normalizedSettings.MaximumOutputTokens);
         var estimate = pricing is IAiRequestPriceEstimator requestPricing
             ? await requestPricing.EstimateAsync(request, cancellationToken)
             : await pricing.EstimateAsync(normalizedPrompt, route, cancellationToken);
@@ -133,7 +161,8 @@ public sealed class ChatWorkflow(
             normalizedPrompt,
             route,
             estimate.MaximumCostMinor,
-            context);
+            context,
+            normalizedSettings);
     }
 
     public async Task<ChatExecutionResult> SendAsync(
@@ -206,7 +235,10 @@ public sealed class ChatWorkflow(
                 plan.Prompt,
                 plan.Route,
                 plan.Context?.Messages,
-                plan.Context?.EstimatedInputTokens);
+                plan.Context?.EstimatedInputTokens,
+                plan.Settings?.SystemInstruction,
+                plan.Settings?.Temperature,
+                plan.Settings?.MaximumOutputTokens);
             AiProviderResult providerResult;
             if (onDelta is not null && provider is IAiStreamingProvider streamingProvider)
             {

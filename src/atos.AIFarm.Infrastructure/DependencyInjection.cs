@@ -39,7 +39,11 @@ public static class DependencyInjection
         if (openAi is null)
         {
             services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
-            services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
+            services.AddSingleton<BestAvailableRouteSelector>();
+            services.AddSingleton<IAiRouteSelector>(provider =>
+                provider.GetRequiredService<BestAvailableRouteSelector>());
+            services.AddSingleton<IAiModelCatalog>(provider =>
+                provider.GetRequiredService<BestAvailableRouteSelector>());
             services.AddSingleton<IAiProviderClient, FakeAiProvider>();
         }
         else
@@ -52,6 +56,8 @@ public static class DependencyInjection
             services.AddSingleton<IPriceEstimator>(provider =>
                 provider.GetRequiredService<OpenAiPriceCatalog>());
             services.AddSingleton<IAiRouteSelector>(provider =>
+                provider.GetRequiredService<OpenAiPriceCatalog>());
+            services.AddSingleton<IAiModelCatalog>(provider =>
                 provider.GetRequiredService<OpenAiPriceCatalog>());
             services.AddSingleton<OpenAiResponsesProvider>();
             services.AddSingleton<IAiProviderClient>(provider =>

@@ -37,7 +37,8 @@ public interface IChatContextPlanner
     ChatContextPlan Plan(
         IReadOnlyList<ChatMessageSnapshot> messages,
         string prompt,
-        int? requestedMessageCount = null);
+        int? requestedMessageCount = null,
+        string? systemInstruction = null);
 }
 
 public sealed class ChatContextPlanner(ChatContextLimits? limits = null)
@@ -49,7 +50,8 @@ public sealed class ChatContextPlanner(ChatContextLimits? limits = null)
     public ChatContextPlan Plan(
         IReadOnlyList<ChatMessageSnapshot> messages,
         string prompt,
-        int? requestedMessageCount = null)
+        int? requestedMessageCount = null,
+        string? systemInstruction = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         if (string.IsNullOrWhiteSpace(prompt))
@@ -65,7 +67,10 @@ public sealed class ChatContextPlanner(ChatContextLimits? limits = null)
                 $"O contexto deve conter entre 0 e {_limits.MaximumMessageCount} mensagens.");
         }
 
-        var promptTokens = EstimateTokens(prompt);
+        var instructionTokens = string.IsNullOrWhiteSpace(systemInstruction)
+            ? 0
+            : EstimateTokens(systemInstruction);
+        var promptTokens = checked(EstimateTokens(prompt) + instructionTokens);
         if (promptTokens >= _limits.MaximumInputTokens)
         {
             throw new InvalidOperationException(

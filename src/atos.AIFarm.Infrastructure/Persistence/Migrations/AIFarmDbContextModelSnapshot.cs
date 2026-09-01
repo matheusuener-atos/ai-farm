@@ -399,6 +399,67 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.ToTable("balance_reservations", "aifarm");
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ChatPresetRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MaximumOutputTokens")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(512);
+
+                    b.Property<string>("ModelPreference")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasDefaultValue("auto");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("SystemInstruction")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Temperature")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3, 2)
+                        .HasColumnType("numeric(3,2)")
+                        .HasDefaultValue(1.0m);
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("chat_presets", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_chat_presets_maximum_output_tokens", "\"MaximumOutputTokens\" >= 64 AND \"MaximumOutputTokens\" <= 128000");
+
+                            t.HasCheckConstraint("CK_chat_presets_system_instruction_length", "\"SystemInstruction\" IS NULL OR length(\"SystemInstruction\") <= 8000");
+
+                            t.HasCheckConstraint("CK_chat_presets_temperature", "\"Temperature\" >= 0 AND \"Temperature\" <= 2");
+                        });
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ConversationRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -414,6 +475,18 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("MaximumOutputTokens")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(512);
+
+                    b.Property<string>("ModelPreference")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasDefaultValue("auto");
+
                     b.Property<Guid?>("ParentConversationId")
                         .HasColumnType("uuid");
 
@@ -421,6 +494,15 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SystemInstruction")
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Temperature")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3, 2)
+                        .HasColumnType("numeric(3,2)")
+                        .HasDefaultValue(1.0m);
 
                     b.Property<string>("Title")
                         .HasMaxLength(160)
@@ -437,7 +519,14 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("AccountId", "UpdatedAtUtc");
 
-                    b.ToTable("conversations", "aifarm");
+                    b.ToTable("conversations", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_conversations_maximum_output_tokens", "\"MaximumOutputTokens\" >= 64 AND \"MaximumOutputTokens\" <= 128000");
+
+                            t.HasCheckConstraint("CK_conversations_system_instruction_length", "\"SystemInstruction\" IS NULL OR length(\"SystemInstruction\") <= 8000");
+
+                            t.HasCheckConstraint("CK_conversations_temperature", "\"Temperature\" >= 0 AND \"Temperature\" <= 2");
+                        });
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.LedgerEntryRecord", b =>
@@ -670,6 +759,15 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasOne("atos.AIFarm.Infrastructure.Persistence.WalletRecord", null)
                         .WithMany()
                         .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ChatPresetRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

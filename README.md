@@ -115,6 +115,14 @@ local, sem segunda chamada de IA e sem cobrança oculta. Edição e regeneraçã
 recortam o contexto antes da mensagem que originou o ramo. A Responses API
 recebe a sequência explícita com truncamento automático desabilitado.
 
+Cada conversa também possui um perfil de execução persistente com modelo,
+instrução do sistema, criatividade de `0` a `2` e limite de tokens de saída.
+O seletor lista somente as rotas realmente configuradas no ambiente; `auto`
+mantém a escolha da melhor rota disponível. O limite de saída participa da
+estimativa e da reserva antes da chamada ao Provider. Presets são privados da
+conta, podem ser atualizados pelo mesmo nome, aplicados a outras conversas e
+removidos. Uma ramificação herda o perfil da conversa de origem.
+
 Cancelamentos solicitados pelo usuário não contam como falha do Provider. Uma
 estimativa acima do limite é rejeitada antes de reservar saldo, e timeout ou
 falha liberam a reserva normalmente.
@@ -175,6 +183,10 @@ Implementado:
 - resumo extrativo automático para histórico omitido;
 - inspeção, no preflight, do contexto efetivamente enviado ao Provider;
 - contexto de ramificações isolado da continuação original.
+- configuração persistente de modelo, instrução, criatividade e saída por conversa;
+- presets reutilizáveis e isolados por conta;
+- perfil de execução congelado no preflight e herdado por ramificações;
+- parâmetros `instructions`, `temperature` e `max_output_tokens` enviados à Responses API.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
@@ -196,8 +208,8 @@ No Render, crie as mesmas duas variáveis em **Environment** somente quando for
 executar o teste controlado. Nunca coloque a chave em `appsettings.json`, no
 Git ou em componentes `.razor`.
 
-O catálogo `openai-gpt-5.4-mini-2026-03-17-aic-v1` fixa modelo, limite de 512
-tokens de saída e tarifas internas em mAIC por milhão de tokens. Essas tarifas
+O catálogo `openai-gpt-5.4-mini-2026-03-17-aic-v1` fixa modelo, teto de 512
+tokens de saída configuráveis por conversa e tarifas internas em mAIC por milhão de tokens. Essas tarifas
 são experimentais e não estabelecem paridade pública entre AIC e USD. Alterar
 tarifa ou modelo exige uma nova versão de catálogo.
 

@@ -38,6 +38,7 @@ public sealed record OpenAiProviderOptions(
 
 public sealed class OpenAiPriceCatalog :
     IAiRouteSelector,
+    IAiModelCatalog,
     IPriceEstimator,
     IAiRequestPriceEstimator,
     IAiPriceCatalog
@@ -58,6 +59,34 @@ public sealed class OpenAiPriceCatalog :
         string prompt,
         CancellationToken cancellationToken) =>
         Task.FromResult(_entry.Route);
+
+    public async Task<AiRoute> SelectAsync(
+        string prompt,
+        string? modelPreference,
+        CancellationToken cancellationToken)
+    {
+        var route = await SelectAsync(prompt, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(modelPreference) &&
+            !string.Equals(modelPreference, ConversationAiSettings.AutomaticModel, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(modelPreference, route.Model, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("O modelo escolhido não pertence ao catálogo OpenAI ativo.");
+        }
+
+        return route;
+    }
+
+    public IReadOnlyList<AiModelOption> GetOptions() =>
+    [
+        new(
+            ConversationAiSettings.AutomaticModel,
+            $"MELHOR DISPONÍVEL ({_entry.Route.Model})",
+            _entry.MaximumOutputUnits),
+        new(
+            _entry.Route.Model,
+            _entry.Route.Model,
+            _entry.MaximumOutputUnits)
+    ];
 
     public Task<PriceEstimate> EstimateAsync(
         string prompt,
@@ -82,10 +111,14 @@ public sealed class OpenAiPriceCatalog :
         var conservativeInputUnits = checked(
             Encoding.UTF8.GetByteCount(request.Prompt) +
             contextBytes +
+            (request.SystemInstruction is null
+                ? 0
+                : Encoding.UTF8.GetByteCount(request.SystemInstruction)) +
             entry.InputEstimateOverheadUnits);
+        var maximumOutputUnits = EffectiveMaximumOutputUnits(request, entry);
         return Task.FromResult(new PriceEstimate(entry.Cost(
             conservativeInputUnits,
-            entry.MaximumOutputUnits)));
+            maximumOutputUnits)));
     }
 
     public AiPriceCatalogEntry Get(AiRoute route)
@@ -96,6 +129,21 @@ public sealed class OpenAiPriceCatalog :
         }
 
         return _entry;
+    }
+
+    private static int EffectiveMaximumOutputUnits(
+        AiProviderRequest request,
+        AiPriceCatalogEntry entry)
+    {
+        var requested = request.MaximumOutputTokens ?? entry.MaximumOutputUnits;
+        if (requested is < ConversationAiSettings.MinimumOutputTokens ||
+            requested > entry.MaximumOutputUnits)
+        {
+            throw new InvalidOperationException(
+                $"O limite de resposta deve ficar entre {ConversationAiSettings.MinimumOutputTokens:N0} e {entry.MaximumOutputUnits:N0} tokens para esta rota.");
+        }
+
+        return requested;
     }
 }
 
@@ -218,14 +266,7 @@ public sealed class OpenAiResponsesProvider :
         ValidateContextWindow(request, catalogEntry);
         using var message = new HttpRequestMessage(HttpMethod.Post, _options.ResponsesEndpoint)
         {
-            Content = JsonContent.Create(new
-            {
-                model = _options.Model,
-                input = BuildInput(request),
-                max_output_tokens = catalogEntry.MaximumOutputUnits,
-                store = false,
-                truncation = "disabled"
-            })
+            Content = JsonContent.Create(BuildPayload(request, catalogEntry, stream: false))
         };
         using var response = await _httpClient.SendAsync(
             message,
@@ -265,15 +306,7 @@ public sealed class OpenAiResponsesProvider :
         ValidateContextWindow(request, catalogEntry);
         using var message = new HttpRequestMessage(HttpMethod.Post, _options.ResponsesEndpoint)
         {
-            Content = JsonContent.Create(new
-            {
-                model = _options.Model,
-                input = BuildInput(request),
-                max_output_tokens = catalogEntry.MaximumOutputUnits,
-                store = false,
-                stream = true,
-                truncation = "disabled"
-            })
+            Content = JsonContent.Create(BuildPayload(request, catalogEntry, stream: true))
         };
         using var response = await _httpClient.SendAsync(
             message,
@@ -425,16 +458,61 @@ public sealed class OpenAiResponsesProvider :
 
     private sealed record ResponseInputMessage(string Role, string Content);
 
+    private Dictionary<string, object> BuildPayload(
+        AiProviderRequest request,
+        AiPriceCatalogEntry catalogEntry,
+        bool stream)
+    {
+        var maximumOutputTokens = request.MaximumOutputTokens ?? catalogEntry.MaximumOutputUnits;
+        if (maximumOutputTokens is < ConversationAiSettings.MinimumOutputTokens ||
+            maximumOutputTokens > catalogEntry.MaximumOutputUnits)
+        {
+            throw new InvalidOperationException(
+                $"O limite de resposta deve ficar entre {ConversationAiSettings.MinimumOutputTokens:N0} e {catalogEntry.MaximumOutputUnits:N0} tokens para esta rota.");
+        }
+
+        var payload = new Dictionary<string, object>
+        {
+            ["model"] = _options.Model,
+            ["input"] = BuildInput(request),
+            ["max_output_tokens"] = maximumOutputTokens,
+            ["store"] = false,
+            ["truncation"] = "disabled"
+        };
+        if (!string.IsNullOrWhiteSpace(request.SystemInstruction))
+        {
+            payload["instructions"] = request.SystemInstruction;
+        }
+        if (request.Temperature is decimal temperature)
+        {
+            if (temperature is < 0 or > 2)
+            {
+                throw new InvalidOperationException("A criatividade deve ficar entre 0 e 2.");
+            }
+            payload["temperature"] = temperature;
+        }
+        if (stream)
+        {
+            payload["stream"] = true;
+        }
+
+        return payload;
+    }
+
     private static void ValidateContextWindow(
         AiProviderRequest request,
         AiPriceCatalogEntry catalogEntry)
     {
         var inputBytes = Encoding.UTF8.GetByteCount(request.Prompt) +
             (request.Context?.Sum(message =>
-                Encoding.UTF8.GetByteCount(message.Content)) ?? 0);
+                Encoding.UTF8.GetByteCount(message.Content)) ?? 0) +
+            (request.SystemInstruction is null
+                ? 0
+                : Encoding.UTF8.GetByteCount(request.SystemInstruction));
         var messageOverhead = checked(((request.Context?.Count ?? 0) + 1) * 8);
+        var maximumOutputTokens = request.MaximumOutputTokens ?? catalogEntry.MaximumOutputUnits;
         var conservativeUpperBound = checked(
-            inputBytes + messageOverhead + catalogEntry.MaximumOutputUnits);
+            inputBytes + messageOverhead + maximumOutputTokens);
         if (conservativeUpperBound > OpenAiProviderOptions.ModelContextWindowTokens)
         {
             throw new InvalidOperationException(

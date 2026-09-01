@@ -11,6 +11,72 @@ public sealed class PostgresConversationPersistenceTests
 {
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task ConversationSettingsAndAccountPresetSurviveServiceRecreation()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var presetName = $"integration-{Guid.NewGuid():N}";
+        Guid presetId = default;
+        Guid conversationId = default;
+        DateTimeOffset previousUpdatedAtUtc = default;
+        ConversationAiSettings? previousSettings = null;
+        var configured = new ConversationAiSettings(
+            "atos-fake-chat-v1",
+            "Responda em português e em três tópicos.",
+            0.4m,
+            256);
+
+        try
+        {
+            await using (var firstProvider = BuildProvider(connectionString))
+            {
+                var store = firstProvider.GetRequiredService<IChatStore>();
+                var conversation = await store.GetOrCreateCurrentConversationAsync();
+                conversationId = conversation.Id;
+                previousUpdatedAtUtc = conversation.UpdatedAtUtc;
+                previousSettings = conversation.AiSettings;
+                Assert.True(await store.UpdateConversationAiSettingsAsync(conversationId, configured));
+                presetId = (await store.SaveChatPresetAsync(presetName, configured)).Id;
+            }
+
+            await using var recreatedProvider = BuildProvider(connectionString);
+            var recreatedStore = recreatedProvider.GetRequiredService<IChatStore>();
+            var restored = await recreatedStore.GetConversationAsync(conversationId);
+            var restoredPreset = (await recreatedStore.ListChatPresetsAsync())
+                .Single(x => x.Id == presetId);
+
+            Assert.Equal(configured.Normalize(), restored?.AiSettings);
+            Assert.Equal(configured.Normalize(), restoredPreset.Settings);
+            Assert.Equal(presetName, restoredPreset.Name);
+        }
+        finally
+        {
+            await using var cleanupProvider = BuildProvider(connectionString);
+            var cleanupStore = cleanupProvider.GetRequiredService<IChatStore>();
+            if (presetId != Guid.Empty)
+            {
+                await cleanupStore.DeleteChatPresetAsync(presetId);
+            }
+            if (conversationId != Guid.Empty && previousSettings is not null)
+            {
+                await cleanupStore.UpdateConversationAiSettingsAsync(
+                    conversationId,
+                    previousSettings);
+                var factory = cleanupProvider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+                await using var db = await factory.CreateDbContextAsync();
+                var conversation = await db.Conversations.SingleAsync(x => x.Id == conversationId);
+                conversation.UpdatedAtUtc = previousUpdatedAtUtc;
+                await db.SaveChangesAsync();
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task CompletedExchangeSurvivesServiceProviderRecreation()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");

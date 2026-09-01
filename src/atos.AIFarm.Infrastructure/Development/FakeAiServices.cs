@@ -12,10 +12,16 @@ public sealed class FixedPriceEstimator : IPriceEstimator
         CancellationToken cancellationToken) =>
         Task.FromResult(new PriceEstimate(Aic.FromAic(20)));
 }
-public sealed class BestAvailableRouteSelector : IAiRouteSelector
+public sealed class BestAvailableRouteSelector : IAiRouteSelector, IAiModelCatalog
 {
     public Task<AiRoute> SelectAsync(string prompt, CancellationToken cancellationToken) =>
         Task.FromResult(new AiRoute("atos Fake Provider", "atos-fake-chat-v1", "demo-2026-08"));
+
+    public IReadOnlyList<AiModelOption> GetOptions() =>
+    [
+        new(ConversationAiSettings.AutomaticModel, "MELHOR DISPONÍVEL (FAKE)", 512),
+        new("atos-fake-chat-v1", "atos-fake-chat-v1", 512)
+    ];
 }
 
 public sealed class FakeAiProvider :
@@ -59,6 +65,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
     private readonly ConcurrentDictionary<string, ChatExecutionResult> _results = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, FailedChatExecution> _failures = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, ConversationState> _conversations = [];
+    private readonly Dictionary<Guid, ChatPresetSnapshot> _presets = [];
 
     public Task<ConversationPage> SearchConversationsAsync(
         ConversationQuery query,
@@ -271,13 +278,77 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
                 branchMessageId)
             {
                 Title = ConversationTitle.Normalize(
-                    $"{source.Title ?? $"SESSÃO_{source.Id.ToString("N")[..4].ToUpperInvariant()}"} / RAMO")
+                    $"{source.Title ?? $"SESSÃO_{source.Id.ToString("N")[..4].ToUpperInvariant()}"} / RAMO"),
+                AiSettings = source.AiSettings
             };
             branch.Messages.AddRange(source.Messages
                 .Take(branchIndex)
                 .Select(message => message with { Id = Guid.NewGuid() }));
             _conversations.Add(branch.Id, branch);
             return Task.FromResult(Snapshot(branch));
+        }
+    }
+
+    public Task<bool> UpdateConversationAiSettingsAsync(
+        Guid conversationId,
+        ConversationAiSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = settings.Normalize();
+        lock (_sync)
+        {
+            if (!_conversations.TryGetValue(conversationId, out var conversation) ||
+                conversation.IsArchived ||
+                conversation.IsDeleted)
+            {
+                return Task.FromResult(false);
+            }
+
+            conversation.AiSettings = normalized;
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<IReadOnlyList<ChatPresetSnapshot>> ListChatPresetsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            IReadOnlyList<ChatPresetSnapshot> presets = _presets.Values
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return Task.FromResult(presets);
+        }
+    }
+
+    public Task<ChatPresetSnapshot> SaveChatPresetAsync(
+        string name,
+        ConversationAiSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var normalizedSettings = settings.Normalize();
+        lock (_sync)
+        {
+            var existing = _presets.Values.FirstOrDefault(x =>
+                string.Equals(x.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+            var now = DateTimeOffset.UtcNow;
+            var preset = existing is null
+                ? new ChatPresetSnapshot(Guid.NewGuid(), normalizedName, normalizedSettings, now, now)
+                : existing with { Name = normalizedName, Settings = normalizedSettings, UpdatedAtUtc = now };
+            _presets[preset.Id] = preset;
+            return Task.FromResult(preset);
+        }
+    }
+
+    public Task<bool> DeleteChatPresetAsync(
+        Guid presetId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(_presets.Remove(presetId));
         }
     }
 
@@ -432,7 +503,23 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         [.. conversation.Messages.OrderBy(x => x.CreatedAtUtc)],
         conversation.Title,
         conversation.ParentConversationId,
-        conversation.BranchedFromMessageId);
+        conversation.BranchedFromMessageId,
+        conversation.AiSettings);
+
+    private static string NormalizePresetName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Digite um nome para o preset.", nameof(name));
+        }
+
+        var normalized = string.Join(' ', name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (normalized.Length > 80)
+        {
+            throw new ArgumentException("O nome do preset deve ter no máximo 80 caracteres.", nameof(name));
+        }
+        return normalized;
+    }
 
     private static ConversationSummary Summary(ConversationState conversation) => new(
         conversation.Id,
@@ -458,6 +545,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         public Guid? BranchedFromMessageId { get; } = branchedFromMessageId;
         public bool IsArchived { get; set; }
         public bool IsDeleted { get; set; }
+        public ConversationAiSettings AiSettings { get; set; } = ConversationAiSettings.Default;
         public List<ChatMessageSnapshot> Messages { get; } = [];
     }
 }

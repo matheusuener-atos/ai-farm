@@ -37,12 +37,16 @@ public sealed record ChatExecutionPlan(
     string Prompt,
     AiRoute Route,
     long MaximumCostMinor,
-    ChatContextPlan? Context = null);
+    ChatContextPlan? Context = null,
+    ConversationAiSettings? Settings = null);
 public sealed record AiProviderRequest(
     string Prompt,
     AiRoute Route,
     IReadOnlyList<AiContextMessage>? Context = null,
-    int? EstimatedInputTokens = null);
+    int? EstimatedInputTokens = null,
+    string? SystemInstruction = null,
+    decimal? Temperature = null,
+    int? MaximumOutputTokens = null);
 public sealed record AiProviderResult(string Content, long InputUnits, long OutputUnits, long ActualCostMinor);
 
 public sealed record AiPriceCatalogEntry(
@@ -102,7 +106,77 @@ public sealed record ConversationSnapshot(
     IReadOnlyList<ChatMessageSnapshot> Messages,
     string? Title = null,
     Guid? ParentConversationId = null,
-    Guid? BranchedFromMessageId = null);
+    Guid? BranchedFromMessageId = null,
+    ConversationAiSettings? AiSettings = null);
+
+public sealed record ConversationAiSettings(
+    string ModelPreference,
+    string? SystemInstruction,
+    decimal Temperature,
+    int MaximumOutputTokens)
+{
+    public const string AutomaticModel = "auto";
+    public const int MaximumInstructionLength = 8_000;
+    public const int MinimumOutputTokens = 64;
+    public const int AbsoluteMaximumOutputTokens = 128_000;
+
+    public static ConversationAiSettings Default { get; } = new(
+        AutomaticModel,
+        null,
+        1.0m,
+        512);
+
+    public ConversationAiSettings Normalize()
+    {
+        var model = string.IsNullOrWhiteSpace(ModelPreference)
+            ? AutomaticModel
+            : ModelPreference.Trim();
+        if (model.Length > 120)
+        {
+            throw new ArgumentException("O identificador do modelo deve ter no máximo 120 caracteres.");
+        }
+
+        var instruction = string.IsNullOrWhiteSpace(SystemInstruction)
+            ? null
+            : SystemInstruction.Trim();
+        if (instruction?.Length > MaximumInstructionLength)
+        {
+            throw new ArgumentException(
+                $"A instrução do sistema deve ter no máximo {MaximumInstructionLength:N0} caracteres.");
+        }
+        if (Temperature is < 0 or > 2)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(Temperature),
+                "A criatividade deve ficar entre 0 e 2.");
+        }
+        if (MaximumOutputTokens is < MinimumOutputTokens or > AbsoluteMaximumOutputTokens)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(MaximumOutputTokens),
+                $"O limite de resposta deve ficar entre {MinimumOutputTokens:N0} e {AbsoluteMaximumOutputTokens:N0} tokens.");
+        }
+
+        return this with
+        {
+            ModelPreference = model,
+            SystemInstruction = instruction,
+            Temperature = decimal.Round(Temperature, 2)
+        };
+    }
+}
+
+public sealed record ChatPresetSnapshot(
+    Guid Id,
+    string Name,
+    ConversationAiSettings Settings,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
+public sealed record AiModelOption(
+    string Value,
+    string Label,
+    int MaximumOutputTokens);
 
 public sealed record ConversationSummary(
     Guid Id,
@@ -206,6 +280,27 @@ public interface IAiRequestPriceEstimator
 public interface IAiRouteSelector
 {
     Task<AiRoute> SelectAsync(string prompt, CancellationToken cancellationToken);
+
+    async Task<AiRoute> SelectAsync(
+        string prompt,
+        string? modelPreference,
+        CancellationToken cancellationToken)
+    {
+        var route = await SelectAsync(prompt, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(modelPreference) &&
+            !string.Equals(modelPreference, ConversationAiSettings.AutomaticModel, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(modelPreference, route.Model, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("O modelo escolhido não está disponível neste ambiente.");
+        }
+
+        return route;
+    }
+}
+
+public interface IAiModelCatalog
+{
+    IReadOnlyList<AiModelOption> GetOptions();
 }
 
 public interface IAiProvider
@@ -331,6 +426,19 @@ public interface IChatStore
     Task<ConversationSnapshot> BranchConversationAsync(
         Guid conversationId,
         Guid branchMessageId,
+        CancellationToken cancellationToken = default);
+    Task<bool> UpdateConversationAiSettingsAsync(
+        Guid conversationId,
+        ConversationAiSettings settings,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChatPresetSnapshot>> ListChatPresetsAsync(
+        CancellationToken cancellationToken = default);
+    Task<ChatPresetSnapshot> SaveChatPresetAsync(
+        string name,
+        ConversationAiSettings settings,
+        CancellationToken cancellationToken = default);
+    Task<bool> DeleteChatPresetAsync(
+        Guid presetId,
         CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);

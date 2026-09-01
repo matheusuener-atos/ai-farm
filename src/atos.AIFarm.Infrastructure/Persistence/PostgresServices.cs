@@ -661,6 +661,10 @@ public sealed class PostgresChatStore(
             BranchedFromMessageId = branchMessageId,
             Title = ConversationTitle.Normalize(
                 $"{source.Title ?? $"SESSÃO_{source.Id.ToString("N")[..4].ToUpperInvariant()}"} / RAMO"),
+            ModelPreference = source.ModelPreference,
+            SystemInstruction = source.SystemInstruction,
+            Temperature = source.Temperature,
+            MaximumOutputTokens = source.MaximumOutputTokens,
             Status = "Active",
             CreatedAtUtc = now,
             UpdatedAtUtc = now
@@ -682,6 +686,111 @@ public sealed class PostgresChatStore(
             }));
         await db.SaveChangesAsync(cancellationToken);
         return await LoadConversationAsync(db, branch, cancellationToken);
+    }
+
+    public async Task<bool> UpdateConversationAiSettingsAsync(
+        Guid conversationId,
+        ConversationAiSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = settings.Normalize();
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 x.Status == "Active",
+            cancellationToken);
+        if (conversation is null)
+        {
+            return false;
+        }
+
+        ApplySettings(conversation, normalized);
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<IReadOnlyList<ChatPresetSnapshot>> ListChatPresetsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.ChatPresets
+            .Where(x => x.AccountId == identity.AccountId)
+            .OrderBy(x => x.Name)
+            .Select(x => new ChatPresetSnapshot(
+                x.Id,
+                x.Name,
+                new ConversationAiSettings(
+                    x.ModelPreference,
+                    x.SystemInstruction,
+                    x.Temperature,
+                    x.MaximumOutputTokens),
+                x.CreatedAtUtc,
+                x.UpdatedAtUtc))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<ChatPresetSnapshot> SaveChatPresetAsync(
+        string name,
+        ConversationAiSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var normalizedKey = normalizedName.ToUpperInvariant();
+        var normalizedSettings = settings.Normalize();
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var record = await db.ChatPresets.SingleOrDefaultAsync(
+            x => x.AccountId == identity.AccountId && x.NormalizedName == normalizedKey,
+            cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        if (record is null)
+        {
+            record = new ChatPresetRecord
+            {
+                Id = Guid.NewGuid(),
+                AccountId = identity.AccountId,
+                CreatedAtUtc = now
+            };
+            db.ChatPresets.Add(record);
+        }
+
+        record.Name = normalizedName;
+        record.NormalizedName = normalizedKey;
+        record.ModelPreference = normalizedSettings.ModelPreference;
+        record.SystemInstruction = normalizedSettings.SystemInstruction;
+        record.Temperature = normalizedSettings.Temperature;
+        record.MaximumOutputTokens = normalizedSettings.MaximumOutputTokens;
+        record.UpdatedAtUtc = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return new ChatPresetSnapshot(
+            record.Id,
+            record.Name,
+            normalizedSettings,
+            record.CreatedAtUtc,
+            record.UpdatedAtUtc);
+    }
+
+    public async Task<bool> DeleteChatPresetAsync(
+        Guid presetId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var preset = await db.ChatPresets.SingleOrDefaultAsync(
+            x => x.Id == presetId && x.AccountId == identity.AccountId,
+            cancellationToken);
+        if (preset is null)
+        {
+            return false;
+        }
+
+        db.ChatPresets.Remove(preset);
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
@@ -929,7 +1038,37 @@ public sealed class PostgresChatStore(
             messages,
             conversation.Title,
             conversation.ParentConversationId,
-            conversation.BranchedFromMessageId);
+            conversation.BranchedFromMessageId,
+            new ConversationAiSettings(
+                conversation.ModelPreference,
+                conversation.SystemInstruction,
+                conversation.Temperature,
+                conversation.MaximumOutputTokens));
+    }
+
+    private static void ApplySettings(
+        ConversationRecord conversation,
+        ConversationAiSettings settings)
+    {
+        conversation.ModelPreference = settings.ModelPreference;
+        conversation.SystemInstruction = settings.SystemInstruction;
+        conversation.Temperature = settings.Temperature;
+        conversation.MaximumOutputTokens = settings.MaximumOutputTokens;
+    }
+
+    private static string NormalizePresetName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Digite um nome para o preset.", nameof(name));
+        }
+
+        var normalized = string.Join(' ', name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (normalized.Length > 80)
+        {
+            throw new ArgumentException("O nome do preset deve ter no máximo 80 caracteres.", nameof(name));
+        }
+        return normalized;
     }
 
     private static string EscapeLikePattern(string value) =>

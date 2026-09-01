@@ -621,6 +621,44 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task WorkflowFreezesConversationSettingsAndPresetsAreReusable()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var configured = new ConversationAiSettings(
+            "atos-fake-chat-v1",
+            "Responda com uma lista curta.",
+            0.2m,
+            128);
+        Assert.True(await chat.UpdateConversationAiSettingsAsync(conversation.Id, configured));
+        var preset = await chat.SaveChatPresetAsync("Lista curta", configured);
+        var provider = new CapturingProvider();
+        var workflow = NewWorkflow(wallet, provider, chat);
+
+        var plan = await workflow.PrepareAsync(conversation.Id, "planejar");
+        await chat.UpdateConversationAiSettingsAsync(
+            conversation.Id,
+            ConversationAiSettings.Default);
+        await workflow.SendAsync(conversation.Id, plan, "settings:frozen");
+
+        Assert.Equal(configured.Normalize(), plan.Settings);
+        Assert.Equal("Responda com uma lista curta.", provider.LastRequest?.SystemInstruction);
+        Assert.Equal(0.2m, provider.LastRequest?.Temperature);
+        Assert.Equal(128, provider.LastRequest?.MaximumOutputTokens);
+        Assert.Equal(preset, Assert.Single(await chat.ListChatPresetsAsync()));
+
+        var branchPoint = (await chat.GetConversationAsync(conversation.Id))!.Messages
+            .Single(x => x.Role == ChatMessageRole.User);
+        await chat.UpdateConversationAiSettingsAsync(conversation.Id, configured);
+        var branch = await chat.BranchConversationAsync(conversation.Id, branchPoint.Id);
+        Assert.Equal(configured.Normalize(), branch.AiSettings);
+
+        Assert.True(await chat.DeleteChatPresetAsync(preset.Id));
+        Assert.Empty(await chat.ListChatPresetsAsync());
+    }
+
+    [Fact]
     public async Task PromptAndCostLimitsAreEnforcedBeforeReservation()
     {
         var wallet = await FundedWalletAsync();

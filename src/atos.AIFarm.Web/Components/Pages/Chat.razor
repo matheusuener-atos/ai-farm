@@ -9,6 +9,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ChatContextLimits ContextLimits
+@inject IAiModelCatalog ModelCatalog
 @implements IDisposable
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
@@ -166,6 +167,12 @@
                 </button>
             }
             <button type="button"
+                    class="configuration-button"
+                    @onclick="ToggleConfiguration"
+                    disabled="@(_working || _conversationId == Guid.Empty)">
+                @(_showConfiguration ? "[ FECHAR CONFIG ]" : "[ CONFIGURAR ]")
+            </button>
+            <button type="button"
                     class="archive-button"
                     @onclick="ArchiveCurrentConversationAsync"
                     disabled="@(_working || _conversationId == Guid.Empty)">
@@ -179,6 +186,89 @@
             </button>
         </div>
     </div>
+
+    @if (_showConfiguration)
+    {
+        <section class="chat-configuration" aria-label="Configuração desta conversa">
+            <div class="configuration-heading">
+                <div>
+                    <strong>[ PERFIL DE EXECUÇÃO DESTA CONVERSA ]</strong>
+                    <small>Alterações afetam apenas as próximas execuções. Ramos herdam este perfil.</small>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_configurationNotice))
+                {
+                    <span class="configuration-notice">@_configurationNotice</span>
+                }
+            </div>
+            <div class="configuration-grid">
+                <label>
+                    MODELO
+                    <select @bind="_modelPreference" disabled="@_working">
+                        @foreach (var option in ModelOptions)
+                        {
+                            <option value="@option.Value">@option.Label</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    CRIATIVIDADE // @_temperature.ToString("0.00")
+                    <input type="range" min="0" max="2" step="0.1" @bind="_temperature" disabled="@_working" />
+                </label>
+                <label>
+                    LIMITE DE RESPOSTA // TOKENS
+                    <input type="number"
+                           min="@ConversationAiSettings.MinimumOutputTokens"
+                           max="@SelectedModelMaximumOutputTokens"
+                           step="64"
+                           @bind="_maximumOutputTokens"
+                           disabled="@_working" />
+                </label>
+                <label class="system-instruction-field">
+                    INSTRUÇÃO DO SISTEMA
+                    <textarea rows="4"
+                              maxlength="@ConversationAiSettings.MaximumInstructionLength"
+                              placeholder="Ex.: Responda em português, com objetividade e exemplos práticos."
+                              @bind="_systemInstruction"
+                              disabled="@_working"></textarea>
+                    <small>@((_systemInstruction?.Length ?? 0).ToString("N0")) / @ConversationAiSettings.MaximumInstructionLength.ToString("N0") CARACTERES</small>
+                </label>
+            </div>
+            <div class="configuration-actions">
+                <button type="button" @onclick="SaveConversationSettingsAsync" disabled="@_working">
+                    [ SALVAR NESTA CONVERSA ]
+                </button>
+                <button type="button" class="button-secondary" @onclick="ResetSettingsDraft" disabled="@_working">
+                    [ RESTAURAR SALVO ]
+                </button>
+            </div>
+            <div class="preset-panel">
+                <div class="preset-create">
+                    <label>
+                        SALVAR CONFIGURAÇÃO COMO PRESET
+                        <input maxlength="80" placeholder="NOME DO PRESET" @bind="_presetName" disabled="@_working" />
+                    </label>
+                    <button type="button" @onclick="SavePresetAsync" disabled="@_working">[ SALVAR PRESET ]</button>
+                </div>
+                <div class="preset-list">
+                    @if (_presets.Count == 0)
+                    {
+                        <span class="muted">NENHUM PRESET SALVO</span>
+                    }
+                    @foreach (var preset in _presets)
+                    {
+                        <article>
+                            <div>
+                                <strong>@preset.Name</strong>
+                                <small>@PresetDescription(preset)</small>
+                            </div>
+                            <button type="button" @onclick="() => ApplyPresetAsync(preset)" disabled="@_working">[ APLICAR ]</button>
+                            <button type="button" class="danger-button" @onclick="() => DeletePresetAsync(preset.Id)" disabled="@_working">[ REMOVER ]</button>
+                        </article>
+                    }
+                </div>
+            </div>
+        </section>
+    }
 
     @if (_messages.Count == 0)
     {
@@ -333,7 +423,28 @@
                             <dd>@context.EstimatedInputTokens.ToString("N0") / @context.MaximumInputTokens.ToString("N0") TOKENS</dd>
                         </div>
                     }
+                    @if (_pendingPlan.Settings is { } settings)
+                    {
+                        <div>
+                            <dt>CRIATIVIDADE</dt>
+                            <dd>@settings.Temperature.ToString("0.00")</dd>
+                        </div>
+                        <div>
+                            <dt>LIMITE DE RESPOSTA</dt>
+                            <dd>@settings.MaximumOutputTokens.ToString("N0") TOKENS</dd>
+                        </div>
+                    }
                 </dl>
+                @if (_pendingPlan.Settings?.SystemInstruction is { Length: > 0 } instruction)
+                {
+                    <details class="context-details">
+                        <summary>[ VER INSTRUÇÃO DO SISTEMA ]</summary>
+                        <article>
+                            <strong>INSTRUÇÃO</strong>
+                            <pre>@instruction</pre>
+                        </article>
+                    </details>
+                }
                 @if (_pendingPlan.Context is { } plannedContext)
                 {
                     <details class="context-details">
@@ -420,6 +531,7 @@
     private readonly List<ChatMessageSnapshot> _messages = [];
     private readonly List<ConversationSummary> _conversations = [];
     private readonly List<ConversationSummary> _archivedConversations = [];
+    private readonly List<ChatPresetSnapshot> _presets = [];
     private const int ConversationPageSize = 8;
     private Guid _conversationId;
     private string _prompt = string.Empty;
@@ -451,6 +563,19 @@
     private ChatExecutionPlan? _pendingPlan;
     private int _contextMessageLimit;
     private bool _contextMessageLimitInitialized;
+    private bool _showConfiguration;
+    private string _modelPreference = ConversationAiSettings.AutomaticModel;
+    private string? _systemInstruction;
+    private decimal _temperature = ConversationAiSettings.Default.Temperature;
+    private int _maximumOutputTokens = ConversationAiSettings.Default.MaximumOutputTokens;
+    private string _presetName = string.Empty;
+    private string? _configurationNotice;
+    private ConversationAiSettings _savedAiSettings = ConversationAiSettings.Default;
+
+    private IReadOnlyList<AiModelOption> ModelOptions => ModelCatalog.GetOptions();
+    private int SelectedModelMaximumOutputTokens =>
+        ModelOptions.FirstOrDefault(x => x.Value == _modelPreference)?.MaximumOutputTokens
+        ?? ModelOptions.First().MaximumOutputTokens;
 
     private IEnumerable<int> ContextMessageOptions =>
         new[] { 0, 4, 8, 16, 24, 32, ContextLimits.MaximumMessageCount }
@@ -502,6 +627,175 @@
         : Aic.Format(Math.Max(
             0,
             _snapshot.Balance.AvailableMinor - _pendingPlan.MaximumCostMinor));
+
+    private void ToggleConfiguration()
+    {
+        _showConfiguration = !_showConfiguration;
+        _configurationNotice = null;
+        if (_showConfiguration)
+        {
+            ResetSettingsDraft();
+        }
+    }
+
+    private ConversationAiSettings SettingsDraft() => new ConversationAiSettings(
+        _modelPreference,
+        _systemInstruction,
+        _temperature,
+        _maximumOutputTokens).Normalize();
+
+    private void LoadSettings(ConversationAiSettings settings)
+    {
+        _savedAiSettings = settings.Normalize();
+        ResetSettingsDraft();
+    }
+
+    private void ResetSettingsDraft()
+    {
+        _modelPreference = _savedAiSettings.ModelPreference;
+        _systemInstruction = _savedAiSettings.SystemInstruction;
+        _temperature = _savedAiSettings.Temperature;
+        _maximumOutputTokens = _savedAiSettings.MaximumOutputTokens;
+        _configurationNotice = null;
+    }
+
+    private void ValidateAvailableSettings(ConversationAiSettings settings)
+    {
+        var option = ModelOptions.FirstOrDefault(x => x.Value == settings.ModelPreference)
+            ?? throw new InvalidOperationException("O modelo escolhido não está disponível neste ambiente.");
+        if (settings.MaximumOutputTokens > option.MaximumOutputTokens)
+        {
+            throw new InvalidOperationException(
+                $"Este modelo aceita no máximo {option.MaximumOutputTokens:N0} tokens nesta instalação.");
+        }
+    }
+
+    private async Task SaveConversationSettingsAsync()
+    {
+        if (_working || _conversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var settings = SettingsDraft();
+            ValidateAvailableSettings(settings);
+            if (!await ChatStore.UpdateConversationAiSettingsAsync(_conversationId, settings))
+            {
+                throw new InvalidOperationException("A conversa não está disponível para configuração.");
+            }
+            _savedAiSettings = settings;
+            _pendingPlan = null;
+            _configurationNotice = "[ CONFIGURAÇÃO SALVA ]";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task SavePresetAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var settings = SettingsDraft();
+            ValidateAvailableSettings(settings);
+            await ChatStore.SaveChatPresetAsync(_presetName, settings);
+            _presetName = string.Empty;
+            await RefreshPresetsAsync();
+            _configurationNotice = "[ PRESET SALVO ]";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ApplyPresetAsync(ChatPresetSnapshot preset)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var settings = preset.Settings.Normalize();
+            ValidateAvailableSettings(settings);
+            if (!await ChatStore.UpdateConversationAiSettingsAsync(_conversationId, settings))
+            {
+                throw new InvalidOperationException("A conversa não está disponível para configuração.");
+            }
+            LoadSettings(settings);
+            _pendingPlan = null;
+            _configurationNotice = $"[ PRESET {preset.Name} APLICADO ]";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task DeletePresetAsync(Guid presetId)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.DeleteChatPresetAsync(presetId))
+            {
+                throw new InvalidOperationException("O preset não foi encontrado.");
+            }
+            await RefreshPresetsAsync();
+            _configurationNotice = "[ PRESET REMOVIDO ]";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task RefreshPresetsAsync()
+    {
+        _presets.Clear();
+        _presets.AddRange(await ChatStore.ListChatPresetsAsync());
+    }
+
+    private static string PresetDescription(ChatPresetSnapshot preset) =>
+        $"{preset.Settings.ModelPreference} // T {preset.Settings.Temperature:0.00} // {preset.Settings.MaximumOutputTokens:N0} TOKENS";
 
     private async Task PrepareAsync()
     {
@@ -779,6 +1073,8 @@
         _conversationId = conversation.Id;
         _currentConversationTitle = conversation.Title;
         _currentConversationParentId = conversation.ParentConversationId;
+        LoadSettings(conversation.AiSettings ?? ConversationAiSettings.Default);
+        await RefreshPresetsAsync();
         _renaming = false;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);

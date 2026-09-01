@@ -143,6 +143,48 @@ public sealed class OpenAiResponsesProviderTests
     }
 
     [Fact]
+    public async Task ResponsesApiReceivesConversationExecutionProfile()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "status": "completed",
+                  "output_text": "ok",
+                  "usage": { "input_tokens": 20, "output_tokens": 5 }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("teste", CancellationToken.None);
+
+        await provider.ExecuteAsync(
+            new AiProviderRequest(
+                "teste",
+                route,
+                SystemInstruction: "Responda em português.",
+                Temperature: 0.3m,
+                MaximumOutputTokens: 128),
+            CancellationToken.None);
+
+        using var body = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal("Responda em português.", body.RootElement.GetProperty("instructions").GetString());
+        Assert.Equal(0.3m, body.RootElement.GetProperty("temperature").GetDecimal());
+        Assert.Equal(128, body.RootElement.GetProperty("max_output_tokens").GetInt32());
+
+        var estimate = await catalog.EstimateAsync(
+            new AiProviderRequest("teste", route, MaximumOutputTokens: 128),
+            CancellationToken.None);
+        Assert.True(estimate.MaximumCostMinor >= catalog.Get(route).Cost(5, 128));
+        Assert.True(estimate.MaximumCostMinor < catalog.Get(route).Cost(5, 512));
+    }
+
+    [Fact]
     public async Task ProviderRejectsContextAboveModelWindowBeforeHttpCall()
     {
         var options = Options();
