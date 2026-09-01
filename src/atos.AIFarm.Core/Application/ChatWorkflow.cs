@@ -11,7 +11,8 @@ public sealed class ChatWorkflow(
     ChatExecutionLimits? executionLimits = null,
     TimeProvider? timeProvider = null,
     IChatContextPlanner? contextPlanner = null,
-    IAiModelCatalog? modelCatalog = null)
+    IAiModelCatalog? modelCatalog = null,
+    IChatAttachmentService? attachmentService = null)
 {
     private readonly ChatExecutionLimits _executionLimits =
         ValidateLimits(executionLimits ?? ChatExecutionLimits.Default);
@@ -55,6 +56,8 @@ public sealed class ChatWorkflow(
             null,
             null,
             ConversationAiSettings.Default,
+            [],
+            AiDataClassification.Standard,
             cancellationToken);
     }
 
@@ -63,6 +66,8 @@ public sealed class ChatWorkflow(
         string prompt,
         int? maximumContextMessages = null,
         Guid? beforeMessageId = null,
+        IReadOnlyCollection<Guid>? attachmentIds = null,
+        AiDataClassification dataClassification = AiDataClassification.Standard,
         CancellationToken cancellationToken = default)
     {
         var conversation = await chat.GetConversationAsync(
@@ -83,11 +88,26 @@ public sealed class ChatWorkflow(
             messages = conversation.Messages.Take(index).ToArray();
         }
 
+        IReadOnlyList<AiAttachmentInput> attachments = [];
+        if (attachmentIds is { Count: > 0 })
+        {
+            if (attachmentService is null || !attachmentService.IsAvailable)
+            {
+                throw new InvalidOperationException("O armazenamento privado de anexos não está configurado neste ambiente.");
+            }
+            attachments = await attachmentService.LoadDraftsAsync(
+                conversationId,
+                attachmentIds,
+                cancellationToken);
+        }
+
         return await PrepareCoreAsync(
             prompt,
             messages,
             maximumContextMessages,
             conversation.AiSettings ?? ConversationAiSettings.Default,
+            attachments,
+            dataClassification,
             cancellationToken);
     }
 
@@ -96,6 +116,8 @@ public sealed class ChatWorkflow(
         IReadOnlyList<ChatMessageSnapshot>? messages,
         int? maximumContextMessages,
         ConversationAiSettings settings,
+        IReadOnlyList<AiAttachmentInput> attachments,
+        AiDataClassification dataClassification,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -104,6 +126,10 @@ public sealed class ChatWorkflow(
         }
 
         var normalizedPrompt = prompt.Trim();
+        if (!Enum.IsDefined(dataClassification))
+        {
+            throw new InvalidOperationException("A classificação de dados é inválida.");
+        }
         if (normalizedPrompt.Length > _executionLimits.MaximumPromptCharacters)
         {
             throw new InvalidOperationException(
@@ -131,6 +157,12 @@ public sealed class ChatWorkflow(
             normalizedPrompt,
             normalizedSettings.ModelPreference,
             cancellationToken);
+        if (dataClassification == AiDataClassification.Private &&
+            !string.Equals(route.Provider, "atos Fake Provider", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Dados classificados como PRIVADO não podem sair deste ambiente. Use CONFIÁVEL somente se o envio ao provedor indicado no preflight estiver autorizado.");
+        }
         var context = _contextPlanner.Plan(
             messages ?? [],
             normalizedPrompt,
@@ -143,7 +175,9 @@ public sealed class ChatWorkflow(
             context.EstimatedInputTokens,
             normalizedSettings.SystemInstruction,
             normalizedSettings.Temperature,
-            normalizedSettings.MaximumOutputTokens);
+            normalizedSettings.MaximumOutputTokens,
+            attachments,
+            dataClassification);
         var estimate = pricing is IAiRequestPriceEstimator requestPricing
             ? await requestPricing.EstimateAsync(request, cancellationToken)
             : await pricing.EstimateAsync(normalizedPrompt, route, cancellationToken);
@@ -162,7 +196,9 @@ public sealed class ChatWorkflow(
             route,
             estimate.MaximumCostMinor,
             context,
-            normalizedSettings);
+            normalizedSettings,
+            attachments,
+            dataClassification);
     }
 
     public async Task<ChatExecutionResult> SendAsync(
@@ -238,7 +274,9 @@ public sealed class ChatWorkflow(
                 plan.Context?.EstimatedInputTokens,
                 plan.Settings?.SystemInstruction,
                 plan.Settings?.Temperature,
-                plan.Settings?.MaximumOutputTokens);
+                plan.Settings?.MaximumOutputTokens,
+                plan.Attachments,
+                plan.DataClassification);
             AiProviderResult providerResult;
             if (onDelta is not null && provider is IAiStreamingProvider streamingProvider)
             {
@@ -274,7 +312,9 @@ public sealed class ChatWorkflow(
                 providerResult.InputUnits,
                 providerResult.OutputUnits,
                 startedAtUtc,
-                finishedAtUtc);
+                finishedAtUtc,
+                plan.Attachments?.Select(x => x.Id).ToArray(),
+                plan.DataClassification);
             await chat.SaveCompletedAsync(
                 plan.Prompt,
                 idempotencyKey,
@@ -298,7 +338,8 @@ public sealed class ChatWorkflow(
                     plan.MaximumCostMinor,
                     FailureCode(exception),
                     startedAtUtc,
-                    _timeProvider.GetUtcNow()),
+                    _timeProvider.GetUtcNow(),
+                    plan.DataClassification),
                 CancellationToken.None);
             throw;
         }

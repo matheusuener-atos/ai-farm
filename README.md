@@ -50,6 +50,16 @@ neon checkout development --project-id crimson-shadow-20267299
 
 - `DATABASE_URL`: conexão com pool usada pelo runtime.
 - `DATABASE_URL_UNPOOLED`: conexão direta usada exclusivamente por migrations.
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3` e
+  `AWS_REGION`: credencial branch-scoped do bucket privado `chat-attachments`.
+
+O arquivo versionado `neon.ts` declara o bucket privado. Para conferir e
+aplicar a infraestrutura somente na branch selecionada:
+
+```powershell
+neon config plan --branch development
+neon config apply --branch development
+```
 
 Os arquivos `.env.local` e `.neon` são locais e ignorados pelo Git. Para
 aplicar migrations manualmente:
@@ -68,6 +78,11 @@ informe no Dashboard do Render as variáveis secretas da branch Neon
 
 - `DATABASE_URL`: URL pooled de `production`;
 - `DATABASE_URL_UNPOOLED`: URL direta de `production`, usada nas migrations.
+
+Anexos exigem também as quatro variáveis `AWS_*` declaradas em `render.yaml`.
+Antes de preenchê-las, o bucket deve ser criado explicitamente na branch Neon
+`production`; até lá, o Chat permanece funcional e mostra anexos como
+indisponíveis. A branch `production` não é alterada durante o desenvolvimento.
 
 Não copie `.env.local` para o Render: ele pertence exclusivamente à branch
 Neon `development`. O plano gratuito está declarado para evitar cobrança
@@ -122,6 +137,18 @@ mantém a escolha da melhor rota disponível. O limite de saída participa da
 estimativa e da reserva antes da chamada ao Provider. Presets são privados da
 conta, podem ser atualizados pelo mesmo nome, aplicados a outras conversas e
 removidos. Uma ramificação herda o perfil da conversa de origem.
+
+Anexos são enviados primeiro como rascunhos para o bucket privado da branch.
+O PostgreSQL guarda apenas metadados, hash SHA-256 e a chave do objeto. O
+preflight relê o objeto, verifica tamanho/hash e congela os bytes efetivamente
+enviados; depois do sucesso, os metadados são vinculados à mensagem. São
+aceitos até 3 arquivos, 5 MB por arquivo e 15 MB no total, com validação de
+extensão, MIME e assinatura/conteúdo real. Downloads passam por endpoint
+autenticado e isolamento por conta.
+
+A classificação é registrada em cada execução. `PRIVADO` nunca pode usar uma
+rota externa; `CONFIÁVEL` representa autorização explícita para o Provider
+mostrado no preflight; `PADRÃO` é destinado a conteúdo não sensível.
 
 Cancelamentos solicitados pelo usuário não contam como falha do Provider. Uma
 estimativa acima do limite é rejeitada antes de reservar saldo, e timeout ou
@@ -187,6 +214,11 @@ Implementado:
 - presets reutilizáveis e isolados por conta;
 - perfil de execução congelado no preflight e herdado por ramificações;
 - parâmetros `instructions`, `temperature` e `max_output_tokens` enviados à Responses API.
+- anexos privados branch-scoped no Neon Object Storage, com metadados no PostgreSQL;
+- verificação de integridade SHA-256, tipo real e limites antes do preflight;
+- payload multimodal oficial (`input_image`, `input_file` e `input_text`);
+- classificação auditável e bloqueio de dados privados em Providers externos;
+- download autenticado e preservação das referências em ramificações.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

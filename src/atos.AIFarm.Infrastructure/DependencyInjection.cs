@@ -1,6 +1,7 @@
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure.Development;
+using atos.AIFarm.Infrastructure.Attachments;
 using atos.AIFarm.Infrastructure.Persistence;
 using atos.AIFarm.Infrastructure.Providers.OpenAI;
 using Microsoft.EntityFrameworkCore;
@@ -32,6 +33,9 @@ public static class DependencyInjection
         services.AddScoped<IReservationExpirationService,
             CurrentWalletReservationExpirationService>();
         services.AddSingleton<InMemoryChatStore>();
+        services.AddSingleton<InMemoryChatAttachmentService>();
+        services.AddSingleton<IChatAttachmentService>(provider =>
+            provider.GetRequiredService<InMemoryChatAttachmentService>());
         services.AddSingleton<IChatStore>(provider =>
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageQuery>(provider =>
@@ -72,7 +76,8 @@ public static class DependencyInjection
     public static IServiceCollection AddAIFarmPostgres(
         this IServiceCollection services,
         string connectionString,
-        AIFarmIdentity? identity = null)
+        AIFarmIdentity? identity = null,
+        NeonObjectStorageOptions? objectStorage = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
@@ -89,12 +94,24 @@ public static class DependencyInjection
         services.RemoveAll<IAiUsageQuery>();
         services.RemoveAll<IReservationExpirationService>();
         services.RemoveAll<IAIFarmReadinessProbe>();
+        services.RemoveAll<IChatAttachmentService>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
         services.AddSingleton<IReservationExpirationService,
             PostgresReservationExpirationService>();
         services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();
+        if (objectStorage is null)
+        {
+            services.AddSingleton<IChatAttachmentService, UnavailableChatAttachmentService>();
+        }
+        else
+        {
+            objectStorage.Validate();
+            services.AddSingleton(objectStorage);
+            services.AddSingleton<IChatObjectStorage, NeonS3ObjectStorage>();
+            services.AddScoped<IChatAttachmentService, PostgresChatAttachmentService>();
+        }
         return services;
     }
 

@@ -325,6 +325,44 @@ public sealed class OpenAiResponsesProviderTests
         Assert.Equal("req_diagnostic", error.DiagnosticId);
     }
 
+    [Fact]
+    public async Task ResponsesApiBuildsOfficialMultimodalContentParts()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"status":"completed","output_text":"ok","usage":{"input_tokens":20,"output_tokens":2}}""",
+                Encoding.UTF8,
+                "application/json")
+        });
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("analisar", CancellationToken.None);
+        var image = new AiAttachmentInput(Guid.NewGuid(), Guid.NewGuid(), "foto.png", "image/png", 3, new string('a', 64), [1, 2, 3], 100, true);
+        var file = new AiAttachmentInput(Guid.NewGuid(), image.ConversationId, "notas.txt", "text/plain", 4, new string('b', 64), Encoding.UTF8.GetBytes("atos"), 260, false);
+
+        await provider.ExecuteAsync(
+            new AiProviderRequest(
+                "descreva os anexos",
+                route,
+                Attachments: [image, file],
+                DataClassification: AiDataClassification.Private),
+            CancellationToken.None);
+
+        using var body = JsonDocument.Parse(handler.RequestBody!);
+        var current = body.RootElement.GetProperty("input")[0];
+        Assert.Equal("user", current.GetProperty("role").GetString());
+        var content = current.GetProperty("content");
+        Assert.Equal("input_image", content[0].GetProperty("type").GetString());
+        Assert.StartsWith("data:image/png;base64,", content[0].GetProperty("image_url").GetString());
+        Assert.Equal("input_file", content[1].GetProperty("type").GetString());
+        Assert.Equal("notas.txt", content[1].GetProperty("filename").GetString());
+        Assert.StartsWith("data:text/plain;base64,", content[1].GetProperty("file_data").GetString());
+        Assert.Equal("input_text", content[2].GetProperty("type").GetString());
+        Assert.Equal("descreva os anexos", content[2].GetProperty("text").GetString());
+    }
+
     private static OpenAiProviderOptions Options() => new(
         "test-api-key",
         "gpt-5.4-mini-2026-03-17",

@@ -114,6 +114,7 @@ public sealed class OpenAiPriceCatalog :
             (request.SystemInstruction is null
                 ? 0
                 : Encoding.UTF8.GetByteCount(request.SystemInstruction)) +
+            (request.Attachments?.Sum(x => x.EstimatedInputTokens) ?? 0) +
             entry.InputEstimateOverheadUnits);
         var maximumOutputUnits = EffectiveMaximumOutputUnits(request, entry);
         return Task.FromResult(new PriceEstimate(entry.Cost(
@@ -442,21 +443,50 @@ public sealed class OpenAiResponsesProvider :
 
     private static object BuildInput(AiProviderRequest request)
     {
-        if (request.Context is not { Count: > 0 })
+        if (request.Context is not { Count: > 0 } && request.Attachments is not { Count: > 0 })
         {
             return request.Prompt;
         }
 
-        var input = request.Context
+        var input = (request.Context ?? [])
             .Select(message => new ResponseInputMessage(
                 message.Role == ChatMessageRole.User ? "user" : "assistant",
                 message.Content))
             .ToList();
-        input.Add(new ResponseInputMessage("user", request.Prompt));
+        if (request.Attachments is not { Count: > 0 })
+        {
+            input.Add(new ResponseInputMessage("user", request.Prompt));
+            return input;
+        }
+
+        var currentContent = new List<Dictionary<string, object>>();
+        foreach (var attachment in request.Attachments)
+        {
+            var dataUrl = $"data:{attachment.ContentType};base64,{Convert.ToBase64String(attachment.Content)}";
+            currentContent.Add(attachment.IsImage
+                ? new Dictionary<string, object>
+                {
+                    ["type"] = "input_image",
+                    ["image_url"] = dataUrl,
+                    ["detail"] = "auto"
+                }
+                : new Dictionary<string, object>
+                {
+                    ["type"] = "input_file",
+                    ["filename"] = attachment.FileName,
+                    ["file_data"] = dataUrl
+                });
+        }
+        currentContent.Add(new Dictionary<string, object>
+        {
+            ["type"] = "input_text",
+            ["text"] = request.Prompt
+        });
+        input.Add(new ResponseInputMessage("user", currentContent));
         return input;
     }
 
-    private sealed record ResponseInputMessage(string Role, string Content);
+    private sealed record ResponseInputMessage(string Role, object Content);
 
     private Dictionary<string, object> BuildPayload(
         AiProviderRequest request,
@@ -512,7 +542,9 @@ public sealed class OpenAiResponsesProvider :
         var messageOverhead = checked(((request.Context?.Count ?? 0) + 1) * 8);
         var maximumOutputTokens = request.MaximumOutputTokens ?? catalogEntry.MaximumOutputUnits;
         var conservativeUpperBound = checked(
-            inputBytes + messageOverhead + maximumOutputTokens);
+            inputBytes +
+            (request.Attachments?.Sum(x => x.EstimatedInputTokens) ?? 0) +
+            messageOverhead + maximumOutputTokens);
         if (conservativeUpperBound > OpenAiProviderOptions.ModelContextWindowTokens)
         {
             throw new InvalidOperationException(

@@ -399,6 +399,70 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.ToTable("balance_reservations", "aifarm");
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ChatAttachmentRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(180)
+                        .HasColumnType("character varying(180)");
+
+                    b.Property<Guid?>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(700)
+                        .HasColumnType("character varying(700)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("AccountId", "ConversationId", "Status");
+
+                    b.ToTable("chat_attachments", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_chat_attachments_sha256", "length(\"Sha256\") = 64");
+
+                            t.HasCheckConstraint("CK_chat_attachments_size", "\"SizeBytes\" > 0");
+
+                            t.HasCheckConstraint("CK_chat_attachments_status", "\"Status\" IN ('Draft', 'Attached')");
+                        });
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ChatPresetRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -761,6 +825,26 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("WalletId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ChatAttachmentRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.ConversationRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.MessageRecord", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.ChatPresetRecord", b =>

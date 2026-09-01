@@ -670,7 +670,7 @@ public sealed class PostgresChatStore(
             UpdatedAtUtc = now
         };
         db.Conversations.Add(branch);
-        db.Messages.AddRange(sourceMessages
+        var copiedMessages = sourceMessages
             .Take(branchIndex)
             .Select(message => new MessageRecord
             {
@@ -683,7 +683,29 @@ public sealed class PostgresChatStore(
                 Status = message.Status,
                 IdempotencyKey = $"branch:{branch.Id:N}:{message.Id:N}",
                 CreatedAtUtc = message.CreatedAtUtc
-            }));
+            }).ToArray();
+        db.Messages.AddRange(copiedMessages);
+        var copiedBySourceId = sourceMessages.Take(branchIndex)
+            .Zip(copiedMessages)
+            .ToDictionary(x => x.First.Id, x => x.Second.Id);
+        var sourceMessageIds = copiedBySourceId.Keys.ToArray();
+        var sourceAttachments = await db.ChatAttachments
+            .Where(x => x.MessageId.HasValue && sourceMessageIds.Contains(x.MessageId.Value) && x.Status == "Attached")
+            .ToArrayAsync(cancellationToken);
+        db.ChatAttachments.AddRange(sourceAttachments.Select(attachment => new ChatAttachmentRecord
+        {
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            ConversationId = branch.Id,
+            MessageId = copiedBySourceId[attachment.MessageId!.Value],
+            StorageKey = attachment.StorageKey,
+            FileName = attachment.FileName,
+            ContentType = attachment.ContentType,
+            SizeBytes = attachment.SizeBytes,
+            Sha256 = attachment.Sha256,
+            Status = "Attached",
+            CreatedAtUtc = attachment.CreatedAtUtc
+        }));
         await db.SaveChangesAsync(cancellationToken);
         return await LoadConversationAsync(db, branch, cancellationToken);
     }
@@ -852,7 +874,9 @@ public sealed class PostgresChatStore(
             stored.execution.InputUnits,
             stored.execution.OutputUnits,
             stored.execution.StartedAtUtc,
-            stored.execution.FinishedAtUtc);
+            stored.execution.FinishedAtUtc,
+            null,
+            Enum.Parse<AiDataClassification>(stored.request.DataClassification));
     }
 
     public async Task SaveCompletedAsync(
@@ -885,7 +909,7 @@ public sealed class PostgresChatStore(
             ConversationId = result.ConversationId,
             OperationId = result.OperationId,
             Modality = "Chat",
-            DataClassification = "Standard",
+            DataClassification = result.DataClassification.ToString(),
             RequestedRoute = $"{result.Route.Provider}/{result.Route.Model}",
             MaxCostMinor = result.EstimatedCostMinor,
             Status = "Completed",
@@ -908,10 +932,11 @@ public sealed class PostgresChatStore(
             StartedAtUtc = result.StartedAtUtc ?? now,
             FinishedAtUtc = result.FinishedAtUtc ?? now
         });
+        var userMessageId = Guid.NewGuid();
         db.Messages.AddRange(
             new MessageRecord
             {
-                Id = Guid.NewGuid(),
+                Id = userMessageId,
                 ConversationId = result.ConversationId,
                 OperationId = result.OperationId,
                 Role = nameof(ChatMessageRole.User),
@@ -932,6 +957,21 @@ public sealed class PostgresChatStore(
                 IdempotencyKey = $"{idempotencyKey}:assistant",
                 CreatedAtUtc = now.AddMilliseconds(1)
             });
+        if (result.AttachmentIds is { Count: > 0 })
+        {
+            var ids = result.AttachmentIds.Distinct().ToArray();
+            var attachments = await db.ChatAttachments
+                .Where(x => ids.Contains(x.Id) && x.AccountId == identity.AccountId && x.Status == "Draft")
+                .ToArrayAsync(cancellationToken);
+            if (attachments.Length != ids.Length)
+                throw new InvalidOperationException("Um anexo confirmado não está mais disponível.");
+            foreach (var attachment in attachments)
+            {
+                attachment.ConversationId = result.ConversationId;
+                attachment.MessageId = userMessageId;
+                attachment.Status = "Attached";
+            }
+        }
         conversation.Title ??= ConversationTitle.FromPrompt(prompt);
         conversation.UpdatedAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
@@ -964,7 +1004,7 @@ public sealed class PostgresChatStore(
             ConversationId = failure.ConversationId,
             OperationId = failure.OperationId,
             Modality = "Chat",
-            DataClassification = "Standard",
+            DataClassification = failure.DataClassification.ToString(),
             RequestedRoute = $"{failure.Route.Provider}/{failure.Route.Model}",
             MaxCostMinor = failure.EstimatedCostMinor,
             Status = failure.FailureCode,
@@ -1010,6 +1050,17 @@ public sealed class PostgresChatStore(
         var executions = await db.AiExecutions
             .Where(x => executionIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
+        var messageIds = records.Select(x => x.Id).ToArray();
+        var attachmentsByMessage = (await db.ChatAttachments
+                .Where(x => x.MessageId.HasValue && messageIds.Contains(x.MessageId.Value) && x.Status == "Attached")
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToArrayAsync(cancellationToken))
+            .GroupBy(x => x.MessageId!.Value)
+            .ToDictionary(
+                x => x.Key,
+                x => (IReadOnlyList<ChatAttachmentSnapshot>)x.Select(a => new ChatAttachmentSnapshot(
+                    a.Id, a.ConversationId, a.FileName, a.ContentType, a.SizeBytes,
+                    a.Sha256, ChatAttachmentStatus.Attached, a.CreatedAtUtc)).ToArray());
 
         var messages = records.Select(record =>
         {
@@ -1028,7 +1079,8 @@ public sealed class PostgresChatStore(
                 record.CreatedAtUtc,
                 route,
                 execution?.EstimatedCostMinor,
-                execution?.ActualCostMinor);
+                execution?.ActualCostMinor,
+                attachmentsByMessage.GetValueOrDefault(record.Id));
         }).ToArray();
 
         return new ConversationSnapshot(

@@ -171,6 +171,12 @@ h1 span { color: var(--purple); }
 .context-selector select { border: 1px solid #494946; color: var(--white); background: #090909; padding: .45rem; font: inherit; font-size: .68rem; }
 .composer textarea { width: 100%; resize: vertical; border: 0; color: var(--white); background: #090909; padding: 1rem; caret-color: var(--purple); }
 .composer textarea:focus { outline: 1px solid var(--purple); }
+.attachment-composer { display: grid; grid-template-columns: minmax(10rem, .35fr) minmax(18rem, 1fr); gap: .8rem; align-items: end; margin-bottom: .65rem; }
+.attachment-composer select, .attachment-composer input[type="file"] { width: 100%; border: 1px solid #494946; background: #090909; color: var(--white); padding: .55rem; }
+.attachment-drafts, .message-attachments { display: flex; flex-wrap: wrap; gap: .5rem; margin: .45rem 0 .75rem; }
+.classification-note { display: block; color: var(--muted); margin: -.25rem 0 .7rem; }
+.attachment-drafts span, .message-attachments a { border: 1px solid #494946; padding: .45rem .6rem; color: var(--muted); font-size: .72rem; text-decoration: none; }
+.message-attachments a:hover { border-color: var(--purple); color: var(--white); }
 .execution-plan { display: grid; gap: 1rem; margin-top: .8rem; padding: 1rem; border: 1px solid var(--amber); background: var(--amber-deep); }
 .execution-plan-header { display: flex; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: .72rem; }
 .execution-plan dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 0; }
@@ -243,6 +249,7 @@ code { color: var(--white); }
     main { padding-top: 3rem; }
     .balance-panel, .composer-footer { align-items: flex-start; flex-direction: column; }
     .composer-heading { align-items: stretch; flex-direction: column; }
+    .attachment-composer { grid-template-columns: 1fr; }
     .action-grid, .wallet-grid, .operations-grid, .operations-filters { grid-template-columns: 1fr; }
     .chat-workspace { grid-template-columns: 1fr; }
     .conversation-list { max-height: 230px; }

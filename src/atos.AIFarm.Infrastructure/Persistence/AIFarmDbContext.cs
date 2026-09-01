@@ -15,6 +15,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<ConversationRecord> Conversations => Set<ConversationRecord>();
     public DbSet<ChatPresetRecord> ChatPresets => Set<ChatPresetRecord>();
     public DbSet<MessageRecord> Messages => Set<MessageRecord>();
+    public DbSet<ChatAttachmentRecord> ChatAttachments => Set<ChatAttachmentRecord>();
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
 
@@ -207,6 +208,27 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 .HasForeignKey(x => x.AiExecutionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<ChatAttachmentRecord>(entity =>
+        {
+            entity.ToTable("chat_attachments", table =>
+            {
+                table.HasCheckConstraint("CK_chat_attachments_size", "\"SizeBytes\" > 0");
+                table.HasCheckConstraint("CK_chat_attachments_sha256", "length(\"Sha256\") = 64");
+                table.HasCheckConstraint("CK_chat_attachments_status", "\"Status\" IN ('Draft', 'Attached')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.ConversationId, x.Status });
+            entity.HasIndex(x => x.MessageId);
+            entity.Property(x => x.StorageKey).HasMaxLength(700);
+            entity.Property(x => x.FileName).HasMaxLength(180);
+            entity.Property(x => x.ContentType).HasMaxLength(120);
+            entity.Property(x => x.Sha256).HasMaxLength(64);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ConversationRecord>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MessageRecord>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
 public sealed class AccountRecord
@@ -316,6 +338,21 @@ public sealed class MessageRecord
     public string Content { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string IdempotencyKey { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class ChatAttachmentRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid ConversationId { get; set; }
+    public Guid? MessageId { get; set; }
+    public string StorageKey { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string Sha256 { get; set; } = string.Empty;
+    public string Status { get; set; } = "Draft";
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 

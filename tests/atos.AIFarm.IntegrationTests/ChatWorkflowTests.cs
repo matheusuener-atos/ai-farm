@@ -2,6 +2,7 @@ using System.Text;
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure.Development;
+using atos.AIFarm.Infrastructure.Attachments;
 
 namespace atos.AIFarm.IntegrationTests;
 
@@ -747,6 +748,80 @@ public sealed class ChatWorkflowTests
             transaction => transaction.Type == LedgerTransactionType.Capture);
     }
 
+    [Fact]
+    public async Task AttachmentsAndClassificationAreFrozenSentAndPersisted()
+    {
+        var attachments = new InMemoryChatAttachmentService();
+        var chat = new InMemoryChatStore(attachments);
+        var conversation = await chat.CreateConversationAsync();
+        var bytes = Encoding.UTF8.GetBytes("conteúdo auditável");
+        await using var stream = new MemoryStream(bytes);
+        var draft = await attachments.UploadDraftAsync(
+            conversation.Id, "evidence.txt", "text/plain", stream, bytes.Length);
+        var provider = new CapturingProvider();
+        var workflow = new ChatWorkflow(
+            await FundedWalletAsync(),
+            new FixedPriceEstimator(),
+            new BestAvailableRouteSelector(),
+            provider,
+            chat,
+            attachmentService: attachments);
+
+        var plan = await workflow.PrepareAsync(
+            conversation.Id,
+            "analise o arquivo",
+            attachmentIds: [draft.Id],
+            dataClassification: AiDataClassification.Private);
+        bytes[0] = 0;
+
+        var result = await workflow.SendAsync(conversation.Id, plan, "attachment-request");
+        var saved = await chat.GetConversationAsync(conversation.Id);
+
+        Assert.Equal(AiDataClassification.Private, plan.DataClassification);
+        Assert.Equal(AiDataClassification.Private, provider.LastRequest!.DataClassification);
+        Assert.Equal("conteúdo auditável", Encoding.UTF8.GetString(provider.LastRequest.Attachments![0].Content));
+        Assert.Equal([draft.Id], result.AttachmentIds);
+        var savedAttachment = Assert.Single(saved!.Messages[0].Attachments!);
+        Assert.Equal(ChatAttachmentStatus.Attached, savedAttachment.Status);
+        Assert.Empty(await attachments.ListDraftsAsync(conversation.Id));
+    }
+
+    [Fact]
+    public async Task AttachmentPolicyRejectsMismatchedMimeAndExtension()
+    {
+        var attachments = new InMemoryChatAttachmentService();
+        await using var stream = new MemoryStream([1, 2, 3]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            attachments.UploadDraftAsync(
+                Guid.NewGuid(), "payload.pdf", "image/png", stream, stream.Length));
+
+        Assert.Contains("incompatível", exception.Message);
+    }
+
+    [Fact]
+    public async Task PrivateClassificationCannotUseExternalProvider()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var provider = new CountingProvider();
+        var workflow = new ChatWorkflow(
+            await FundedWalletAsync(),
+            new FixedPriceEstimator(),
+            new ExternalRouteSelector(),
+            provider,
+            chat);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.PrepareAsync(
+                conversation.Id,
+                "conteúdo privado",
+                dataClassification: AiDataClassification.Private));
+
+        Assert.Contains("não podem sair", exception.Message);
+        Assert.Equal(0, provider.CallCount);
+    }
+
     private static ChatWorkflow NewWorkflow(
         IWalletService wallet,
         IAiProvider provider,
@@ -795,6 +870,12 @@ public sealed class ChatWorkflowTests
             CallCount++;
             return Task.FromResult(new AiProviderResult("ok", 1, 1, Aic.FromAic(1)));
         }
+    }
+
+    private sealed class ExternalRouteSelector : IAiRouteSelector
+    {
+        public Task<AiRoute> SelectAsync(string prompt, CancellationToken cancellationToken) =>
+            Task.FromResult(new AiRoute("OpenAI", "external", "v1"));
     }
 
     private sealed class CapturingProvider : IAiProvider

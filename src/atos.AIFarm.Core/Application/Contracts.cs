@@ -19,6 +19,42 @@ public interface IWalletService
     Task<int> ExpireReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken = default);
 }
 public sealed record AiRoute(string Provider, string Model, string PriceCatalogVersion);
+public enum AiDataClassification { Standard, Trusted, Private }
+public enum ChatAttachmentStatus { Draft, Attached }
+
+public sealed record ChatAttachmentSnapshot(
+    Guid Id,
+    Guid ConversationId,
+    string FileName,
+    string ContentType,
+    long SizeBytes,
+    string Sha256,
+    ChatAttachmentStatus Status,
+    DateTimeOffset CreatedAtUtc);
+
+public sealed record AiAttachmentInput(
+    Guid Id,
+    Guid ConversationId,
+    string FileName,
+    string ContentType,
+    long SizeBytes,
+    string Sha256,
+    byte[] Content,
+    int EstimatedInputTokens,
+    bool IsImage);
+
+public sealed record ChatAttachmentDownload(
+    string FileName,
+    string ContentType,
+    byte[] Content);
+
+public sealed record ChatAttachmentLimits(
+    int MaximumCount,
+    long MaximumFileBytes,
+    long MaximumTotalBytes)
+{
+    public static ChatAttachmentLimits Default { get; } = new(3, 5 * 1024 * 1024, 15 * 1024 * 1024);
+}
 public sealed record PriceEstimate(long MaximumCostMinor);
 public sealed record AiContextMessage(
     ChatMessageRole Role,
@@ -38,7 +74,9 @@ public sealed record ChatExecutionPlan(
     AiRoute Route,
     long MaximumCostMinor,
     ChatContextPlan? Context = null,
-    ConversationAiSettings? Settings = null);
+    ConversationAiSettings? Settings = null,
+    IReadOnlyList<AiAttachmentInput>? Attachments = null,
+    AiDataClassification DataClassification = AiDataClassification.Standard);
 public sealed record AiProviderRequest(
     string Prompt,
     AiRoute Route,
@@ -46,7 +84,9 @@ public sealed record AiProviderRequest(
     int? EstimatedInputTokens = null,
     string? SystemInstruction = null,
     decimal? Temperature = null,
-    int? MaximumOutputTokens = null);
+    int? MaximumOutputTokens = null,
+    IReadOnlyList<AiAttachmentInput>? Attachments = null,
+    AiDataClassification DataClassification = AiDataClassification.Standard);
 public sealed record AiProviderResult(string Content, long InputUnits, long OutputUnits, long ActualCostMinor);
 
 public sealed record AiPriceCatalogEntry(
@@ -97,7 +137,8 @@ public sealed record ChatMessageSnapshot(
     DateTimeOffset CreatedAtUtc,
     AiRoute? Route = null,
     long? EstimatedCostMinor = null,
-    long? ActualCostMinor = null);
+    long? ActualCostMinor = null,
+    IReadOnlyList<ChatAttachmentSnapshot>? Attachments = null);
 
 public sealed record ConversationSnapshot(
     Guid Id,
@@ -339,7 +380,9 @@ public sealed record ChatExecutionResult(
     long InputUnits = 0,
     long OutputUnits = 0,
     DateTimeOffset? StartedAtUtc = null,
-    DateTimeOffset? FinishedAtUtc = null);
+    DateTimeOffset? FinishedAtUtc = null,
+    IReadOnlyList<Guid>? AttachmentIds = null,
+    AiDataClassification DataClassification = AiDataClassification.Standard);
 
 public sealed record FailedChatExecution(
     Guid ConversationId,
@@ -348,7 +391,8 @@ public sealed record FailedChatExecution(
     long EstimatedCostMinor,
     string FailureCode,
     DateTimeOffset StartedAtUtc,
-    DateTimeOffset FinishedAtUtc);
+    DateTimeOffset FinishedAtUtc,
+    AiDataClassification DataClassification = AiDataClassification.Standard);
 
 public sealed record ChatExecutionLimits(
     int MaximumPromptCharacters,
@@ -393,6 +437,32 @@ public interface IAiUsageQuery
 {
     Task<AiUsageDashboard> GetDashboardAsync(
         int recentLimit = 50,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IChatAttachmentService
+{
+    bool IsAvailable { get; }
+    ChatAttachmentLimits Limits { get; }
+    Task<ChatAttachmentSnapshot> UploadDraftAsync(
+        Guid conversationId,
+        string fileName,
+        string contentType,
+        Stream content,
+        long sizeBytes,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChatAttachmentSnapshot>> ListDraftsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AiAttachmentInput>> LoadDraftsAsync(
+        Guid conversationId,
+        IReadOnlyCollection<Guid> attachmentIds,
+        CancellationToken cancellationToken = default);
+    Task<bool> DeleteDraftAsync(
+        Guid attachmentId,
+        CancellationToken cancellationToken = default);
+    Task<ChatAttachmentDownload?> DownloadAsync(
+        Guid attachmentId,
         CancellationToken cancellationToken = default);
 }
 

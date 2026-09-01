@@ -10,6 +10,7 @@
 @inject IJSRuntime JS
 @inject ChatContextLimits ContextLimits
 @inject IAiModelCatalog ModelCatalog
+@inject IChatAttachmentService AttachmentService
 @implements IDisposable
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
@@ -284,6 +285,17 @@
         <article class="message">
             <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@RoleLabel(message.Role)&gt;</span>
             <p>@message.Content</p>
+            @if (message.Attachments is { Count: > 0 })
+            {
+                <div class="message-attachments">
+                    @foreach (var attachment in message.Attachments)
+                    {
+                        <a href="@($"/api/chat/attachments/{attachment.Id}")" target="_blank" rel="noopener">
+                            [ @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]
+                        </a>
+                    }
+                </div>
+            }
             @if (MessageMeta(message) is string meta)
             {
                 <small>@meta</small>
@@ -394,6 +406,45 @@
                 }
             </section>
         }
+        <div class="attachment-composer">
+            <label>
+                CLASSIFICAÇÃO DOS DADOS
+                <select @bind="_dataClassification" disabled="@(_working || _pendingPlan is not null)">
+                    <option value="@AiDataClassification.Standard">PADRÃO</option>
+                    <option value="@AiDataClassification.Trusted">CONFIÁVEL</option>
+                    <option value="@AiDataClassification.Private">PRIVADO</option>
+                </select>
+            </label>
+            @if (AttachmentService.IsAvailable)
+            {
+                <label class="attachment-picker">
+                    ANEXOS // MÁX. @AttachmentService.Limits.MaximumCount ARQUIVOS, @FormatBytes(AttachmentService.Limits.MaximumFileBytes) CADA
+                    <InputFile OnChange="UploadAttachmentsAsync"
+                               multiple
+                               accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.csv,.json,.log,.cs,.js,.ts,.py,.sql,.xml,.html,.css"
+                               disabled="@(_working || _pendingPlan is not null)" />
+                </label>
+            }
+            else
+            {
+                <small class="muted">ANEXOS INDISPONÍVEIS // OBJECT STORAGE NÃO CONFIGURADO</small>
+            }
+        </div>
+        <small class="classification-note">
+            PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida no preflight. PADRÃO é indicado para conteúdo não sensível.
+        </small>
+        @if (_attachments.Count > 0)
+        {
+            <div class="attachment-drafts" aria-label="Anexos desta execução">
+                @foreach (var attachment in _attachments)
+                {
+                    <span>
+                        @attachment.FileName // @FormatBytes(attachment.SizeBytes)
+                        <button type="button" class="message-action" @onclick="() => DeleteAttachmentAsync(attachment.Id)" disabled="@(_working || _pendingPlan is not null)">[ REMOVER ]</button>
+                    </span>
+                }
+            </div>
+        }
         <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Digite sua tarefa..." rows="3"></textarea>
 
         @if (_pendingPlan is not null)
@@ -416,6 +467,17 @@
                         <dt>SALDO APÓS RESERVA</dt>
                         <dd>@ProjectedBalance</dd>
                     </div>
+                    <div>
+                        <dt>CLASSIFICAÇÃO</dt>
+                        <dd>@ClassificationLabel(_pendingPlan.DataClassification)</dd>
+                    </div>
+                    @if (_pendingPlan.Attachments is { Count: > 0 } plannedAttachments)
+                    {
+                        <div>
+                            <dt>ANEXOS CONGELADOS</dt>
+                            <dd>@plannedAttachments.Count ARQ // @FormatBytes(plannedAttachments.Sum(x => x.SizeBytes))</dd>
+                        </div>
+                    }
                     @if (_pendingPlan.Context is { } context)
                     {
                         <div>
@@ -532,6 +594,7 @@
     private readonly List<ConversationSummary> _conversations = [];
     private readonly List<ConversationSummary> _archivedConversations = [];
     private readonly List<ChatPresetSnapshot> _presets = [];
+    private readonly List<ChatAttachmentSnapshot> _attachments = [];
     private const int ConversationPageSize = 8;
     private Guid _conversationId;
     private string _prompt = string.Empty;
@@ -571,6 +634,7 @@
     private string _presetName = string.Empty;
     private string? _configurationNotice;
     private ConversationAiSettings _savedAiSettings = ConversationAiSettings.Default;
+    private AiDataClassification _dataClassification = AiDataClassification.Standard;
 
     private IReadOnlyList<AiModelOption> ModelOptions => ModelCatalog.GetOptions();
     private int SelectedModelMaximumOutputTokens =>
@@ -814,7 +878,9 @@
                 _conversationId,
                 _prompt,
                 _contextMessageLimit,
-                _branchMessageId);
+                _branchMessageId,
+                _attachments.Select(x => x.Id).ToArray(),
+                _dataClassification);
             _prompt = _pendingPlan.Prompt;
             _attemptIdempotencyKey = Guid.NewGuid().ToString("N");
             _lastFailure = null;
@@ -1039,6 +1105,82 @@
         }
     }
 
+    private async Task UploadAttachmentsAsync(InputFileChangeEventArgs change)
+    {
+        if (_working || _pendingPlan is not null || !AttachmentService.IsAvailable)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var remaining = AttachmentService.Limits.MaximumCount - _attachments.Count;
+            if (remaining <= 0)
+            {
+                throw new InvalidOperationException("Remova um anexo antes de adicionar outro.");
+            }
+            foreach (var file in change.GetMultipleFiles(remaining))
+            {
+                await using var stream = file.OpenReadStream(AttachmentService.Limits.MaximumFileBytes);
+                var uploaded = await AttachmentService.UploadDraftAsync(
+                    _conversationId,
+                    file.Name,
+                    file.ContentType,
+                    stream,
+                    file.Size);
+                _attachments.Add(uploaded);
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task DeleteAttachmentAsync(Guid attachmentId)
+    {
+        if (_working || _pendingPlan is not null)
+        {
+            return;
+        }
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await AttachmentService.DeleteDraftAsync(attachmentId))
+            {
+                throw new InvalidOperationException("O anexo não está mais disponível para remoção.");
+            }
+            _attachments.RemoveAll(x => x.Id == attachmentId);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
+        ? $"{bytes / 1024d / 1024d:0.##} MB"
+        : $"{Math.Max(1, bytes / 1024d):0.##} KB";
+
+    private static string ClassificationLabel(AiDataClassification classification) => classification switch
+    {
+        AiDataClassification.Standard => "PADRÃO",
+        AiDataClassification.Trusted => "CONFIÁVEL",
+        AiDataClassification.Private => "PRIVADO",
+        _ => classification.ToString().ToUpperInvariant()
+    };
+
     private void CancelPlan()
     {
         if (_working)
@@ -1078,6 +1220,11 @@
         _renaming = false;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);
+        _attachments.Clear();
+        if (AttachmentService.IsAvailable)
+        {
+            _attachments.AddRange(await AttachmentService.ListDraftsAsync(conversation.Id));
+        }
         await RefreshConversationsAsync();
 
         if (ConversationId is null)

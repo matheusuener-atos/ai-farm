@@ -1,6 +1,7 @@
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Development;
+using atos.AIFarm.Infrastructure.Attachments;
 using atos.AIFarm.Infrastructure.Persistence;
 using atos.AIFarm.Infrastructure.Providers.OpenAI;
 using atos.AIFarm.Web;
@@ -131,7 +132,26 @@ if (string.IsNullOrWhiteSpace(postgresConnection))
     throw new InvalidOperationException(
         "DATABASE_URL is required because authenticated accounts are persisted in PostgreSQL.");
 }
-builder.Services.AddAIFarmPostgres(postgresConnection);
+var objectStorageValues = new[]
+{
+    builder.Configuration["AWS_ACCESS_KEY_ID"],
+    builder.Configuration["AWS_SECRET_ACCESS_KEY"],
+    builder.Configuration["AWS_ENDPOINT_URL_S3"],
+    builder.Configuration["AWS_REGION"]
+};
+NeonObjectStorageOptions? objectStorage = null;
+if (objectStorageValues.All(x => !string.IsNullOrWhiteSpace(x)))
+{
+    objectStorage = new NeonObjectStorageOptions(
+        objectStorageValues[0]!, objectStorageValues[1]!,
+        objectStorageValues[2]!, objectStorageValues[3]!);
+}
+else if (objectStorageValues.Any(x => !string.IsNullOrWhiteSpace(x)))
+{
+    throw new InvalidOperationException(
+        "Neon Object Storage requires AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3 and AWS_REGION together.");
+}
+builder.Services.AddAIFarmPostgres(postgresConnection, objectStorage: objectStorage);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
@@ -184,6 +204,17 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+app.MapGet("/api/chat/attachments/{attachmentId:guid}", async (
+    Guid attachmentId,
+    IChatAttachmentService attachments,
+    CancellationToken cancellationToken) =>
+{
+    var download = await attachments.DownloadAsync(attachmentId, cancellationToken);
+    return download is null
+        ? Results.NotFound()
+        : Results.File(download.Content, download.ContentType, download.FileName);
+}).RequireAuthorization();
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.MapHealthChecks("/health/live", new HealthCheckOptions

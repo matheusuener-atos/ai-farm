@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Core.Wallet;
+using atos.AIFarm.Infrastructure.Attachments;
 
 namespace atos.AIFarm.Infrastructure.Development;
 
@@ -59,7 +60,7 @@ public sealed class FakeAiProvider :
     }
 }
 
-public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
+public sealed class InMemoryChatStore(InMemoryChatAttachmentService? attachmentService = null) : IChatStore, IAiUsageQuery
 {
     private readonly object _sync = new();
     private readonly ConcurrentDictionary<string, ChatExecutionResult> _results = new(StringComparer.Ordinal);
@@ -402,13 +403,15 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
             {
                 throw new InvalidOperationException("A conversa não existe.");
             }
+            var attached = attachmentService?.Attach(result.ConversationId, result.AttachmentIds) ?? [];
             conversation.Messages.Add(new ChatMessageSnapshot(
                 Guid.NewGuid(),
                 ChatMessageRole.User,
                 prompt,
                 ChatMessageStatus.Completed,
                 result.OperationId,
-                now));
+                now,
+                Attachments: attached));
             conversation.Messages.Add(new ChatMessageSnapshot(
                 Guid.NewGuid(),
                 ChatMessageRole.Assistant,
