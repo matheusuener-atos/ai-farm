@@ -150,6 +150,17 @@ A classificação é registrada em cada execução. `PRIVADO` nunca pode usar um
 rota externa; `CONFIÁVEL` representa autorização explícita para o Provider
 mostrado no preflight; `PADRÃO` é destinado a conteúdo não sensível.
 
+Respostas concluídas podem ser avaliadas como `ÚTIL` ou `NÃO ÚTIL`; a segunda
+opção aceita um motivo opcional de até 500 caracteres. A avaliação é privada da
+conta, atualizável e removível. O painel `/operations` agrega satisfação por
+execução — cópias históricas em ramificações não inflam a métrica — sem expor
+prompts, respostas ou justificativas.
+
+Conversas ativas podem ser exportadas por endpoints autenticados em Markdown
+ou JSON. Os arquivos incluem mensagens, rotas, custos, configurações,
+metadados de anexos e feedback, mas nunca incorporam credenciais nem os bytes
+dos objetos privados. Não existem links públicos de compartilhamento.
+
 Cancelamentos solicitados pelo usuário não contam como falha do Provider. Uma
 estimativa acima do limite é rejeitada antes de reservar saldo, e timeout ou
 falha liberam a reserva normalmente.
@@ -219,6 +230,9 @@ Implementado:
 - payload multimodal oficial (`input_image`, `input_file` e `input_text`);
 - classificação auditável e bloqueio de dados privados em Providers externos;
 - download autenticado e preservação das referências em ramificações.
+- feedback persistente e atualizável por resposta, isolado por conta;
+- satisfação agregada por execução no painel operacional;
+- exportação autenticada e portável de conversas em Markdown e JSON.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

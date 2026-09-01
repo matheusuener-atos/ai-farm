@@ -177,6 +177,12 @@ h1 span { color: var(--purple); }
 .classification-note { display: block; color: var(--muted); margin: -.25rem 0 .7rem; }
 .attachment-drafts span, .message-attachments a { border: 1px solid #494946; padding: .45rem .6rem; color: var(--muted); font-size: .72rem; text-decoration: none; }
 .message-attachments a:hover { border-color: var(--purple); color: var(--white); }
+.export-button { border: 1px solid #494946; color: var(--muted); padding: .45rem .6rem; font-size: .7rem; text-decoration: none; }
+.export-button:hover, .message-action.active-feedback { border-color: var(--purple); color: var(--white); }
+.feedback-state { display: block; color: var(--purple); margin-top: .45rem; }
+.feedback-editor { border-left: 2px solid var(--purple); margin-top: .65rem; padding: .75rem; background: #090909; }
+.feedback-editor textarea { width: 100%; margin: .4rem 0; resize: vertical; background: #050505; border: 1px solid #494946; color: var(--white); padding: .6rem; }
+.feedback-editor > div { display: flex; flex-wrap: wrap; gap: .5rem; }
 .execution-plan { display: grid; gap: 1rem; margin-top: .8rem; padding: 1rem; border: 1px solid var(--amber); background: var(--amber-deep); }
 .execution-plan-header { display: flex; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: .72rem; }
 .execution-plan dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 0; }

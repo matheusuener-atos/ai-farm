@@ -215,6 +215,20 @@ app.MapGet("/api/chat/attachments/{attachmentId:guid}", async (
         : Results.File(download.Content, download.ContentType, download.FileName);
 }).RequireAuthorization();
 
+app.MapGet("/api/chat/conversations/{conversationId:guid}/export/{format}", async (
+    Guid conversationId,
+    string format,
+    IConversationExportService exports,
+    CancellationToken cancellationToken) =>
+{
+    if (!Enum.TryParse<ConversationExportFormat>(format, true, out var exportFormat))
+        return Results.BadRequest("Formato de exportação inválido.");
+    var export = await exports.ExportAsync(conversationId, exportFormat, cancellationToken);
+    return export is null
+        ? Results.NotFound()
+        : Results.File(export.Content, export.ContentType, export.FileName);
+}).RequireAuthorization();
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.MapHealthChecks("/health/live", new HealthCheckOptions

@@ -42,6 +42,11 @@ else
             <strong>@Aic.Format(_dashboard.Totals.ReleasedCostMinor)</strong>
             <small>ESTIMATIVA NÃO CONSUMIDA</small>
         </section>
+        <section class="metric purple-border">
+            <span>SATISFAÇÃO</span>
+            <strong>@(_dashboard.Totals.SatisfactionPercent is decimal satisfaction ? $"{satisfaction:0.0}%" : "---")</strong>
+            <small>@_dashboard.Totals.PositiveFeedbackCount ÚTIL // @_dashboard.Totals.NegativeFeedbackCount NÃO ÚTIL</small>
+        </section>
     </div>
 
     <section class="ledger operations-ledger">

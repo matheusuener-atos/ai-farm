@@ -128,6 +128,18 @@ public enum ChatMessageStatus
     Completed
 }
 
+public enum ChatFeedbackRating
+{
+    Positive,
+    Negative
+}
+
+public sealed record ChatMessageFeedback(
+    ChatFeedbackRating Rating,
+    string? Reason,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);
+
 public sealed record ChatMessageSnapshot(
     Guid Id,
     ChatMessageRole Role,
@@ -138,7 +150,8 @@ public sealed record ChatMessageSnapshot(
     AiRoute? Route = null,
     long? EstimatedCostMinor = null,
     long? ActualCostMinor = null,
-    IReadOnlyList<ChatAttachmentSnapshot>? Attachments = null);
+    IReadOnlyList<ChatAttachmentSnapshot>? Attachments = null,
+    ChatMessageFeedback? Feedback = null);
 
 public sealed record ConversationSnapshot(
     Guid Id,
@@ -409,9 +422,15 @@ public sealed record AiUsageTotals(
     long InputUnits,
     long OutputUnits,
     long EstimatedCostMinor,
-    long ActualCostMinor)
+    long ActualCostMinor,
+    int PositiveFeedbackCount = 0,
+    int NegativeFeedbackCount = 0)
 {
     public long ReleasedCostMinor => EstimatedCostMinor - ActualCostMinor;
+    public int FeedbackCount => PositiveFeedbackCount + NegativeFeedbackCount;
+    public decimal? SatisfactionPercent => FeedbackCount == 0
+        ? null
+        : decimal.Round(PositiveFeedbackCount * 100m / FeedbackCount, 1);
 }
 
 public sealed record AiExecutionSummary(
@@ -510,6 +529,11 @@ public interface IChatStore
     Task<bool> DeleteChatPresetAsync(
         Guid presetId,
         CancellationToken cancellationToken = default);
+    Task<bool> SetMessageFeedbackAsync(
+        Guid messageId,
+        ChatFeedbackRating? rating,
+        string? reason = null,
+        CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);
     Task<ChatExecutionResult?> FindAsync(string idempotencyKey, CancellationToken cancellationToken);
@@ -522,4 +546,23 @@ public interface IChatStore
         string idempotencyKey,
         FailedChatExecution failure,
         CancellationToken cancellationToken);
+}
+
+public enum ConversationExportFormat
+{
+    Markdown,
+    Json
+}
+
+public sealed record ConversationExport(
+    string FileName,
+    string ContentType,
+    byte[] Content);
+
+public interface IConversationExportService
+{
+    Task<ConversationExport?> ExportAsync(
+        Guid conversationId,
+        ConversationExportFormat format,
+        CancellationToken cancellationToken = default);
 }

@@ -671,6 +671,48 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.ToTable("ledger_transactions", "aifarm");
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.MessageFeedbackRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Rating")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "Rating");
+
+                    b.ToTable("message_feedback", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_message_feedback_rating", "\"Rating\" IN ('Positive', 'Negative')");
+
+                            t.HasCheckConstraint("CK_message_feedback_reason_length", "\"Reason\" IS NULL OR length(\"Reason\") <= 500");
+                        });
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.MessageRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -884,6 +926,21 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasOne("atos.AIFarm.Infrastructure.Persistence.WalletRecord", null)
                         .WithMany()
                         .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.MessageFeedbackRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.MessageRecord", null)
+                        .WithOne()
+                        .HasForeignKey("atos.AIFarm.Infrastructure.Persistence.MessageFeedbackRecord", "MessageId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

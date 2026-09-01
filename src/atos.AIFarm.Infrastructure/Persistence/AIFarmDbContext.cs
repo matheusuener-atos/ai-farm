@@ -15,6 +15,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<ConversationRecord> Conversations => Set<ConversationRecord>();
     public DbSet<ChatPresetRecord> ChatPresets => Set<ChatPresetRecord>();
     public DbSet<MessageRecord> Messages => Set<MessageRecord>();
+    public DbSet<MessageFeedbackRecord> MessageFeedbacks => Set<MessageFeedbackRecord>();
     public DbSet<ChatAttachmentRecord> ChatAttachments => Set<ChatAttachmentRecord>();
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
@@ -229,6 +230,22 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<ConversationRecord>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<MessageRecord>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Restrict);
         });
+
+        modelBuilder.Entity<MessageFeedbackRecord>(entity =>
+        {
+            entity.ToTable("message_feedback", table =>
+            {
+                table.HasCheckConstraint("CK_message_feedback_rating", "\"Rating\" IN ('Positive', 'Negative')");
+                table.HasCheckConstraint("CK_message_feedback_reason_length", "\"Reason\" IS NULL OR length(\"Reason\") <= 500");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.MessageId).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.Rating });
+            entity.Property(x => x.Rating).HasMaxLength(16);
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MessageRecord>().WithOne().HasForeignKey<MessageFeedbackRecord>(x => x.MessageId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 }
 public sealed class AccountRecord
@@ -354,6 +371,17 @@ public sealed class ChatAttachmentRecord
     public string Sha256 { get; set; } = string.Empty;
     public string Status { get; set; } = "Draft";
     public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class MessageFeedbackRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid MessageId { get; set; }
+    public string Rating { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 
 public sealed class AiExecutionRecord

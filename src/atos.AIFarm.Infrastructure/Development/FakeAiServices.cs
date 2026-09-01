@@ -353,6 +353,37 @@ public sealed class InMemoryChatStore(InMemoryChatAttachmentService? attachmentS
         }
     }
 
+    public Task<bool> SetMessageFeedbackAsync(
+        Guid messageId,
+        ChatFeedbackRating? rating,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedReason = NormalizeFeedbackReason(reason);
+        lock (_sync)
+        {
+            var conversation = _conversations.Values.FirstOrDefault(x =>
+                !x.IsDeleted && x.Messages.Any(message => message.Id == messageId));
+            if (conversation is null) return Task.FromResult(false);
+            var index = conversation.Messages.FindIndex(message =>
+                message.Id == messageId && message.Role == ChatMessageRole.Assistant);
+            if (index < 0) return Task.FromResult(false);
+            var existing = conversation.Messages[index].Feedback;
+            var now = DateTimeOffset.UtcNow;
+            conversation.Messages[index] = conversation.Messages[index] with
+            {
+                Feedback = rating is null
+                    ? null
+                    : new ChatMessageFeedback(
+                        rating.Value,
+                        rating == ChatFeedbackRating.Negative ? normalizedReason : null,
+                        existing?.CreatedAtUtc ?? now,
+                        now)
+            };
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {
@@ -451,6 +482,12 @@ public sealed class InMemoryChatStore(InMemoryChatAttachmentService? attachmentS
         {
             var results = _results.Values.ToArray();
             var failures = _failures.Values.ToArray();
+            var feedback = _conversations.Values
+                .SelectMany(x => x.Messages)
+                .Where(x => x.Role == ChatMessageRole.Assistant && x.Feedback is not null)
+                .GroupBy(x => x.OperationId)
+                .Select(x => x.OrderByDescending(message => message.Feedback!.UpdatedAtUtc).First().Feedback)
+                .ToArray();
             var totals = new AiUsageTotals(
                 results.Length + failures.Length,
                 results.Select(x => x.ConversationId)
@@ -461,7 +498,9 @@ public sealed class InMemoryChatStore(InMemoryChatAttachmentService? attachmentS
                 results.Sum(x => x.OutputUnits),
                 results.Sum(x => x.EstimatedCostMinor) +
                     failures.Sum(x => x.EstimatedCostMinor),
-                results.Sum(x => x.ActualCostMinor));
+                results.Sum(x => x.ActualCostMinor),
+                feedback.Count(x => x!.Rating == ChatFeedbackRating.Positive),
+                feedback.Count(x => x!.Rating == ChatFeedbackRating.Negative));
             var completed = results.Select(x => new AiExecutionSummary(
                 x.OperationId,
                 x.ConversationId,
@@ -521,6 +560,15 @@ public sealed class InMemoryChatStore(InMemoryChatAttachmentService? attachmentS
         {
             throw new ArgumentException("O nome do preset deve ter no máximo 80 caracteres.", nameof(name));
         }
+        return normalized;
+    }
+
+    private static string? NormalizeFeedbackReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        var normalized = string.Join(' ', reason.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (normalized.Length > 500)
+            throw new ArgumentException("O motivo do feedback deve ter no máximo 500 caracteres.", nameof(reason));
         return normalized;
     }
 

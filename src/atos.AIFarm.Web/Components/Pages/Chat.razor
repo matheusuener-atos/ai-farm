@@ -185,6 +185,11 @@
                     disabled="@(_working || _conversationId == Guid.Empty)">
                 [ EXCLUIR ]
             </button>
+            @if (_conversationId != Guid.Empty)
+            {
+                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">[ EXPORTAR MD ]</a>
+                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">[ EXPORTAR JSON ]</a>
+            }
         </div>
     </div>
 
@@ -300,6 +305,16 @@
             {
                 <small>@meta</small>
             }
+            @if (message.Feedback is not null)
+            {
+                <small class="feedback-state">
+                    FEEDBACK // @(message.Feedback.Rating == ChatFeedbackRating.Positive ? "ÚTIL" : "NÃO ÚTIL")
+                    @if (!string.IsNullOrWhiteSpace(message.Feedback.Reason))
+                    {
+                        <span> // @message.Feedback.Reason</span>
+                    }
+                </small>
+            }
             <div class="message-actions">
                 <button type="button"
                         class="message-action"
@@ -325,7 +340,39 @@
                     [ GERAR OUTRA RESPOSTA ]
                 </button>
                 }
+                @if (message.Role == ChatMessageRole.Assistant)
+                {
+                    <button type="button"
+                            class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Positive ? "active-feedback" : null)"
+                            @onclick="() => SetPositiveFeedbackAsync(message)"
+                            disabled="@_working">
+                        [ ÚTIL ]
+                    </button>
+                    <button type="button"
+                            class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Negative ? "active-feedback" : null)"
+                            @onclick="() => StartNegativeFeedback(message)"
+                            disabled="@_working">
+                        [ NÃO ÚTIL ]
+                    </button>
+                }
             </div>
+            @if (_feedbackMessageId == message.Id)
+            {
+                <section class="feedback-editor" aria-label="Motivo do feedback">
+                    <label>
+                        O QUE PODERIA MELHORAR? // OPCIONAL
+                        <textarea rows="2" maxlength="500" @bind="_feedbackReason" disabled="@_working"></textarea>
+                    </label>
+                    <div>
+                        <button type="button" @onclick="() => SaveNegativeFeedbackAsync(message.Id)" disabled="@_working">[ SALVAR FEEDBACK ]</button>
+                        @if (message.Feedback is not null)
+                        {
+                            <button type="button" class="button-secondary" @onclick="() => ClearFeedbackAsync(message.Id)" disabled="@_working">[ REMOVER ]</button>
+                        }
+                        <button type="button" class="button-secondary" @onclick="CancelFeedback" disabled="@_working">[ CANCELAR ]</button>
+                    </div>
+                </section>
+            }
         </article>
     }
 
@@ -633,6 +680,8 @@
     private int _maximumOutputTokens = ConversationAiSettings.Default.MaximumOutputTokens;
     private string _presetName = string.Empty;
     private string? _configurationNotice;
+    private Guid? _feedbackMessageId;
+    private string _feedbackReason = string.Empty;
     private ConversationAiSettings _savedAiSettings = ConversationAiSettings.Default;
     private AiDataClassification _dataClassification = AiDataClassification.Standard;
 
@@ -1103,6 +1152,58 @@
         {
             _error = "O navegador não permitiu copiar esta mensagem.";
         }
+    }
+
+    private async Task SetPositiveFeedbackAsync(ChatMessageSnapshot message)
+    {
+        var rating = message.Feedback?.Rating == ChatFeedbackRating.Positive
+            ? (ChatFeedbackRating?)null
+            : ChatFeedbackRating.Positive;
+        await SaveFeedbackAsync(message.Id, rating, null);
+    }
+
+    private void StartNegativeFeedback(ChatMessageSnapshot message)
+    {
+        _feedbackMessageId = message.Id;
+        _feedbackReason = message.Feedback?.Rating == ChatFeedbackRating.Negative
+            ? message.Feedback.Reason ?? string.Empty
+            : string.Empty;
+        _error = null;
+    }
+
+    private Task SaveNegativeFeedbackAsync(Guid messageId) =>
+        SaveFeedbackAsync(messageId, ChatFeedbackRating.Negative, _feedbackReason);
+
+    private Task ClearFeedbackAsync(Guid messageId) =>
+        SaveFeedbackAsync(messageId, null, null);
+
+    private async Task SaveFeedbackAsync(Guid messageId, ChatFeedbackRating? rating, string? reason)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.SetMessageFeedbackAsync(messageId, rating, reason))
+                throw new InvalidOperationException("A resposta não está disponível para avaliação.");
+            _feedbackMessageId = null;
+            _feedbackReason = string.Empty;
+            await RefreshConversationAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void CancelFeedback()
+    {
+        _feedbackMessageId = null;
+        _feedbackReason = string.Empty;
     }
 
     private async Task UploadAttachmentsAsync(InputFileChangeEventArgs change)

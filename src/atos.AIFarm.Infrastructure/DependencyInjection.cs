@@ -40,6 +40,7 @@ public static class DependencyInjection
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageQuery>(provider =>
             provider.GetRequiredService<InMemoryChatStore>());
+        services.TryAddScoped<IConversationExportService, ConversationExportService>();
         if (openAi is null)
         {
             services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();

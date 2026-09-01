@@ -42,6 +42,13 @@ public sealed class PostgresAccountIsolationTests
                 "resposta a preservar");
 
             var source = await store.GetConversationAsync(original.Id);
+            var evaluatedAssistant = source!.Messages.Single(
+                x => x.OperationId == firstOperation && x.Role == ChatMessageRole.Assistant);
+            Assert.True(await store.SetMessageFeedbackAsync(
+                evaluatedAssistant.Id,
+                ChatFeedbackRating.Negative,
+                "resposta incompleta"));
+            source = await store.GetConversationAsync(original.Id);
             var branchPoint = source!.Messages.Single(
                 x => x.OperationId == secondOperation &&
                      x.Role == ChatMessageRole.User);
@@ -56,6 +63,9 @@ public sealed class PostgresAccountIsolationTests
             Assert.Equal(original.Id, reloadedBranch?.ParentConversationId);
             Assert.Equal(branchPoint.Id, reloadedBranch?.BranchedFromMessageId);
             Assert.Equal(2, reloadedBranch?.Messages.Count);
+            Assert.Equal(
+                ChatFeedbackRating.Negative,
+                reloadedBranch?.Messages.Single(x => x.Role == ChatMessageRole.Assistant).Feedback?.Rating);
             Assert.Equal(4, reloadedSource?.Messages.Count);
             Assert.Contains(
                 reloadedSource!.Messages,
@@ -65,6 +75,44 @@ public sealed class PostgresAccountIsolationTests
         finally
         {
             await CleanupAsync(connectionString, identity);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task FeedbackAndConversationExportsAreIsolatedByAccount()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var firstIdentity = NewIdentity("feedback-first");
+        var secondIdentity = NewIdentity("feedback-second");
+        try
+        {
+            await using var first = BuildProvider(connectionString, firstIdentity);
+            await using var second = BuildProvider(connectionString, secondIdentity);
+            await first.InitializeAIFarmAsync();
+            await second.InitializeAIFarmAsync();
+            var firstStore = first.GetRequiredService<IChatStore>();
+            var secondStore = second.GetRequiredService<IChatStore>();
+            var conversation = await firstStore.CreateConversationAsync();
+            await SaveExchangeAsync(firstStore, conversation.Id, Guid.NewGuid(), "entrada", "saída");
+            var assistant = (await firstStore.GetConversationAsync(conversation.Id))!.Messages
+                .Single(x => x.Role == ChatMessageRole.Assistant);
+
+            Assert.False(await secondStore.SetMessageFeedbackAsync(
+                assistant.Id, ChatFeedbackRating.Positive));
+            Assert.True(await firstStore.SetMessageFeedbackAsync(
+                assistant.Id, ChatFeedbackRating.Positive));
+            Assert.Equal(1, (await first.GetRequiredService<IAiUsageQuery>().GetDashboardAsync()).Totals.PositiveFeedbackCount);
+            Assert.Equal(0, (await second.GetRequiredService<IAiUsageQuery>().GetDashboardAsync()).Totals.FeedbackCount);
+            Assert.NotNull(await first.GetRequiredService<IConversationExportService>()
+                .ExportAsync(conversation.Id, ConversationExportFormat.Json));
+            Assert.Null(await second.GetRequiredService<IConversationExportService>()
+                .ExportAsync(conversation.Id, ConversationExportFormat.Json));
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, firstIdentity, secondIdentity);
         }
     }
 
@@ -304,6 +352,11 @@ public sealed class PostgresAccountIsolationTests
             .Select(x => x.Id)
             .ToArrayAsync();
 
+        db.MessageFeedbacks.RemoveRange(db.MessageFeedbacks.Where(
+            x => accountIds.Contains(x.AccountId)));
+        db.ChatAttachments.RemoveRange(db.ChatAttachments.Where(
+            x => accountIds.Contains(x.AccountId)));
+        await db.SaveChangesAsync();
         db.Messages.RemoveRange(db.Messages.Where(
             x => conversationIds.Contains(x.ConversationId)));
         db.AiExecutions.RemoveRange(db.AiExecutions.Where(

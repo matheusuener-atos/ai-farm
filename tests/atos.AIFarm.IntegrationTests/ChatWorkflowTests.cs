@@ -822,6 +822,42 @@ public sealed class ChatWorkflowTests
         Assert.Equal(0, provider.CallCount);
     }
 
+    [Fact]
+    public async Task FeedbackIsUpdatedAggregatedAndIncludedInExports()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var workflow = NewWorkflow(await FundedWalletAsync(), new FakeAiProvider(), chat);
+        var plan = await workflow.PrepareAsync(conversation.Id, "explique a etapa oito");
+        await workflow.SendAsync(conversation.Id, plan, "feedback-export");
+        var completed = await chat.GetConversationAsync(conversation.Id);
+        var assistant = Assert.Single(completed!.Messages, x => x.Role == ChatMessageRole.Assistant);
+
+        Assert.True(await chat.SetMessageFeedbackAsync(
+            assistant.Id,
+            ChatFeedbackRating.Negative,
+            "  faltou   um exemplo prático  "));
+        var evaluated = await chat.GetConversationAsync(conversation.Id);
+        var feedback = evaluated!.Messages.Single(x => x.Id == assistant.Id).Feedback;
+        Assert.Equal(ChatFeedbackRating.Negative, feedback?.Rating);
+        Assert.Equal("faltou um exemplo prático", feedback?.Reason);
+
+        var dashboard = await chat.GetDashboardAsync();
+        Assert.Equal(0, dashboard.Totals.PositiveFeedbackCount);
+        Assert.Equal(1, dashboard.Totals.NegativeFeedbackCount);
+        Assert.Equal(0m, dashboard.Totals.SatisfactionPercent);
+
+        var exports = new ConversationExportService(chat);
+        var markdown = await exports.ExportAsync(conversation.Id, ConversationExportFormat.Markdown);
+        var json = await exports.ExportAsync(conversation.Id, ConversationExportFormat.Json);
+        Assert.Contains("Avaliação: Não útil", Encoding.UTF8.GetString(markdown!.Content));
+        Assert.Contains("faltou um exemplo prático", Encoding.UTF8.GetString(markdown.Content));
+        Assert.Contains("\"rating\": \"negative\"", Encoding.UTF8.GetString(json!.Content));
+
+        Assert.True(await chat.SetMessageFeedbackAsync(assistant.Id, null));
+        Assert.Null((await chat.GetConversationAsync(conversation.Id))!.Messages.Single(x => x.Id == assistant.Id).Feedback);
+    }
+
     private static ChatWorkflow NewWorkflow(
         IWalletService wallet,
         IAiProvider provider,

@@ -706,6 +706,19 @@ public sealed class PostgresChatStore(
             Status = "Attached",
             CreatedAtUtc = attachment.CreatedAtUtc
         }));
+        var sourceFeedback = await db.MessageFeedbacks
+            .Where(x => sourceMessageIds.Contains(x.MessageId))
+            .ToArrayAsync(cancellationToken);
+        db.MessageFeedbacks.AddRange(sourceFeedback.Select(feedback => new MessageFeedbackRecord
+        {
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            MessageId = copiedBySourceId[feedback.MessageId],
+            Rating = feedback.Rating,
+            Reason = feedback.Reason,
+            CreatedAtUtc = feedback.CreatedAtUtc,
+            UpdatedAtUtc = feedback.UpdatedAtUtc
+        }));
         await db.SaveChangesAsync(cancellationToken);
         return await LoadConversationAsync(db, branch, cancellationToken);
     }
@@ -811,6 +824,57 @@ public sealed class PostgresChatStore(
         }
 
         db.ChatPresets.Remove(preset);
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> SetMessageFeedbackAsync(
+        Guid messageId,
+        ChatFeedbackRating? rating,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedReason = NormalizeFeedbackReason(reason);
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var authorized = await (
+            from message in db.Messages
+            join conversation in db.Conversations on message.ConversationId equals conversation.Id
+            where message.Id == messageId &&
+                  message.Role == nameof(ChatMessageRole.Assistant) &&
+                  conversation.AccountId == identity.AccountId &&
+                  conversation.Status != "Deleted"
+            select message.Id).AnyAsync(cancellationToken);
+        if (!authorized) return false;
+
+        var existing = await db.MessageFeedbacks.SingleOrDefaultAsync(
+            x => x.MessageId == messageId && x.AccountId == identity.AccountId,
+            cancellationToken);
+        if (rating is null)
+        {
+            if (existing is not null)
+            {
+                db.MessageFeedbacks.Remove(existing);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            return true;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (existing is null)
+        {
+            existing = new MessageFeedbackRecord
+            {
+                Id = Guid.NewGuid(),
+                AccountId = identity.AccountId,
+                MessageId = messageId,
+                CreatedAtUtc = now
+            };
+            db.MessageFeedbacks.Add(existing);
+        }
+        existing.Rating = rating.Value.ToString();
+        existing.Reason = rating == ChatFeedbackRating.Negative ? normalizedReason : null;
+        existing.UpdatedAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -1061,6 +1125,16 @@ public sealed class PostgresChatStore(
                 x => (IReadOnlyList<ChatAttachmentSnapshot>)x.Select(a => new ChatAttachmentSnapshot(
                     a.Id, a.ConversationId, a.FileName, a.ContentType, a.SizeBytes,
                     a.Sha256, ChatAttachmentStatus.Attached, a.CreatedAtUtc)).ToArray());
+        var feedbackByMessage = await db.MessageFeedbacks
+            .Where(x => messageIds.Contains(x.MessageId))
+            .ToDictionaryAsync(
+                x => x.MessageId,
+                x => new ChatMessageFeedback(
+                    Enum.Parse<ChatFeedbackRating>(x.Rating),
+                    x.Reason,
+                    x.CreatedAtUtc,
+                    x.UpdatedAtUtc),
+                cancellationToken);
 
         var messages = records.Select(record =>
         {
@@ -1080,7 +1154,8 @@ public sealed class PostgresChatStore(
                 route,
                 execution?.EstimatedCostMinor,
                 execution?.ActualCostMinor,
-                attachmentsByMessage.GetValueOrDefault(record.Id));
+                attachmentsByMessage.GetValueOrDefault(record.Id),
+                feedbackByMessage.GetValueOrDefault(record.Id));
         }).ToArray();
 
         return new ConversationSnapshot(
@@ -1120,6 +1195,15 @@ public sealed class PostgresChatStore(
         {
             throw new ArgumentException("O nome do preset deve ter no máximo 80 caracteres.", nameof(name));
         }
+        return normalized;
+    }
+
+    private static string? NormalizeFeedbackReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        var normalized = string.Join(' ', reason.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (normalized.Length > 500)
+            throw new ArgumentException("O motivo do feedback deve ter no máximo 500 caracteres.", nameof(reason));
         return normalized;
     }
 
@@ -1179,15 +1263,31 @@ public sealed class PostgresAiUsageQuery(
                 ActualCostMinor = group.Sum(x => x.ActualCostMinor)
             })
             .SingleOrDefaultAsync(cancellationToken);
+        var feedbackRows = await (
+            from feedback in db.MessageFeedbacks
+            join message in db.Messages on feedback.MessageId equals message.Id
+            where feedback.AccountId == identity.AccountId
+            select new { message.OperationId, feedback.Rating, feedback.UpdatedAtUtc })
+            .ToArrayAsync(cancellationToken);
+        var feedbackCounts = feedbackRows
+            .GroupBy(x => x.OperationId)
+            .Select(x => x.OrderByDescending(item => item.UpdatedAtUtc).First().Rating)
+            .GroupBy(x => x)
+            .ToDictionary(x => x.Key, x => x.Count());
         var totals = aggregate is null
-            ? new AiUsageTotals(0, 0, 0, 0, 0, 0)
+            ? new AiUsageTotals(
+                0, 0, 0, 0, 0, 0,
+                feedbackCounts.GetValueOrDefault(nameof(ChatFeedbackRating.Positive)),
+                feedbackCounts.GetValueOrDefault(nameof(ChatFeedbackRating.Negative)))
             : new AiUsageTotals(
                 aggregate.ExecutionCount,
                 aggregate.ConversationCount,
                 aggregate.InputUnits,
                 aggregate.OutputUnits,
                 aggregate.EstimatedCostMinor,
-                aggregate.ActualCostMinor);
+                aggregate.ActualCostMinor,
+                feedbackCounts.GetValueOrDefault(nameof(ChatFeedbackRating.Positive)),
+                feedbackCounts.GetValueOrDefault(nameof(ChatFeedbackRating.Negative)));
         var recent = await executions
             .OrderByDescending(x => x.StartedAtUtc)
             .Take(recentLimit)
