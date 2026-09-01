@@ -15,11 +15,16 @@ public static class DependencyInjection
         this IServiceCollection services,
         ChatExecutionLimits? executionLimits = null,
         AiProviderProtectionOptions? providerProtection = null,
-        OpenAiProviderOptions? openAi = null)
+        OpenAiProviderOptions? openAi = null,
+        ChatContextLimits? contextLimits = null)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton(executionLimits ?? ChatExecutionLimits.Default);
         services.TryAddSingleton(providerProtection ?? AiProviderProtectionOptions.Default);
+        var configuredContextLimits = (contextLimits ?? ChatContextLimits.Default).Validate();
+        services.TryAddSingleton(configuredContextLimits);
+        services.TryAddSingleton<IChatContextPlanner>(
+            new ChatContextPlanner(configuredContextLimits));
         services.TryAddSingleton<IAIFarmIdentityAccessor>(
             new FixedAIFarmIdentityAccessor(AIFarmIdentity.Development));
         services.AddSingleton<IAIFarmReadinessProbe, InMemoryReadinessProbe>();

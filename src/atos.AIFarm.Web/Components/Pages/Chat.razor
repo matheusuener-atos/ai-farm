@@ -8,6 +8,7 @@
 @inject IWalletService Wallet
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject ChatContextLimits ContextLimits
 @implements IDisposable
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
@@ -274,7 +275,20 @@
     }
 
     <div class="composer">
-        <label for="prompt">MENSAGEM</label>
+        <div class="composer-heading">
+            <label for="prompt">MENSAGEM</label>
+            <label class="context-selector" for="context-message-limit">
+                CONTEXTO
+                <select id="context-message-limit"
+                        @bind="_contextMessageLimit"
+                        disabled="@(_working || _pendingPlan is not null)">
+                    @foreach (var option in ContextMessageOptions)
+                    {
+                        <option value="@option">@(option == 0 ? "SÓ ESTA MENSAGEM" : $"ÚLTIMAS {option} MSG")</option>
+                    }
+                </select>
+            </label>
+        </div>
         @if (_editingBranch || _regenerating)
         {
             <section class="branch-draft" aria-live="polite">
@@ -312,7 +326,39 @@
                         <dt>SALDO APÓS RESERVA</dt>
                         <dd>@ProjectedBalance</dd>
                     </div>
+                    @if (_pendingPlan.Context is { } context)
+                    {
+                        <div>
+                            <dt>CONTEXTO ESTIMADO</dt>
+                            <dd>@context.EstimatedInputTokens.ToString("N0") / @context.MaximumInputTokens.ToString("N0") TOKENS</dd>
+                        </div>
+                    }
                 </dl>
+                @if (_pendingPlan.Context is { } plannedContext)
+                {
+                    <details class="context-details">
+                        <summary>[ VER CONTEXTO EFETIVAMENTE ENVIADO ]</summary>
+                        <p>
+                            @plannedContext.IncludedMessageCount MSG INTEGRAIS //
+                            @plannedContext.OmittedMessageCount MSG RESUMIDAS
+                        </p>
+                        @foreach (var contextMessage in plannedContext.Messages)
+                        {
+                            <article>
+                                <strong>@ContextRoleLabel(contextMessage)</strong>
+                                <pre>@contextMessage.Content</pre>
+                            </article>
+                        }
+                        <article>
+                            <strong>MENSAGEM ATUAL</strong>
+                            <pre>@_pendingPlan.Prompt</pre>
+                        </article>
+                    </details>
+                    @if (plannedContext.UsesSummary)
+                    {
+                        <p class="context-note">[ RESUMO AUTOMÁTICO ] Mensagens antigas foram compactadas de forma extrativa.</p>
+                    }
+                }
                 @if (!CanAffordPendingPlan)
                 {
                     <p class="plan-warning">[ SALDO INSUFICIENTE ] A execução não pode ser confirmada.</p>
@@ -403,6 +449,14 @@
     private Guid? _currentConversationParentId;
     private WalletSnapshot? _snapshot;
     private ChatExecutionPlan? _pendingPlan;
+    private int _contextMessageLimit;
+    private bool _contextMessageLimitInitialized;
+
+    private IEnumerable<int> ContextMessageOptions =>
+        new[] { 0, 4, 8, 16, 24, 32, ContextLimits.MaximumMessageCount }
+            .Where(x => x <= ContextLimits.MaximumMessageCount)
+            .Distinct()
+            .Order();
 
     private string SessionCode => _conversationId == Guid.Empty
         ? "----"
@@ -424,6 +478,11 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (!_contextMessageLimitInitialized)
+        {
+            _contextMessageLimit = ContextLimits.DefaultMessageCount;
+            _contextMessageLimitInitialized = true;
+        }
         if (ConversationId is Guid requestedId &&
             requestedId != _conversationId)
         {
@@ -457,10 +516,20 @@
         try
         {
             await RefreshWalletAsync();
-            _pendingPlan = await Workflow.PrepareAsync(_prompt);
+            _pendingPlan = await Workflow.PrepareAsync(
+                _conversationId,
+                _prompt,
+                _contextMessageLimit,
+                _branchMessageId);
             _prompt = _pendingPlan.Prompt;
             _attemptIdempotencyKey = Guid.NewGuid().ToString("N");
             _lastFailure = null;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
+        {
+            _pendingPlan = null;
+            _error = exception.Message;
         }
         catch (Exception)
         {
@@ -1133,6 +1202,13 @@
 
     private static string RoleLabel(ChatMessageRole role) =>
         role == ChatMessageRole.User ? "VOCÊ" : "atos_AI";
+
+    private static string ContextRoleLabel(AiContextMessage message) =>
+        message.IsSummary
+            ? "RESUMO AUTOMÁTICO"
+            : message.Role == ChatMessageRole.User
+                ? "VOCÊ"
+                : "atos_AI";
 
     private static string? MessageMeta(ChatMessageSnapshot message) =>
         message.Route is null ||

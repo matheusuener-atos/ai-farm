@@ -20,11 +20,29 @@ public interface IWalletService
 }
 public sealed record AiRoute(string Provider, string Model, string PriceCatalogVersion);
 public sealed record PriceEstimate(long MaximumCostMinor);
+public sealed record AiContextMessage(
+    ChatMessageRole Role,
+    string Content,
+    bool IsSummary = false);
+public sealed record ChatContextPlan(
+    IReadOnlyList<AiContextMessage> Messages,
+    int IncludedMessageCount,
+    int OmittedMessageCount,
+    int EstimatedInputTokens,
+    int MaximumInputTokens)
+{
+    public bool UsesSummary => Messages.Any(x => x.IsSummary);
+}
 public sealed record ChatExecutionPlan(
     string Prompt,
     AiRoute Route,
-    long MaximumCostMinor);
-public sealed record AiProviderRequest(string Prompt, AiRoute Route);
+    long MaximumCostMinor,
+    ChatContextPlan? Context = null);
+public sealed record AiProviderRequest(
+    string Prompt,
+    AiRoute Route,
+    IReadOnlyList<AiContextMessage>? Context = null,
+    int? EstimatedInputTokens = null);
 public sealed record AiProviderResult(string Content, long InputUnits, long OutputUnits, long ActualCostMinor);
 
 public sealed record AiPriceCatalogEntry(
@@ -175,6 +193,13 @@ public interface IPriceEstimator
     Task<PriceEstimate> EstimateAsync(
         string prompt,
         AiRoute route,
+        CancellationToken cancellationToken);
+}
+
+public interface IAiRequestPriceEstimator
+{
+    Task<PriceEstimate> EstimateAsync(
+        AiProviderRequest request,
         CancellationToken cancellationToken);
 }
 

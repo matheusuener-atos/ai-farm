@@ -51,6 +51,20 @@ var executionLimits = new ChatExecutionLimits(
     builder.Configuration.GetValue(
         "AIFarm:Execution:MaximumCostPerRequestMinor",
         ChatExecutionLimits.Default.MaximumCostPerRequestMinor));
+var contextDefaults = ChatContextLimits.Default;
+var contextLimits = new ChatContextLimits(
+    builder.Configuration.GetValue(
+        "AIFarm:Context:DefaultMessageCount",
+        contextDefaults.DefaultMessageCount),
+    builder.Configuration.GetValue(
+        "AIFarm:Context:MaximumMessageCount",
+        contextDefaults.MaximumMessageCount),
+    builder.Configuration.GetValue(
+        "AIFarm:Context:MaximumInputTokens",
+        contextDefaults.MaximumInputTokens),
+    builder.Configuration.GetValue(
+        "AIFarm:Context:SummaryTokenBudget",
+        contextDefaults.SummaryTokenBudget)).Validate();
 var providerDefaults = AiProviderProtectionOptions.Default;
 var providerProtection = new AiProviderProtectionOptions(
     TimeSpan.FromSeconds(builder.Configuration.GetValue(
@@ -98,7 +112,8 @@ else if (!configuredProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
 builder.Services.AddAIFarmDevelopment(
     executionLimits,
     providerProtection,
-    openAi);
+    openAi,
+    contextLimits);
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();

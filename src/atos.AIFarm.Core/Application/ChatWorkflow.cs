@@ -9,11 +9,14 @@ public sealed class ChatWorkflow(
     IAiProvider provider,
     IChatStore chat,
     ChatExecutionLimits? executionLimits = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IChatContextPlanner? contextPlanner = null)
 {
     private readonly ChatExecutionLimits _executionLimits =
         ValidateLimits(executionLimits ?? ChatExecutionLimits.Default);
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly IChatContextPlanner _contextPlanner =
+        contextPlanner ?? new ChatContextPlanner();
 
     public async Task<ChatExecutionResult> SendAsync(
         string prompt,
@@ -34,7 +37,7 @@ public sealed class ChatWorkflow(
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        var plan = await PrepareAsync(prompt, cancellationToken);
+        var plan = await PrepareAsync(conversationId, prompt, cancellationToken: cancellationToken);
         return await SendAsync(
             conversationId,
             plan,
@@ -45,6 +48,51 @@ public sealed class ChatWorkflow(
     public async Task<ChatExecutionPlan> PrepareAsync(
         string prompt,
         CancellationToken cancellationToken = default)
+    {
+        return await PrepareCoreAsync(
+            prompt,
+            null,
+            null,
+            cancellationToken);
+    }
+
+    public async Task<ChatExecutionPlan> PrepareAsync(
+        Guid conversationId,
+        string prompt,
+        int? maximumContextMessages = null,
+        Guid? beforeMessageId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var conversation = await chat.GetConversationAsync(
+            conversationId,
+            cancellationToken) ?? throw new InvalidOperationException(
+                "A conversa não existe ou não pertence à conta atual.");
+        IReadOnlyList<ChatMessageSnapshot> messages = conversation.Messages;
+        if (beforeMessageId is Guid messageId)
+        {
+            var index = conversation.Messages
+                .Select((message, position) => new { message.Id, position })
+                .FirstOrDefault(x => x.Id == messageId)?.position ?? -1;
+            if (index < 0)
+            {
+                throw new InvalidOperationException(
+                    "A mensagem usada como ponto de contexto não existe.");
+            }
+            messages = conversation.Messages.Take(index).ToArray();
+        }
+
+        return await PrepareCoreAsync(
+            prompt,
+            messages,
+            maximumContextMessages,
+            cancellationToken);
+    }
+
+    private async Task<ChatExecutionPlan> PrepareCoreAsync(
+        string prompt,
+        IReadOnlyList<ChatMessageSnapshot>? messages,
+        int? maximumContextMessages,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -59,10 +107,18 @@ public sealed class ChatWorkflow(
         }
 
         var route = await router.SelectAsync(normalizedPrompt, cancellationToken);
-        var estimate = await pricing.EstimateAsync(
+        var context = _contextPlanner.Plan(
+            messages ?? [],
+            normalizedPrompt,
+            maximumContextMessages);
+        var request = new AiProviderRequest(
             normalizedPrompt,
             route,
-            cancellationToken);
+            context.Messages,
+            context.EstimatedInputTokens);
+        var estimate = pricing is IAiRequestPriceEstimator requestPricing
+            ? await requestPricing.EstimateAsync(request, cancellationToken)
+            : await pricing.EstimateAsync(normalizedPrompt, route, cancellationToken);
         if (estimate.MaximumCostMinor <= 0)
         {
             throw new InvalidOperationException("A estimativa de custo deve ser positiva.");
@@ -76,7 +132,8 @@ public sealed class ChatWorkflow(
         return new ChatExecutionPlan(
             normalizedPrompt,
             route,
-            estimate.MaximumCostMinor);
+            estimate.MaximumCostMinor,
+            context);
     }
 
     public async Task<ChatExecutionResult> SendAsync(
@@ -145,7 +202,11 @@ public sealed class ChatWorkflow(
         var startedAtUtc = _timeProvider.GetUtcNow();
         try
         {
-            var request = new AiProviderRequest(plan.Prompt, plan.Route);
+            var request = new AiProviderRequest(
+                plan.Prompt,
+                plan.Route,
+                plan.Context?.Messages,
+                plan.Context?.EstimatedInputTokens);
             AiProviderResult providerResult;
             if (onDelta is not null && provider is IAiStreamingProvider streamingProvider)
             {

@@ -17,6 +17,7 @@ public sealed record OpenAiProviderOptions(
     int MaximumOutputTokens,
     Uri ResponsesEndpoint)
 {
+    public const int ModelContextWindowTokens = 400_000;
     public static Uri DefaultEndpoint { get; } =
         new("https://api.openai.com/v1/responses");
 
@@ -38,6 +39,7 @@ public sealed record OpenAiProviderOptions(
 public sealed class OpenAiPriceCatalog :
     IAiRouteSelector,
     IPriceEstimator,
+    IAiRequestPriceEstimator,
     IAiPriceCatalog
 {
     private readonly AiPriceCatalogEntry _entry;
@@ -65,6 +67,22 @@ public sealed class OpenAiPriceCatalog :
         var entry = Get(route);
         var conservativeInputUnits = checked(
             Encoding.UTF8.GetByteCount(prompt) + entry.InputEstimateOverheadUnits);
+        return Task.FromResult(new PriceEstimate(entry.Cost(
+            conservativeInputUnits,
+            entry.MaximumOutputUnits)));
+    }
+
+    public Task<PriceEstimate> EstimateAsync(
+        AiProviderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var entry = Get(request.Route);
+        var contextBytes = request.Context?.Sum(message =>
+            Encoding.UTF8.GetByteCount(message.Content)) ?? 0;
+        var conservativeInputUnits = checked(
+            Encoding.UTF8.GetByteCount(request.Prompt) +
+            contextBytes +
+            entry.InputEstimateOverheadUnits);
         return Task.FromResult(new PriceEstimate(entry.Cost(
             conservativeInputUnits,
             entry.MaximumOutputUnits)));
@@ -197,14 +215,16 @@ public sealed class OpenAiResponsesProvider :
         CancellationToken cancellationToken)
     {
         var catalogEntry = _catalog.Get(request.Route);
+        ValidateContextWindow(request, catalogEntry);
         using var message = new HttpRequestMessage(HttpMethod.Post, _options.ResponsesEndpoint)
         {
             Content = JsonContent.Create(new
             {
                 model = _options.Model,
-                input = request.Prompt,
+                input = BuildInput(request),
                 max_output_tokens = catalogEntry.MaximumOutputUnits,
-                store = false
+                store = false,
+                truncation = "disabled"
             })
         };
         using var response = await _httpClient.SendAsync(
@@ -242,15 +262,17 @@ public sealed class OpenAiResponsesProvider :
     {
         ArgumentNullException.ThrowIfNull(onDelta);
         var catalogEntry = _catalog.Get(request.Route);
+        ValidateContextWindow(request, catalogEntry);
         using var message = new HttpRequestMessage(HttpMethod.Post, _options.ResponsesEndpoint)
         {
             Content = JsonContent.Create(new
             {
                 model = _options.Model,
-                input = request.Prompt,
+                input = BuildInput(request),
                 max_output_tokens = catalogEntry.MaximumOutputUnits,
                 store = false,
-                stream = true
+                stream = true,
+                truncation = "disabled"
             })
         };
         using var response = await _httpClient.SendAsync(
@@ -384,6 +406,41 @@ public sealed class OpenAiResponsesProvider :
     }
 
     public void Dispose() => _httpClient.Dispose();
+
+    private static object BuildInput(AiProviderRequest request)
+    {
+        if (request.Context is not { Count: > 0 })
+        {
+            return request.Prompt;
+        }
+
+        var input = request.Context
+            .Select(message => new ResponseInputMessage(
+                message.Role == ChatMessageRole.User ? "user" : "assistant",
+                message.Content))
+            .ToList();
+        input.Add(new ResponseInputMessage("user", request.Prompt));
+        return input;
+    }
+
+    private sealed record ResponseInputMessage(string Role, string Content);
+
+    private static void ValidateContextWindow(
+        AiProviderRequest request,
+        AiPriceCatalogEntry catalogEntry)
+    {
+        var inputBytes = Encoding.UTF8.GetByteCount(request.Prompt) +
+            (request.Context?.Sum(message =>
+                Encoding.UTF8.GetByteCount(message.Content)) ?? 0);
+        var messageOverhead = checked(((request.Context?.Count ?? 0) + 1) * 8);
+        var conservativeUpperBound = checked(
+            inputBytes + messageOverhead + catalogEntry.MaximumOutputUnits);
+        if (conservativeUpperBound > OpenAiProviderOptions.ModelContextWindowTokens)
+        {
+            throw new InvalidOperationException(
+                "O contexto excede a janela segura do modelo OpenAI configurado.");
+        }
+    }
 
     private static string ReadOutputText(JsonElement root)
     {

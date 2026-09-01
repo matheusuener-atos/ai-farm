@@ -94,6 +94,79 @@ public sealed class OpenAiResponsesProviderTests
     }
 
     [Fact]
+    public async Task ResponsesApiReceivesExplicitOrderedConversationContext()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "status": "completed",
+                  "output_text": "ok",
+                  "usage": { "input_tokens": 80, "output_tokens": 5 }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("atual", CancellationToken.None);
+
+        await provider.ExecuteAsync(
+            new AiProviderRequest(
+                "mensagem atual",
+                route,
+                [
+                    new AiContextMessage(
+                        ChatMessageRole.User,
+                        "resumo anterior",
+                        IsSummary: true),
+                    new AiContextMessage(
+                        ChatMessageRole.Assistant,
+                        "resposta recente")
+                ],
+                42),
+            CancellationToken.None);
+
+        using var body = JsonDocument.Parse(handler.RequestBody!);
+        var input = body.RootElement.GetProperty("input");
+        Assert.Equal(JsonValueKind.Array, input.ValueKind);
+        Assert.Equal(3, input.GetArrayLength());
+        Assert.Equal("user", input[0].GetProperty("role").GetString());
+        Assert.Equal("resumo anterior", input[0].GetProperty("content").GetString());
+        Assert.Equal("assistant", input[1].GetProperty("role").GetString());
+        Assert.Equal("user", input[2].GetProperty("role").GetString());
+        Assert.Equal("mensagem atual", input[2].GetProperty("content").GetString());
+        Assert.Equal("disabled", body.RootElement.GetProperty("truncation").GetString());
+    }
+
+    [Fact]
+    public async Task ProviderRejectsContextAboveModelWindowBeforeHttpCall()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ => throw new InvalidOperationException(
+            "O transporte não deveria ser chamado."));
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("atual", CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.ExecuteAsync(
+                new AiProviderRequest(
+                    "mensagem atual",
+                    route,
+                    [new AiContextMessage(
+                        ChatMessageRole.User,
+                        new string('x', OpenAiProviderOptions.ModelContextWindowTokens))]),
+                CancellationToken.None));
+
+        Assert.Contains("janela segura", error.Message);
+        Assert.Null(handler.RequestBody);
+    }
+
+    [Fact]
     public async Task FailedStreamExposesSafeRetryDetailsAfterPartialOutput()
     {
         var options = Options();

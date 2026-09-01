@@ -529,6 +529,98 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task PreflightUsesOnlyHistoryBeforeBranchPoint()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var firstOperation = Guid.NewGuid();
+        var secondOperation = Guid.NewGuid();
+        await chat.SaveCompletedAsync(
+            "primeira pergunta",
+            "context:first",
+            new ChatExecutionResult(
+                conversation.Id,
+                firstOperation,
+                "primeira resposta",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+        await chat.SaveCompletedAsync(
+            "mensagem que será editada",
+            "context:second",
+            new ChatExecutionResult(
+                conversation.Id,
+                secondOperation,
+                "continuação que não pode vazar",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+        var snapshot = await chat.GetConversationAsync(conversation.Id);
+        var branchPoint = snapshot!.Messages.Single(x =>
+            x.OperationId == secondOperation && x.Role == ChatMessageRole.User);
+        var workflow = NewWorkflow(
+            await FundedWalletAsync(),
+            new FakeAiProvider(),
+            chat);
+
+        var plan = await workflow.PrepareAsync(
+            conversation.Id,
+            "mensagem editada",
+            maximumContextMessages: 16,
+            beforeMessageId: branchPoint.Id);
+
+        Assert.NotNull(plan.Context);
+        Assert.Equal(2, plan.Context.IncludedMessageCount);
+        Assert.Contains(plan.Context.Messages, x => x.Content == "primeira pergunta");
+        Assert.Contains(plan.Context.Messages, x => x.Content == "primeira resposta");
+        Assert.DoesNotContain(
+            plan.Context.Messages,
+            x => x.Content.Contains("não pode vazar", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WorkflowSendsFrozenContextPlanToProvider()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        await chat.SaveCompletedAsync(
+            "contexto anterior",
+            "context:frozen",
+            new ChatExecutionResult(
+                conversation.Id,
+                Guid.NewGuid(),
+                "resposta anterior",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+        var provider = new CapturingProvider();
+        var workflow = NewWorkflow(wallet, provider, chat);
+        var plan = await workflow.PrepareAsync(
+            conversation.Id,
+            "nova pergunta",
+            maximumContextMessages: 8);
+
+        await workflow.SendAsync(
+            conversation.Id,
+            plan,
+            "context:send");
+
+        Assert.NotNull(provider.LastRequest);
+        Assert.Equal(plan.Context?.EstimatedInputTokens, provider.LastRequest.EstimatedInputTokens);
+        Assert.Collection(
+            provider.LastRequest.Context!,
+            message => Assert.Equal("contexto anterior", message.Content),
+            message => Assert.Equal("resposta anterior", message.Content));
+    }
+
+    [Fact]
     public async Task PromptAndCostLimitsAreEnforcedBeforeReservation()
     {
         var wallet = await FundedWalletAsync();
@@ -664,6 +756,23 @@ public sealed class ChatWorkflowTests
         {
             CallCount++;
             return Task.FromResult(new AiProviderResult("ok", 1, 1, Aic.FromAic(1)));
+        }
+    }
+
+    private sealed class CapturingProvider : IAiProvider
+    {
+        public AiProviderRequest? LastRequest { get; private set; }
+
+        public Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return Task.FromResult(new AiProviderResult(
+                "resposta nova",
+                request.EstimatedInputTokens ?? 1,
+                1,
+                Aic.FromAic(12)));
         }
     }
 

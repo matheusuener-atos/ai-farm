@@ -102,6 +102,19 @@ configuração do ASP.NET Core (por exemplo,
 - `CircuitBreakerFailureThreshold`: 3;
 - `CircuitBreakerOpenSeconds`: 30.
 
+O contexto do Chat também é controlado por ambiente:
+
+- `AIFarm__Context__DefaultMessageCount`: 16 mensagens anteriores;
+- `AIFarm__Context__MaximumMessageCount`: 32 mensagens anteriores;
+- `AIFarm__Context__MaximumInputTokens`: 32.000 tokens estimados;
+- `AIFarm__Context__SummaryTokenBudget`: 2.000 tokens estimados para resumo.
+
+O preflight congela e mostra o contexto antes da reserva. Mensagens recentes
+entram integralmente; as anteriores são condensadas em um resumo extrativo
+local, sem segunda chamada de IA e sem cobrança oculta. Edição e regeneração
+recortam o contexto antes da mensagem que originou o ramo. A Responses API
+recebe a sequência explícita com truncamento automático desabilitado.
+
 Cancelamentos solicitados pelo usuário não contam como falha do Provider. Uma
 estimativa acima do limite é rejeitada antes de reservar saldo, e timeout ou
 falha liberam a reserva normalmente.
@@ -157,6 +170,11 @@ Implementado:
 - cadastro, login e logout com ASP.NET Core Identity;
 - Wallet, Ledger e Chat isolados pela conta autenticada;
 - UI responsiva no sistema visual terminal/ASCII.
+- contexto inteligente com limite de mensagens configurável por execução;
+- estimativa preventiva de tokens e limite seguro de entrada;
+- resumo extrativo automático para histórico omitido;
+- inspeção, no preflight, do contexto efetivamente enviado ao Provider;
+- contexto de ramificações isolado da continuação original.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
