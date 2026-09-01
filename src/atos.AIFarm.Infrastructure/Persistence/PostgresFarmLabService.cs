@@ -22,14 +22,18 @@ internal sealed class PostgresFarmLabService(
     private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
     private const string NetworkPolicy = "DENY_ALL";
     private const string DataClassification = "STANDARD";
+    private static readonly TimeSpan AgentHeartbeatTolerance = TimeSpan.FromSeconds(90);
 
     public async Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
-        node.LastSeenAtUtc = timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
+        if (node.ConnectionKind == FarmNodeConnectionKind.Embedded.ToString())
+        {
+            node.LastSeenAtUtc = timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(cancellationToken);
+        }
         return await BuildDashboardAsync(db, node, cancellationToken);
     }
 
@@ -44,7 +48,8 @@ internal sealed class PostgresFarmLabService(
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
         node.Status = status.ToString();
-        node.LastSeenAtUtc = timeProvider.GetUtcNow();
+        if (node.ConnectionKind == FarmNodeConnectionKind.Embedded.ToString())
+            node.LastSeenAtUtc = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
         return await BuildDashboardAsync(db, node, cancellationToken);
     }
@@ -54,6 +59,9 @@ internal sealed class PostgresFarmLabService(
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        if (node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString())
+            throw new InvalidOperationException(
+                "Este node usa um Compute Agent remoto; o despacho de Jobs será habilitado no próximo incremento.");
         if (!Enum.TryParse<FarmNodeStatus>(node.Status, out var nodeStatus) ||
             nodeStatus != FarmNodeStatus.Online)
             throw new InvalidOperationException("Retome o node antes de executar um benchmark.");
@@ -190,6 +198,7 @@ internal sealed class PostgresFarmLabService(
             Name = $"LAB-{Environment.MachineName}".ToUpperInvariant(),
             Status = FarmNodeStatus.Online.ToString(),
             VerificationLevel = FarmVerificationLevel.Detected.ToString(),
+            ConnectionKind = FarmNodeConnectionKind.Embedded.ToString(),
             Runtime = $"{RuntimeInformation.FrameworkDescription} // {RuntimeInformation.OSDescription}",
             LogicalProcessors = Environment.ProcessorCount,
             MemoryBytes = Math.Max(0, GC.GetGCMemoryInfo().TotalAvailableMemoryBytes),
@@ -314,15 +323,28 @@ internal sealed class PostgresFarmLabService(
             OccurredAtUtc = occurredAtUtc
         });
 
-    private static FarmNodeSnapshot ToSnapshot(FarmNodeRecord node) => new(
-        node.Id,
-        node.Name,
-        Enum.Parse<FarmNodeStatus>(node.Status),
-        Enum.Parse<FarmVerificationLevel>(node.VerificationLevel),
-        node.Runtime,
-        node.LogicalProcessors,
-        node.MemoryBytes,
-        node.LastSeenAtUtc);
+    private FarmNodeSnapshot ToSnapshot(FarmNodeRecord node)
+    {
+        var connectionKind = Enum.TryParse<FarmNodeConnectionKind>(node.ConnectionKind, out var parsedKind)
+            ? parsedKind
+            : FarmNodeConnectionKind.Embedded;
+        var heartbeatFresh = connectionKind == FarmNodeConnectionKind.Embedded ||
+            timeProvider.GetUtcNow() - node.LastSeenAtUtc <= AgentHeartbeatTolerance;
+        var persistedStatus = Enum.Parse<FarmNodeStatus>(node.Status);
+        var effectiveStatus = heartbeatFresh ? persistedStatus : FarmNodeStatus.Offline;
+        return new FarmNodeSnapshot(
+            node.Id,
+            node.Name,
+            effectiveStatus,
+            Enum.Parse<FarmVerificationLevel>(node.VerificationLevel),
+            node.Runtime,
+            node.LogicalProcessors,
+            node.MemoryBytes,
+            node.LastSeenAtUtc,
+            connectionKind,
+            node.AgentVersion,
+            heartbeatFresh);
+    }
 
     private FarmJobSnapshot ToSnapshot(
         FarmJobRecord job,

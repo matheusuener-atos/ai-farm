@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IFarmLabService FarmLab
+@inject IFarmAgentService FarmAgent
 
 <PageTitle>Compute Lab // atos AI Farm</PageTitle>
 
@@ -52,24 +53,61 @@ else
                 <span>CU VERIFICADO</span>
                 <strong>@FormatCu(_dashboard.VerifiedComputeUnitsMilli)</strong>
             </article>
+            <article>
+                <span>CONEXÃO</span>
+                <strong>@ConnectionLabel(_dashboard.Node.ConnectionKind)</strong>
+            </article>
         </div>
 
         <p class="farm-runtime">@_dashboard.Node.Runtime</p>
 
         <div class="farm-controls">
-            @if (IsOnline)
+            @if (IsOnline && IsEmbedded)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR NODE ]</button>
                 <button type="button" @onclick="RunBenchmarkAsync" disabled="@_working">
                     @(_working ? "[ EXECUTANDO... ]" : "[ EXECUTAR BENCHMARK ]")
                 </button>
             }
-            else
+            else if (IsOnline)
+            {
+                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
+            }
+            else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
             {
                 <button type="button" @onclick="ResumeAsync" disabled="@_working">[ RETOMAR NODE ]</button>
             }
+            else
+            {
+                <button type="button" disabled>[ AGUARDANDO HEARTBEAT ]</button>
+            }
         </div>
         <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // SEM SHELL // SEM REDE // SEM AIC</small>
+    </section>
+
+    <section class="terminal farm-agent-panel">
+        <div class="terminal-title">COMPUTE AGENT // VÍNCULO DA MÁQUINA</div>
+        <p>
+            @if (IsEmbedded)
+            {
+                <text>Modo EMBEDDED: o benchmark roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
+            }
+            else
+            {
+                <text>Agent @_dashboard.Node.AgentVersion // último heartbeat @_dashboard.Node.LastSeenAtUtc.ToLocalTime().ToString("HH:mm:ss")</text>
+            }
+        </p>
+        <button type="button" class="button-secondary" @onclick="CreateEnrollmentAsync" disabled="@_working">
+            [ @(IsEmbedded ? "GERAR CÓDIGO DE VÍNCULO" : "ROTACIONAR CREDENCIAL") ]
+        </button>
+        @if (_enrollment is not null)
+        {
+            <div class="farm-enrollment-secret" role="status">
+                <strong>CÓDIGO ÚNICO // EXPIRES @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</strong>
+                <code>@_enrollment.Token</code>
+                <small>Copie agora. O código não será exibido novamente e o anterior foi invalidado.</small>
+            </div>
+        }
     </section>
 
     <section class="terminal farm-jobs">
@@ -140,7 +178,9 @@ else
     private FarmDashboard? _dashboard;
     private bool _working;
     private string? _error;
+    private FarmAgentEnrollment? _enrollment;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
+    private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -176,6 +216,17 @@ else
         finally { _working = false; }
     }
 
+    private async Task CreateEnrollmentAsync()
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try { _enrollment = await FarmAgent.CreateEnrollmentAsync(); }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        { _error = exception.Message; }
+        finally { _working = false; }
+    }
+
     private async Task ReloadAsync()
     {
         try { _dashboard = await FarmLab.GetDashboardAsync(); }
@@ -183,8 +234,16 @@ else
         { _error = exception.Message; }
     }
 
-    private static string NodeStatusLabel(FarmNodeStatus status) =>
-        status == FarmNodeStatus.Online ? "ONLINE" : "PAUSADO";
+    private static string NodeStatusLabel(FarmNodeStatus status) => status switch
+    {
+        FarmNodeStatus.Online => "ONLINE",
+        FarmNodeStatus.Paused => "PAUSADO",
+        FarmNodeStatus.Offline => "OFFLINE",
+        _ => status.ToString().ToUpperInvariant()
+    };
+
+    private static string ConnectionLabel(FarmNodeConnectionKind kind) =>
+        kind == FarmNodeConnectionKind.Agent ? "AGENT" : "EMBEDDED";
 
     private static string VerificationLabel(FarmVerificationLevel level) =>
         level == FarmVerificationLevel.Verified ? "VERIFICADO" : "DETECTADO";

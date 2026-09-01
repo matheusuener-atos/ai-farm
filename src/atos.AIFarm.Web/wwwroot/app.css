@@ -290,7 +290,7 @@ code { color: var(--white); }
 .farm-node-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid #4b3600; }
 .farm-node-header > div { display: grid; gap: .35rem; }
 .farm-node-header strong { color: var(--amber-bright); overflow-wrap: anywhere; }
-.farm-metrics { display: grid; grid-template-columns: repeat(4, 1fr); }
+.farm-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .farm-metrics article { display: grid; gap: .55rem; padding: 1rem; border-right: 1px solid #4b3600; }
 .farm-metrics article:last-child { border-right: 0; }
 .farm-metrics span, .farm-runtime { color: var(--muted); font-size: .68rem; }
@@ -298,6 +298,12 @@ code { color: var(--white); }
 .farm-runtime { margin: 0; padding: .8rem 1rem; border-top: 1px solid #4b3600; overflow-wrap: anywhere; }
 .farm-controls { display: flex; flex-wrap: wrap; gap: .6rem; padding: 1rem; border-top: 1px solid #4b3600; }
 .farm-node-panel > .classification-note { margin: 0; padding: 0 1rem 1rem; }
+.farm-agent-panel { margin-bottom: 1rem; padding: 0; }
+.farm-agent-panel > p, .farm-agent-panel > button { margin: 1rem; }
+.farm-enrollment-secret { display: grid; gap: .65rem; margin-top: 1rem; padding: 1rem; border-top: 1px solid var(--purple); background: #120b1d; }
+.farm-enrollment-secret strong { color: var(--purple-soft); }
+.farm-enrollment-secret code { padding: .75rem; border: 1px solid #5d3994; color: var(--white); background: var(--black); overflow-wrap: anywhere; user-select: all; }
+.farm-enrollment-secret small { color: var(--amber-bright); }
 .farm-jobs { padding: 0; }
 .farm-jobs > .muted { padding: 1rem; }
 .farm-job { padding: 1rem; border-top: 1px solid #292927; }

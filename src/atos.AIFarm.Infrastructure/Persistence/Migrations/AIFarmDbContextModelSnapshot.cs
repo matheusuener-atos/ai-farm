@@ -593,6 +593,39 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmAgentEnrollmentRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConsumedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "ExpiresAtUtc");
+
+                    b.ToTable("farm_agent_enrollments", "aifarm");
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobEventRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -747,6 +780,24 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AgentCredentialHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("AgentCredentialIssuedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AgentVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ConnectionKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("Embedded");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -784,9 +835,14 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasIndex("AccountId")
                         .IsUnique();
 
+                    b.HasIndex("AgentCredentialHash")
+                        .IsUnique();
+
                     b.ToTable("farm_nodes", "aifarm", t =>
                         {
-                            t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused')");
+                            t.HasCheckConstraint("CK_farm_nodes_connection_kind", "\"ConnectionKind\" IN ('Embedded', 'Agent')");
+
+                            t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");
 
                             t.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
                         });
@@ -1109,6 +1165,15 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ParentConversationId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmAgentEnrollmentRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobEventRecord", b =>

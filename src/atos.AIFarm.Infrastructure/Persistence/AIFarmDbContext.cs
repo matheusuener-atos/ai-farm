@@ -20,6 +20,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
     public DbSet<FarmNodeRecord> FarmNodes => Set<FarmNodeRecord>();
+    public DbSet<FarmAgentEnrollmentRecord> FarmAgentEnrollments => Set<FarmAgentEnrollmentRecord>();
     public DbSet<FarmJobRecord> FarmJobs => Set<FarmJobRecord>();
     public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
 
@@ -238,15 +239,30 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("farm_nodes", table =>
             {
-                table.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused')");
+                table.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");
                 table.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
+                table.HasCheckConstraint("CK_farm_nodes_connection_kind", "\"ConnectionKind\" IN ('Embedded', 'Agent')");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.HasIndex(x => x.AgentCredentialHash).IsUnique();
             entity.Property(x => x.Name).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.VerificationLevel).HasMaxLength(24);
+            entity.Property(x => x.ConnectionKind).HasMaxLength(24).HasDefaultValue("Embedded");
+            entity.Property(x => x.AgentVersion).HasMaxLength(80);
+            entity.Property(x => x.AgentCredentialHash).HasMaxLength(64);
             entity.Property(x => x.Runtime).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmAgentEnrollmentRecord>(entity =>
+        {
+            entity.ToTable("farm_agent_enrollments");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.ExpiresAtUtc });
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -319,11 +335,25 @@ public sealed class FarmNodeRecord
     public string Name { get; set; } = string.Empty;
     public string Status { get; set; } = "Online";
     public string VerificationLevel { get; set; } = "Detected";
+    public string ConnectionKind { get; set; } = "Embedded";
+    public string? AgentVersion { get; set; }
+    public string? AgentCredentialHash { get; set; }
+    public DateTimeOffset? AgentCredentialIssuedAtUtc { get; set; }
     public string Runtime { get; set; } = string.Empty;
     public int LogicalProcessors { get; set; }
     public long MemoryBytes { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset LastSeenAtUtc { get; set; }
+}
+
+public sealed class FarmAgentEnrollmentRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string TokenHash { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
 }
 
 public sealed class FarmJobRecord

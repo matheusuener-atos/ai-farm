@@ -12,8 +12,10 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
@@ -39,6 +41,20 @@ builder.Services.AddAuthentication(options =>
     .AddIdentityCookies();
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("farm-agent", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+});
 if (builder.Environment.IsDevelopment())
 {
     var developmentKeys = Path.Combine(builder.Environment.ContentRootPath, ".aifarm-keys");
@@ -223,6 +239,7 @@ if (!app.Environment.IsDevelopment())
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
@@ -262,6 +279,53 @@ app.MapGet("/api/chat/conversations/{conversationId:guid}/export/{format}", asyn
         ? Results.NotFound()
         : Results.File(export.Content, export.ContentType, export.FileName);
 }).RequireAuthorization();
+
+app.MapPost("/api/farm/agents/enroll", async (
+    HttpRequest request,
+    HttpResponse response,
+    FarmAgentEnrollmentRequest agent,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var token = request.Headers["X-Enrollment-Token"].ToString();
+    try
+    {
+        var enrollment = await farmAgents.EnrollAsync(token, agent, cancellationToken);
+        return enrollment is null ? Results.Unauthorized() : Results.Ok(enrollment);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/heartbeat", async (
+    HttpRequest request,
+    HttpResponse response,
+    FarmAgentHeartbeatRequest heartbeat,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var authorization = request.Headers.Authorization.ToString();
+    var credential = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? authorization["Bearer ".Length..].Trim()
+        : string.Empty;
+    try
+    {
+        var result = await farmAgents.HeartbeatAsync(credential, heartbeat, cancellationToken);
+        return result is null ? Results.Unauthorized() : Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

@@ -104,10 +104,70 @@ public sealed class PostgresFarmLabTests
         }
     }
 
-    private static ServiceProvider BuildProvider(string connectionString, AIFarmIdentity identity)
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task AgentEnrollmentIsOneTimeAndHeartbeatExpiresOffline()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos agent protocol test");
+        var clock = new AdjustableTimeProvider(new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+            Assert.Equal(FarmNodeConnectionKind.Embedded, (await lab.GetDashboardAsync()).Node.ConnectionKind);
+
+            var enrollment = await agents.CreateEnrollmentAsync();
+            var request = new FarmAgentEnrollmentRequest(
+                "LAB-AGENT-01",
+                ".NET 10 // WINDOWS",
+                8,
+                16L * 1024 * 1024 * 1024,
+                "atos-agent/0.1.0");
+            var linked = await agents.EnrollAsync(enrollment.Token, request);
+
+            Assert.NotNull(linked);
+            Assert.Null(await agents.EnrollAsync(enrollment.Token, request));
+            Assert.Null(await agents.HeartbeatAsync(
+                "afc_invalid",
+                new FarmAgentHeartbeatRequest(request.Runtime, 8, request.MemoryBytes, request.AgentVersion)));
+
+            var heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(request.Runtime, 8, request.MemoryBytes, request.AgentVersion));
+            Assert.NotNull(heartbeat);
+            Assert.True(heartbeat.AcceptJobs);
+
+            var online = await lab.GetDashboardAsync();
+            Assert.Equal(FarmNodeConnectionKind.Agent, online.Node.ConnectionKind);
+            Assert.Equal(FarmNodeStatus.Online, online.Node.Status);
+            Assert.Equal("atos-agent/0.1.0", online.Node.AgentVersion);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => lab.RunBenchmarkAsync());
+
+            clock.Advance(TimeSpan.FromSeconds(91));
+            var offline = await lab.GetDashboardAsync();
+            Assert.Equal(FarmNodeStatus.Offline, offline.Node.Status);
+            Assert.False(offline.Node.IsHeartbeatFresh);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, accountId);
+        }
+    }
+
+    private static ServiceProvider BuildProvider(
+        string connectionString,
+        AIFarmIdentity identity,
+        TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        if (timeProvider is not null) services.AddSingleton(timeProvider);
         services.AddAIFarmDevelopment();
         services.AddAIFarmPostgres(connectionString, identity);
         return services.BuildServiceProvider();
@@ -136,6 +196,7 @@ public sealed class PostgresFarmLabTests
             new AIFarmIdentity(accountId, accountId, "cleanup"));
         var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
+        db.FarmAgentEnrollments.RemoveRange(db.FarmAgentEnrollments.Where(x => x.AccountId == accountId));
         var jobIds = await db.FarmJobs.Where(x => x.AccountId == accountId).Select(x => x.Id).ToArrayAsync();
         db.FarmJobEvents.RemoveRange(db.FarmJobEvents.Where(x => jobIds.Contains(x.JobId)));
         db.FarmJobs.RemoveRange(db.FarmJobs.Where(x => x.AccountId == accountId));
@@ -157,6 +218,13 @@ public sealed class PostgresFarmLabTests
         db.Wallets.RemoveRange(db.Wallets.Where(x => x.AccountId == accountId));
         db.Accounts.RemoveRange(db.Accounts.Where(x => x.Id == accountId));
         await db.SaveChangesAsync();
+    }
+
+    private sealed class AdjustableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset current = utcNow;
+        public override DateTimeOffset GetUtcNow() => current;
+        public void Advance(TimeSpan value) => current = current.Add(value);
     }
 
     private static string? ReadLocalVariable(string key)

@@ -225,6 +225,55 @@ shell, imagem de container, egress ou Jobs enviados pelo usuário. O hardware
 exibido pertence ao host onde a aplicação está executando — localmente, a
 máquina de desenvolvimento; no Render, o container do serviço — e ainda não
 representa um Compute Agent instalado no computador do usuário.
+
+### Vínculo experimental do Compute Agent
+
+O painel `/farm` diferencia o laboratório `EMBEDDED` de um `AGENT` externo.
+O usuário autenticado pode gerar um código de vínculo de uso único, válido por
+10 minutos. Gerar outro código invalida os anteriores. Depois do vínculo, o
+Agent recebe uma credencial de heartbeat que só é armazenada como SHA-256 no
+PostgreSQL; a credencial em texto puro é retornada uma única vez.
+
+Enquanto o executável dedicado do Agent não faz parte da solução, o protocolo
+pode ser provado em desenvolvimento com PowerShell. Copie o código exibido no
+painel e execute:
+
+```powershell
+$baseUrl = "http://localhost:5159"
+$enrollmentToken = "afe_COLE_O_CODIGO_AQUI"
+$inventory = @{
+    name = $env:COMPUTERNAME
+    runtime = ".NET 10 // Windows"
+    logicalProcessors = [Environment]::ProcessorCount
+    memoryBytes = [GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes
+    agentVersion = "atos-agent/manual-v1"
+} | ConvertTo-Json
+$linked = Invoke-RestMethod -Method Post `
+    -Uri "$baseUrl/api/farm/agents/enroll" `
+    -Headers @{ "X-Enrollment-Token" = $enrollmentToken } `
+    -ContentType "application/json" -Body $inventory
+```
+
+Envie então um heartbeat com a credencial retornada em `$linked.credential`:
+
+```powershell
+$heartbeat = @{
+    runtime = ".NET 10 // Windows"
+    logicalProcessors = [Environment]::ProcessorCount
+    memoryBytes = [GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes
+    agentVersion = "atos-agent/manual-v1"
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+    -Uri "$baseUrl/api/farm/agents/heartbeat" `
+    -Headers @{ Authorization = "Bearer $($linked.credential)" } `
+    -ContentType "application/json" -Body $heartbeat
+```
+
+Após 90 segundos sem heartbeat o painel marca o Agent como `OFFLINE`. Nenhuma
+credencial ou código deve ser colocado no Git, em screenshots ou em logs. O
+despacho remoto de Jobs ainda permanece bloqueado: este incremento prova apenas
+identidade, inventário e presença do Agent sem fingir execução no host web.
+
 ## Estado do Marco 1
 
 Implementado:
@@ -279,6 +328,7 @@ Implementado:
 - satisfação agregada por execução no painel operacional;
 - exportação autenticada e portável de conversas em Markdown e JSON.
 - Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
+- protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
