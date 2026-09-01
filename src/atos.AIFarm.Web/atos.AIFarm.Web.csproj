@@ -10,7 +10,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
+
+  <Target Name="VerifyBlazorRuntimeAsset" AfterTargets="Publish">
+    <Error
+      Condition="!Exists('$(PublishDir)wwwroot/_framework/blazor.web.js')"
+      Text="The published application is missing wwwroot/_framework/blazor.web.js; interactive server components would not work." />
+  </Target>
 
   <ItemGroup>
     <InternalsVisibleTo Include="atos.AIFarm.IntegrationTests" />

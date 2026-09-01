@@ -200,6 +200,10 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+// Keep a physical-file fallback for framework assets. MapStaticAssets remains
+// enabled below for fingerprinting and compression, while this prevents a
+// published Blazor runtime file from becoming an application-level 404.
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
