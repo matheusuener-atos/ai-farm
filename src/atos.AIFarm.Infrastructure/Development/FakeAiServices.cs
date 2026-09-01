@@ -6,7 +6,10 @@ namespace atos.AIFarm.Infrastructure.Development;
 
 public sealed class FixedPriceEstimator : IPriceEstimator
 {
-    public Task<PriceEstimate> EstimateAsync(string prompt, CancellationToken cancellationToken) =>
+    public Task<PriceEstimate> EstimateAsync(
+        string prompt,
+        AiRoute route,
+        CancellationToken cancellationToken) =>
         Task.FromResult(new PriceEstimate(Aic.FromAic(20)));
 }
 public sealed class BestAvailableRouteSelector : IAiRouteSelector
@@ -31,6 +34,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
 {
     private readonly object _sync = new();
     private readonly ConcurrentDictionary<string, ChatExecutionResult> _results = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, FailedChatExecution> _failures = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, ConversationState> _conversations = [];
 
     public Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
@@ -228,6 +232,15 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         return Task.CompletedTask;
     }
 
+    public Task SaveFailedAsync(
+        string idempotencyKey,
+        FailedChatExecution failure,
+        CancellationToken cancellationToken)
+    {
+        _failures.TryAdd(idempotencyKey, failure);
+        return Task.CompletedTask;
+    }
+
     public Task<AiUsageDashboard> GetDashboardAsync(
         int recentLimit = 50,
         CancellationToken cancellationToken = default)
@@ -240,30 +253,50 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         lock (_sync)
         {
             var results = _results.Values.ToArray();
+            var failures = _failures.Values.ToArray();
             var totals = new AiUsageTotals(
-                results.Length,
-                results.Select(x => x.ConversationId).Distinct().Count(),
+                results.Length + failures.Length,
+                results.Select(x => x.ConversationId)
+                    .Concat(failures.Select(x => x.ConversationId))
+                    .Distinct()
+                    .Count(),
                 results.Sum(x => x.InputUnits),
                 results.Sum(x => x.OutputUnits),
-                results.Sum(x => x.EstimatedCostMinor),
+                results.Sum(x => x.EstimatedCostMinor) +
+                    failures.Sum(x => x.EstimatedCostMinor),
                 results.Sum(x => x.ActualCostMinor));
-            var executions = results
+            var completed = results.Select(x => new AiExecutionSummary(
+                x.OperationId,
+                x.ConversationId,
+                _conversations.GetValueOrDefault(x.ConversationId)?.Title,
+                x.Route.Provider,
+                x.Route.Model,
+                x.Route.PriceCatalogVersion,
+                x.InputUnits,
+                x.OutputUnits,
+                x.EstimatedCostMinor,
+                x.ActualCostMinor,
+                "Completed",
+                x.StartedAtUtc ?? DateTimeOffset.MinValue,
+                x.FinishedAtUtc));
+            var failed = failures.Select(x => new AiExecutionSummary(
+                x.OperationId,
+                x.ConversationId,
+                _conversations.GetValueOrDefault(x.ConversationId)?.Title,
+                x.Route.Provider,
+                x.Route.Model,
+                x.Route.PriceCatalogVersion,
+                0,
+                0,
+                x.EstimatedCostMinor,
+                0,
+                x.FailureCode,
+                x.StartedAtUtc,
+                x.FinishedAtUtc));
+            var executions = completed
+                .Concat(failed)
                 .OrderByDescending(x => x.FinishedAtUtc)
                 .Take(recentLimit)
-                .Select(x => new AiExecutionSummary(
-                    x.OperationId,
-                    x.ConversationId,
-                    _conversations.GetValueOrDefault(x.ConversationId)?.Title,
-                    x.Route.Provider,
-                    x.Route.Model,
-                    x.Route.PriceCatalogVersion,
-                    x.InputUnits,
-                    x.OutputUnits,
-                    x.EstimatedCostMinor,
-                    x.ActualCostMinor,
-                    "Completed",
-                    x.StartedAtUtc ?? DateTimeOffset.MinValue,
-                    x.FinishedAtUtc))
                 .ToArray();
             return Task.FromResult(new AiUsageDashboard(totals, executions));
         }

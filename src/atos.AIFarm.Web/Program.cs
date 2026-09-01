@@ -2,6 +2,7 @@ using atos.AIFarm.Core.Application;
 using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Development;
 using atos.AIFarm.Infrastructure.Persistence;
+using atos.AIFarm.Infrastructure.Providers.OpenAI;
 using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
 using atos.AIFarm.Web.Components.Account;
@@ -61,7 +62,43 @@ var providerProtection = new AiProviderProtectionOptions(
     TimeSpan.FromSeconds(builder.Configuration.GetValue(
         "AIFarm:Execution:CircuitBreakerOpenSeconds",
         providerDefaults.CircuitBreakerOpenDuration.TotalSeconds)));
-builder.Services.AddAIFarmDevelopment(executionLimits, providerProtection);
+var configuredProvider = builder.Configuration["AIFarm:AI:Provider"] ?? "Fake";
+OpenAiProviderOptions? openAi = null;
+if (configuredProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+{
+    var apiKey = builder.Configuration["OPENAI_API_KEY"];
+    if (string.IsNullOrWhiteSpace(apiKey))
+    {
+        throw new InvalidOperationException(
+            "OPENAI_API_KEY is required when AIFarm:AI:Provider is OpenAI.");
+    }
+
+    openAi = new OpenAiProviderOptions(
+        apiKey,
+        builder.Configuration["AIFarm:AI:OpenAI:Model"] ??
+            "gpt-5.4-mini-2026-03-17",
+        builder.Configuration["AIFarm:AI:OpenAI:PriceCatalogVersion"] ??
+            "openai-gpt-5.4-mini-2026-03-17-aic-v1",
+        builder.Configuration.GetValue<long>(
+            "AIFarm:AI:OpenAI:InputCostPerMillionMinor",
+            750_000),
+        builder.Configuration.GetValue<long>(
+            "AIFarm:AI:OpenAI:OutputCostPerMillionMinor",
+            4_500_000),
+        builder.Configuration.GetValue<int>(
+            "AIFarm:AI:OpenAI:MaximumOutputTokens",
+            512),
+        OpenAiProviderOptions.DefaultEndpoint);
+}
+else if (!configuredProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException(
+        $"AIFarm:AI:Provider '{configuredProvider}' is not supported.");
+}
+builder.Services.AddAIFarmDevelopment(
+    executionLimits,
+    providerProtection,
+    openAi);
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();

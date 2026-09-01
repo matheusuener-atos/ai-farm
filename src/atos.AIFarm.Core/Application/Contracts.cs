@@ -27,6 +27,34 @@ public sealed record ChatExecutionPlan(
 public sealed record AiProviderRequest(string Prompt, AiRoute Route);
 public sealed record AiProviderResult(string Content, long InputUnits, long OutputUnits, long ActualCostMinor);
 
+public sealed record AiPriceCatalogEntry(
+    AiRoute Route,
+    long InputCostPerMillionMinor,
+    long OutputCostPerMillionMinor,
+    int MaximumOutputUnits,
+    int InputEstimateOverheadUnits = 256)
+{
+    public long Cost(long inputUnits, long outputUnits)
+    {
+        if (inputUnits < 0 || outputUnits < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(inputUnits));
+        }
+
+        return checked(
+            CeilingRatio(inputUnits, InputCostPerMillionMinor) +
+            CeilingRatio(outputUnits, OutputCostPerMillionMinor));
+    }
+
+    private static long CeilingRatio(long units, long costPerMillion) =>
+        units == 0 ? 0 : checked((units * costPerMillion + 999_999) / 1_000_000);
+}
+
+public interface IAiPriceCatalog
+{
+    AiPriceCatalogEntry Get(AiRoute route);
+}
+
 public enum ChatMessageRole
 {
     User,
@@ -100,7 +128,10 @@ public static class ConversationTitle
 
 public interface IPriceEstimator
 {
-    Task<PriceEstimate> EstimateAsync(string prompt, CancellationToken cancellationToken);
+    Task<PriceEstimate> EstimateAsync(
+        string prompt,
+        AiRoute route,
+        CancellationToken cancellationToken);
 }
 
 public interface IAiRouteSelector
@@ -125,6 +156,15 @@ public sealed record ChatExecutionResult(
     long OutputUnits = 0,
     DateTimeOffset? StartedAtUtc = null,
     DateTimeOffset? FinishedAtUtc = null);
+
+public sealed record FailedChatExecution(
+    Guid ConversationId,
+    Guid OperationId,
+    AiRoute Route,
+    long EstimatedCostMinor,
+    string FailureCode,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset FinishedAtUtc);
 
 public sealed record ChatExecutionLimits(
     int MaximumPromptCharacters,
@@ -200,5 +240,9 @@ public interface IChatStore
         string prompt,
         string idempotencyKey,
         ChatExecutionResult result,
+        CancellationToken cancellationToken);
+    Task SaveFailedAsync(
+        string idempotencyKey,
+        FailedChatExecution failure,
         CancellationToken cancellationToken);
 }

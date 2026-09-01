@@ -587,7 +587,8 @@ public sealed class PostgresChatStore(
             from request in db.AiRequests
             join execution in db.AiExecutions on request.Id equals execution.AiRequestId
             where request.AccountId == identity.AccountId &&
-                  request.IdempotencyKey == idempotencyKey
+                  request.IdempotencyKey == idempotencyKey &&
+                  execution.Status == "Completed"
             select new { request, execution }).SingleOrDefaultAsync(cancellationToken);
         if (stored is null)
         {
@@ -690,6 +691,60 @@ public sealed class PostgresChatStore(
             });
         conversation.Title ??= ConversationTitle.FromPrompt(prompt);
         conversation.UpdatedAtUtc = now;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SaveFailedAsync(
+        string idempotencyKey,
+        FailedChatExecution failure,
+        CancellationToken cancellationToken)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (await db.AiRequests.AnyAsync(
+                x => x.AccountId == identity.AccountId &&
+                     x.IdempotencyKey == idempotencyKey,
+                cancellationToken))
+        {
+            return;
+        }
+
+        var conversation = await db.Conversations.SingleAsync(
+            x => x.Id == failure.ConversationId &&
+                 x.AccountId == identity.AccountId,
+            cancellationToken);
+        var requestId = Guid.NewGuid();
+        db.AiRequests.Add(new AiRequestRecord
+        {
+            Id = requestId,
+            AccountId = identity.AccountId,
+            ConversationId = failure.ConversationId,
+            OperationId = failure.OperationId,
+            Modality = "Chat",
+            DataClassification = "Standard",
+            RequestedRoute = $"{failure.Route.Provider}/{failure.Route.Model}",
+            MaxCostMinor = failure.EstimatedCostMinor,
+            Status = failure.FailureCode,
+            IdempotencyKey = idempotencyKey,
+            CreatedAtUtc = failure.StartedAtUtc
+        });
+        db.AiExecutions.Add(new AiExecutionRecord
+        {
+            Id = Guid.NewGuid(),
+            AiRequestId = requestId,
+            Provider = failure.Route.Provider,
+            Model = failure.Route.Model,
+            PriceCatalogVersion = failure.Route.PriceCatalogVersion,
+            EstimatedCostMinor = failure.EstimatedCostMinor,
+            ActualCostMinor = 0,
+            InputUnits = 0,
+            OutputUnits = 0,
+            Status = failure.FailureCode,
+            Response = string.Empty,
+            StartedAtUtc = failure.StartedAtUtc,
+            FinishedAtUtc = failure.FinishedAtUtc
+        });
+        conversation.UpdatedAtUtc = failure.FinishedAtUtc;
         await db.SaveChangesAsync(cancellationToken);
     }
 

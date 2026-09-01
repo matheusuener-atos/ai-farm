@@ -2,6 +2,7 @@ using atos.AIFarm.Core.Application;
 using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure.Development;
 using atos.AIFarm.Infrastructure.Persistence;
+using atos.AIFarm.Infrastructure.Providers.OpenAI;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -13,7 +14,8 @@ public static class DependencyInjection
     public static IServiceCollection AddAIFarmDevelopment(
         this IServiceCollection services,
         ChatExecutionLimits? executionLimits = null,
-        AiProviderProtectionOptions? providerProtection = null)
+        AiProviderProtectionOptions? providerProtection = null,
+        OpenAiProviderOptions? openAi = null)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton(executionLimits ?? ChatExecutionLimits.Default);
@@ -29,9 +31,27 @@ public static class DependencyInjection
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageQuery>(provider =>
             provider.GetRequiredService<InMemoryChatStore>());
-        services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
-        services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
-        services.AddSingleton<IAiProviderClient, FakeAiProvider>();
+        if (openAi is null)
+        {
+            services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
+            services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
+            services.AddSingleton<IAiProviderClient, FakeAiProvider>();
+        }
+        else
+        {
+            openAi.Validate();
+            services.AddSingleton(openAi);
+            services.AddSingleton<OpenAiPriceCatalog>();
+            services.AddSingleton<IAiPriceCatalog>(provider =>
+                provider.GetRequiredService<OpenAiPriceCatalog>());
+            services.AddSingleton<IPriceEstimator>(provider =>
+                provider.GetRequiredService<OpenAiPriceCatalog>());
+            services.AddSingleton<IAiRouteSelector>(provider =>
+                provider.GetRequiredService<OpenAiPriceCatalog>());
+            services.AddSingleton<OpenAiResponsesProvider>();
+            services.AddSingleton<IAiProviderClient>(provider =>
+                provider.GetRequiredService<OpenAiResponsesProvider>());
+        }
         services.AddSingleton<IAiProvider, ProtectedAiProvider>();
         services.AddScoped<ChatWorkflow>();
         services.AddHostedService<ReservationExpirationWorker>();

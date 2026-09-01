@@ -67,7 +67,8 @@ public sealed class ChatWorkflowTests
     public async Task ProviderFailureReleasesReservationWithoutCharge()
     {
         var wallet = await FundedWalletAsync();
-        var workflow = NewWorkflow(wallet, new ThrowingProvider());
+        var chat = new InMemoryChatStore();
+        var workflow = NewWorkflow(wallet, new ThrowingProvider(), chat);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             workflow.SendAsync("falhar", "request-failure"));
@@ -76,6 +77,9 @@ public sealed class ChatWorkflowTests
         Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
         Assert.Equal(0, snapshot.Balance.ReservedMinor);
         Assert.DoesNotContain(snapshot.Transactions, x => x.Type == LedgerTransactionType.Capture);
+        var failed = Assert.Single((await chat.GetDashboardAsync()).RecentExecutions);
+        Assert.Equal("ProviderFailure", failed.Status);
+        Assert.Equal(0, failed.ActualCostMinor);
     }
 
     [Fact]
@@ -97,15 +101,25 @@ public sealed class ChatWorkflowTests
     public async Task CancellationReleasesReservation()
     {
         var wallet = await FundedWalletAsync();
-        var workflow = NewWorkflow(wallet, new WaitingProvider());
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(30));
+        var chat = new InMemoryChatStore();
+        var provider = new WaitingProvider();
+        var workflow = NewWorkflow(wallet, provider, chat);
+        using var cancellation = new CancellationTokenSource();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            workflow.SendAsync("cancelar", "request-cancel", cancellation.Token));
+        var execution = workflow.SendAsync(
+            "cancelar",
+            "request-cancel",
+            cancellation.Token);
+        await provider.Started;
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
         var snapshot = await wallet.GetSnapshotAsync();
 
         Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
         Assert.Equal(0, snapshot.Balance.ReservedMinor);
+        Assert.Equal(
+            "Cancelled",
+            Assert.Single((await chat.GetDashboardAsync()).RecentExecutions).Status);
     }
 
     [Fact]
@@ -378,8 +392,14 @@ public sealed class ChatWorkflowTests
 
     private sealed class WaitingProvider : IAiProvider
     {
+        private readonly TaskCompletionSource _started = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
         public async Task<AiProviderResult> ExecuteAsync(AiProviderRequest request, CancellationToken cancellationToken)
         {
+            _started.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException("Inalcançável");
         }

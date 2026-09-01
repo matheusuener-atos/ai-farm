@@ -158,7 +158,34 @@ Implementado:
 - Wallet, Ledger e Chat isolados pela conta autenticada;
 - UI responsiva no sistema visual terminal/ASCII.
 
-O Marco 1 está funcionalmente completo com o Fake Provider. Integrações reais,
-políticas comerciais e a Farm distribuída continuam fora deste marco.
+O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
+integração real está implementada no Marco 2 abaixo; sua prova com orçamento
+controlado depende da configuração de uma chave. Políticas comerciais e a Farm
+distribuída continuam fora deste marco.
+
+## Marco 2 — Provider OpenAI
+
+A primeira integração real usa a Responses API server-side, com o snapshot
+`gpt-5.4-mini-2026-03-17`. Fake continua sendo o padrão para desenvolvimento e
+testes sem custo. Para ativar localmente, acrescente a `.env.local`:
+
+```dotenv
+AIFarm__AI__Provider=OpenAI
+OPENAI_API_KEY=adicione-a-chave-do-projeto-aqui
+```
+
+No Render, crie as mesmas duas variáveis em **Environment** somente quando for
+executar o teste controlado. Nunca coloque a chave em `appsettings.json`, no
+Git ou em componentes `.razor`.
+
+O catálogo `openai-gpt-5.4-mini-2026-03-17-aic-v1` fixa modelo, limite de 512
+tokens de saída e tarifas internas em mAIC por milhão de tokens. Essas tarifas
+são experimentais e não estabelecem paridade pública entre AIC e USD. Alterar
+tarifa ou modelo exige uma nova versão de catálogo.
+
+A resposta é criada com `store=false`. A aplicação captura a medição retornada
+pela API, calcula o custo real pelo catálogo ativo e registra sucessos, timeouts,
+cancelamentos e falhas no painel `/operations`, sem copiar prompts ou respostas
+para logs de erro.
 
 Consulte [ADR 0001](docs/ADR/0001-ledger-experimental.md) para as decisões experimentais deste incremento.

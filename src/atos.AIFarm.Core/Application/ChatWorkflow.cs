@@ -59,7 +59,10 @@ public sealed class ChatWorkflow(
         }
 
         var route = await router.SelectAsync(normalizedPrompt, cancellationToken);
-        var estimate = await pricing.EstimateAsync(normalizedPrompt, cancellationToken);
+        var estimate = await pricing.EstimateAsync(
+            normalizedPrompt,
+            route,
+            cancellationToken);
         if (estimate.MaximumCostMinor <= 0)
         {
             throw new InvalidOperationException("A estimativa de custo deve ser positiva.");
@@ -106,9 +109,9 @@ public sealed class ChatWorkflow(
             $"{idempotencyKey}:reserve",
             cancellationToken);
 
+        var startedAtUtc = _timeProvider.GetUtcNow();
         try
         {
-            var startedAtUtc = _timeProvider.GetUtcNow();
             var providerResult = await provider.ExecuteAsync(
                 new AiProviderRequest(plan.Prompt, plan.Route),
                 cancellationToken);
@@ -139,12 +142,23 @@ public sealed class ChatWorkflow(
                 CancellationToken.None);
             return result;
         }
-        catch
+        catch (Exception exception)
         {
             await wallet.ReleaseAsync(
                 reservation.ReservationId,
                 $"{idempotencyKey}:release",
                 "Execução de IA não concluída",
+                CancellationToken.None);
+            await chat.SaveFailedAsync(
+                idempotencyKey,
+                new FailedChatExecution(
+                    conversationId,
+                    operationId,
+                    plan.Route,
+                    plan.MaximumCostMinor,
+                    FailureCode(exception),
+                    startedAtUtc,
+                    _timeProvider.GetUtcNow()),
                 CancellationToken.None);
             throw;
         }
@@ -175,4 +189,11 @@ public sealed class ChatWorkflow(
 
         return limits;
     }
+
+    private static string FailureCode(Exception exception) => exception switch
+    {
+        OperationCanceledException => "Cancelled",
+        TimeoutException => "Timeout",
+        _ => "ProviderFailure"
+    };
 }

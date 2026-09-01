@@ -63,6 +63,18 @@ public sealed class PostgresAccountIsolationTests
                 await firstStore.ListArchivedConversationsAsync();
             var secondArchivedSummaries =
                 await secondStore.ListArchivedConversationsAsync();
+            var failureStartedAt = DateTimeOffset.UtcNow;
+            await firstStore.SaveFailedAsync(
+                $"integration:failure:{firstIdentity.AccountId:N}",
+                new FailedChatExecution(
+                    additionalFirstConversation.Id,
+                    Guid.NewGuid(),
+                    new AiRoute("OpenAI", "test-model", "test-catalog-v1"),
+                    Aic.FromAic(2),
+                    "Timeout",
+                    failureStartedAt,
+                    failureStartedAt.AddSeconds(30)),
+                CancellationToken.None);
             var firstUsage = await first
                 .GetRequiredService<IAiUsageQuery>()
                 .GetDashboardAsync();
@@ -106,10 +118,11 @@ public sealed class PostgresAccountIsolationTests
                 "Projeto confidencial",
                 Assert.Single(firstArchivedSummaries).Title);
             Assert.Empty(secondArchivedSummaries);
-            Assert.Equal(1, firstUsage.Totals.ExecutionCount);
+            Assert.Equal(2, firstUsage.Totals.ExecutionCount);
             Assert.True(firstUsage.Totals.InputUnits > 0);
             Assert.True(firstUsage.Totals.OutputUnits > 0);
             Assert.Equal(Aic.FromAic(12), firstUsage.Totals.ActualCostMinor);
+            Assert.Contains(firstUsage.RecentExecutions, x => x.Status == "Timeout");
             Assert.Empty(secondUsage.RecentExecutions);
             Assert.False(crossAccountRestore);
             Assert.True(restored);

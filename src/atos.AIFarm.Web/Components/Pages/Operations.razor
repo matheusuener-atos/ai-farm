@@ -110,7 +110,7 @@ else
                                 <td>@Aic.Format(execution.EstimatedCostMinor)</td>
                                 <td class="amber">@Aic.Format(execution.ActualCostMinor)</td>
                                 <td>@FormatDuration(execution)</td>
-                                <td><code>@execution.OperationId.ToString()[..8]</code><br /><small class="green">@execution.Status.ToUpperInvariant()</small></td>
+                                <td><code>@execution.OperationId.ToString()[..8]</code><br /><small class="@StatusClass(execution.Status)">@execution.Status.ToUpperInvariant()</small></td>
                             </tr>
                         }
                     </tbody>
@@ -178,4 +178,7 @@ else
             ? $"{elapsed.TotalMilliseconds:N0} ms"
             : $"{elapsed.TotalSeconds:N2} s";
     }
+
+    private static string StatusClass(string status) =>
+        status == "Completed" ? "green" : "amber";
 }

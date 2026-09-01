@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IWalletService Wallet
+@inject IConfiguration Configuration
 
 <div class="shell">
     <header class="topbar">
@@ -27,7 +28,7 @@
         </nav>
     </header>
     <main>@Body</main>
-    <footer>atos:/SYSTEM // AMBIENTE_DE_DESENVOLVIMENTO // FAKE_PROVIDER</footer>
+    <footer>atos:/SYSTEM // PROVIDER_@(Configuration["AIFarm:AI:Provider"]?.ToUpperInvariant() ?? "FAKE")</footer>
 </div>
 
 @code {
