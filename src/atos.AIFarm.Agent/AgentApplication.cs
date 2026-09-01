@@ -9,6 +9,8 @@ internal static class AgentApplication
     public static async Task<int> RunAsync(string[] args)
     {
         var command = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "run";
+        if (command == "__worker")
+            return await AgentWorkerHost.RunAsync(Console.In, Console.Out, Console.Error);
         var configurationStore = new AgentConfigurationStore(
             Environment.GetEnvironmentVariable("AIFARM_AGENT_DATA_DIR"));
         var credentialStore = new WindowsCredentialStore();
@@ -131,6 +133,7 @@ internal static class AgentApplication
             cancellation.Source.Token);
         configuration = trusted.Configuration;
         var manifestVerificationKey = trusted.VerificationKey;
+        var worker = AgentWorkerProcessRunner.CreateCurrent();
         var failures = 0;
         var interval = Math.Clamp(configuration.HeartbeatIntervalSeconds, 10, 300);
         ActiveJobExecution? activeJob = null;
@@ -183,6 +186,7 @@ internal static class AgentApplication
                             configuration,
                             credential,
                             manifestVerificationKey,
+                            worker,
                             cancellation.Source.Token);
                         if (activeJob is not null)
                             interval = Math.Clamp(heartbeat.ActiveHeartbeatIntervalSeconds, 1, 10);
@@ -282,6 +286,7 @@ internal static class AgentApplication
         AgentConfiguration configuration,
         string credential,
         string manifestVerificationKey,
+        AgentWorkerProcessRunner worker,
         CancellationToken cancellationToken)
     {
         var offer = await client.ClaimJobAsync(configuration, credential, cancellationToken);
@@ -330,6 +335,7 @@ internal static class AgentApplication
             credential,
             offer,
             manifest,
+            worker,
             remoteCancellation.Token,
             cancellationToken);
         return new ActiveJobExecution(offer.JobId, remoteCancellation, completion);
@@ -341,6 +347,7 @@ internal static class AgentApplication
         string credential,
         FarmRemoteJobOffer offer,
         RemoteJobManifest manifest,
+        AgentWorkerProcessRunner worker,
         CancellationToken remoteCancellationToken,
         CancellationToken processCancellationToken)
     {
@@ -349,21 +356,16 @@ internal static class AgentApplication
             remoteCancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(execution.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var digest = await Task.Run(
-                () => AgentDeterministicBenchmark.Compute(
-                    manifest.Nonce,
-                    manifest.Iterations,
-                    timeout.Token),
-                timeout.Token);
-            stopwatch.Stop();
+            var workerResult = await worker.RunAsync(manifest, timeout.Token);
             var acknowledgement = await client.SubmitResultAsync(
                 configuration,
                 credential,
                 offer.JobId,
-                new FarmRemoteJobResult(digest, Math.Max(1, stopwatch.ElapsedMilliseconds)),
+                new FarmRemoteJobResult(
+                    workerResult.Digest,
+                    workerResult.DurationMilliseconds),
                 execution.Token);
             Write(
                 "JOB",
@@ -392,6 +394,18 @@ internal static class AgentApplication
                 CancellationToken.None,
                 FarmRemoteJobRejectionKind.Cancelled);
             Write("JOB", $"CANCELLED // {offer.JobId:N}");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            var reason = $"Worker local falhou: {exception.Message}";
+            await client.RejectJobAsync(
+                configuration,
+                credential,
+                offer.JobId,
+                reason[..Math.Min(reason.Length, 200)],
+                CancellationToken.None,
+                FarmRemoteJobRejectionKind.Policy);
+            Write("JOB", $"WORKER_FAILED // {offer.JobId:N} // {exception.Message}");
         }
     }
 

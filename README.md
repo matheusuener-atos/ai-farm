@@ -280,6 +280,16 @@ Node online, mas mostra a política local pausada e seus limites efetivos. Esses
 limites são uma política de admissão assinada; isolamento rígido de CPU/memória
 no sistema operacional ainda não faz parte deste runtime experimental.
 
+O Agent `0.4.0` separa o workload do processo coordenador. Depois de validar o
+manifesto, o coordenador inicia diretamente um processo filho interno, sem
+shell, e envia por `stdin` somente um envelope IPC limitado a 4 KiB com
+`workload`, `nonce` e `iterations`. O worker possui uma allowlist fixa para
+`SHA256_CHAIN`, devolve apenas digest e duração por `stdout` e não recebe
+credenciais, URL do servidor ou chave de manifesto. Timeout, encerramento do
+Agent e cancelamento remoto matam toda a árvore do worker. Limites rígidos de
+CPU e memória no sistema operacional continuam reservados para o próximo
+incremento.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto

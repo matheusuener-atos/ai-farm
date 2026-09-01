@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.3.0";
+    public const string CurrentAgentVersion = "atos-agent/0.4.0";
 }
 
 public sealed record FarmNodeSnapshot(
