@@ -60,13 +60,50 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
     private readonly ConcurrentDictionary<string, FailedChatExecution> _failures = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, ConversationState> _conversations = [];
 
+    public Task<ConversationPage> SearchConversationsAsync(
+        ConversationQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = query.Normalize();
+        lock (_sync)
+        {
+            var conversations = _conversations.Values
+                .Where(x => !x.IsDeleted && x.IsArchived == normalized.Archived);
+            if (normalized.Search is not null)
+            {
+                conversations = conversations.Where(x =>
+                    (x.Title?.Contains(
+                        normalized.Search,
+                        StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    x.Messages.Any(message => message.Content.Contains(
+                        normalized.Search,
+                        StringComparison.OrdinalIgnoreCase)));
+            }
+
+            var ordered = conversations
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .ThenByDescending(x => x.Id);
+            var totalCount = ordered.Count();
+            var items = ordered
+                .Skip((normalized.Page - 1) * normalized.PageSize)
+                .Take(normalized.PageSize)
+                .Select(Summary)
+                .ToArray();
+            return Task.FromResult(new ConversationPage(
+                items,
+                totalCount,
+                normalized.Page,
+                normalized.PageSize));
+        }
+    }
+
     public Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
         CancellationToken cancellationToken = default)
     {
         lock (_sync)
         {
             IReadOnlyList<ConversationSummary> summaries = _conversations.Values
-                .Where(x => !x.IsArchived)
+                .Where(x => !x.IsArchived && !x.IsDeleted)
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => new ConversationSummary(
                     x.Id,
@@ -86,7 +123,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         lock (_sync)
         {
             IReadOnlyList<ConversationSummary> summaries = _conversations.Values
-                .Where(x => x.IsArchived)
+                .Where(x => x.IsArchived && !x.IsDeleted)
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => new ConversationSummary(
                     x.Id,
@@ -121,6 +158,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
             return Task.FromResult(
                 _conversations.TryGetValue(conversationId, out var conversation)
                     && !conversation.IsArchived
+                    && !conversation.IsDeleted
                     ? Snapshot(conversation)
                     : null);
         }
@@ -133,7 +171,8 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         lock (_sync)
         {
             if (!_conversations.TryGetValue(conversationId, out var conversation)
-                || conversation.IsArchived)
+                || conversation.IsArchived
+                || conversation.IsDeleted)
             {
                 return Task.FromResult(false);
             }
@@ -151,7 +190,8 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         lock (_sync)
         {
             if (!_conversations.TryGetValue(conversationId, out var conversation)
-                || !conversation.IsArchived)
+                || !conversation.IsArchived
+                || conversation.IsDeleted)
             {
                 return Task.FromResult(false);
             }
@@ -170,12 +210,31 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         var normalizedTitle = ConversationTitle.Normalize(title);
         lock (_sync)
         {
-            if (!_conversations.TryGetValue(conversationId, out var conversation))
+            if (!_conversations.TryGetValue(conversationId, out var conversation)
+                || conversation.IsDeleted)
             {
                 return Task.FromResult(false);
             }
 
             conversation.Title = normalizedTitle;
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> DeleteConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_conversations.TryGetValue(conversationId, out var conversation)
+                || conversation.IsDeleted)
+            {
+                return Task.FromResult(false);
+            }
+
+            conversation.IsDeleted = true;
             conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
             return Task.FromResult(true);
         }
@@ -187,7 +246,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         lock (_sync)
         {
             var conversation = _conversations.Values
-                .Where(x => !x.IsArchived)
+                .Where(x => !x.IsArchived && !x.IsDeleted)
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .FirstOrDefault();
             if (conversation is null)
@@ -329,7 +388,16 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         conversation.Id,
         conversation.CreatedAtUtc,
         conversation.UpdatedAtUtc,
-        [.. conversation.Messages.OrderBy(x => x.CreatedAtUtc)]);
+        [.. conversation.Messages.OrderBy(x => x.CreatedAtUtc)],
+        conversation.Title);
+
+    private static ConversationSummary Summary(ConversationState conversation) => new(
+        conversation.Id,
+        conversation.Title,
+        conversation.CreatedAtUtc,
+        conversation.UpdatedAtUtc,
+        conversation.Messages.Count,
+        conversation.Messages.LastOrDefault()?.Content);
 
     private sealed class ConversationState(
         Guid id,
@@ -341,6 +409,7 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         public DateTimeOffset UpdatedAtUtc { get; set; } = updatedAtUtc;
         public string? Title { get; set; }
         public bool IsArchived { get; set; }
+        public bool IsDeleted { get; set; }
         public List<ChatMessageSnapshot> Messages { get; } = [];
     }
 }

@@ -356,9 +356,12 @@ public sealed class ChatWorkflowTests
         Assert.Equal(second.Id, Assert.Single(await chat.ListConversationsAsync()).Id);
         var archivedSummary = Assert.Single(
             await chat.ListArchivedConversationsAsync());
+        var archivedPage = await chat.SearchConversationsAsync(
+            new ConversationQuery("projeto", 1, 8, true));
         Assert.Equal(first.Id, archivedSummary.Id);
         Assert.Equal("Projeto principal", archivedSummary.Title);
         Assert.Equal(2, archivedSummary.MessageCount);
+        Assert.Equal(first.Id, Assert.Single(archivedPage.Items).Id);
 
         Assert.True(await chat.RestoreConversationAsync(first.Id));
         Assert.False(await chat.RestoreConversationAsync(first.Id));
@@ -369,6 +372,44 @@ public sealed class ChatWorkflowTests
         Assert.Equal(
             "Projeto principal",
             restoredSummaries.Single(x => x.Id == first.Id).Title);
+
+        var titleSearch = await chat.SearchConversationsAsync(
+            new ConversationQuery("projeto", 1, 8));
+        var contentSearch = await chat.SearchConversationsAsync(
+            new ConversationQuery("resposta da primeira", 1, 8));
+        var firstPage = await chat.SearchConversationsAsync(
+            new ConversationQuery(Page: 1, PageSize: 1));
+        var secondPage = await chat.SearchConversationsAsync(
+            new ConversationQuery(Page: 2, PageSize: 1));
+
+        Assert.Equal(first.Id, Assert.Single(titleSearch.Items).Id);
+        Assert.Equal(first.Id, Assert.Single(contentSearch.Items).Id);
+        Assert.Equal(2, firstPage.TotalCount);
+        Assert.Equal(2, firstPage.TotalPages);
+        Assert.True(firstPage.HasNextPage);
+        Assert.Single(firstPage.Items);
+        Assert.True(secondPage.HasPreviousPage);
+        Assert.Single(secondPage.Items);
+        Assert.NotEqual(firstPage.Items[0].Id, secondPage.Items[0].Id);
+
+        Assert.True(await chat.DeleteConversationAsync(first.Id));
+        Assert.False(await chat.DeleteConversationAsync(first.Id));
+        Assert.Null(await chat.GetConversationAsync(first.Id));
+        Assert.Equal(second.Id, Assert.Single(
+            (await chat.SearchConversationsAsync(new ConversationQuery())).Items).Id);
+        Assert.Empty((await chat.SearchConversationsAsync(
+            new ConversationQuery("resposta da primeira"))).Items);
+        Assert.Single((await chat.GetDashboardAsync()).RecentExecutions);
+    }
+
+    [Theory]
+    [InlineData(0, 8)]
+    [InlineData(1, 0)]
+    [InlineData(1, 51)]
+    public void ConversationQueryRejectsInvalidPagination(int page, int pageSize)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ConversationQuery(Page: page, PageSize: pageSize).Normalize());
     }
 
     [Fact]

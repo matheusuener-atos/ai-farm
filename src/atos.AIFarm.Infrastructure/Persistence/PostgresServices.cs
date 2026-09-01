@@ -403,6 +403,52 @@ public sealed class PostgresChatStore(
     IAIFarmIdentityAccessor identityAccessor)
     : IChatStore
 {
+    public async Task<ConversationPage> SearchConversationsAsync(
+        ConversationQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = query.Normalize();
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var status = normalized.Archived ? "Archived" : "Active";
+        var conversations = db.Conversations.Where(
+            x => x.AccountId == identity.AccountId && x.Status == status);
+        if (normalized.Search is not null)
+        {
+            var pattern = $"%{EscapeLikePattern(normalized.Search)}%";
+            conversations = conversations.Where(conversation =>
+                (conversation.Title != null &&
+                 EF.Functions.ILike(conversation.Title, pattern, @"\")) ||
+                db.Messages.Any(message =>
+                    message.ConversationId == conversation.Id &&
+                    EF.Functions.ILike(message.Content, pattern, @"\")));
+        }
+
+        var totalCount = await conversations.CountAsync(cancellationToken);
+        var items = await conversations
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .ThenByDescending(x => x.Id)
+            .Skip((normalized.Page - 1) * normalized.PageSize)
+            .Take(normalized.PageSize)
+            .Select(x => new ConversationSummary(
+                x.Id,
+                x.Title,
+                x.CreatedAtUtc,
+                x.UpdatedAtUtc,
+                db.Messages.Count(message => message.ConversationId == x.Id),
+                db.Messages
+                    .Where(message => message.ConversationId == x.Id)
+                    .OrderByDescending(message => message.CreatedAtUtc)
+                    .Select(message => message.Content)
+                    .FirstOrDefault()))
+            .ToArrayAsync(cancellationToken);
+        return new ConversationPage(
+            items,
+            totalCount,
+            normalized.Page,
+            normalized.PageSize);
+    }
+
     public async Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -545,6 +591,28 @@ public sealed class PostgresChatStore(
         }
 
         conversation.Title = normalizedTitle;
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> DeleteConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 (x.Status == "Active" || x.Status == "Archived"),
+            cancellationToken);
+        if (conversation is null)
+        {
+            return false;
+        }
+
+        conversation.Status = "Deleted";
         conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         return true;
@@ -792,8 +860,15 @@ public sealed class PostgresChatStore(
             conversation.Id,
             conversation.CreatedAtUtc,
             conversation.UpdatedAtUtc,
-            messages);
+            messages,
+            conversation.Title);
     }
+
+    private static string EscapeLikePattern(string value) =>
+        value
+            .Replace(@"\", @"\\", StringComparison.Ordinal)
+            .Replace("%", @"\%", StringComparison.Ordinal)
+            .Replace("_", @"\_", StringComparison.Ordinal);
 }
 
 public sealed class PostgresAiUsageQuery(

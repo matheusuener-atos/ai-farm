@@ -23,7 +23,27 @@
             <span>CONVERSAS</span>
             <button type="button" @onclick="CreateConversationAsync" disabled="@_working">[ NOVA ]</button>
         </div>
+        <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
+            <input aria-label="Buscar no histórico"
+                   maxlength="120"
+                   placeholder="BUSCAR TÍTULO OU MENSAGEM"
+                   @bind="_conversationSearchDraft" />
+            <button type="submit" disabled="@_working">[ BUSCAR ]</button>
+            @if (!string.IsNullOrWhiteSpace(_conversationSearch))
+            {
+                <button type="button"
+                        class="button-secondary"
+                        @onclick="ClearConversationSearchAsync"
+                        disabled="@_working">
+                    [ LIMPAR ]
+                </button>
+            }
+        </form>
         <div class="conversation-list">
+            @if (_conversations.Count == 0)
+            {
+                <p class="muted">NENHUMA CONVERSA ENCONTRADA</p>
+            }
             @foreach (var conversation in _conversations)
             {
                 <button type="button"
@@ -36,6 +56,22 @@
                 </button>
             }
         </div>
+        @if (_conversationPage is not null)
+        {
+            <div class="conversation-pagination" aria-label="Paginação das conversas">
+                <button type="button"
+                        @onclick="PreviousConversationPageAsync"
+                        disabled="@(_working || !_conversationPage.HasPreviousPage)">
+                    [ &lt; ]
+                </button>
+                <span>PÁG @_conversationPage.Page / @_conversationPage.TotalPages // @_conversationPage.TotalCount</span>
+                <button type="button"
+                        @onclick="NextConversationPageAsync"
+                        disabled="@(_working || !_conversationPage.HasNextPage)">
+                    [ &gt; ]
+                </button>
+            </div>
+        }
         <button type="button"
                 class="archive-toggle"
                 @onclick="ToggleArchivedAsync"
@@ -60,9 +96,37 @@
                                 disabled="@_working">
                             [ RESTAURAR ]
                         </button>
+                        <button type="button"
+                                class="danger-button"
+                                @onclick="() => RequestDeleteConversation(conversation.Id)"
+                                disabled="@_working">
+                            [ EXCLUIR ]
+                        </button>
                     </article>
                 }
             </div>
+        }
+        @if (_deleteCandidateId is Guid deleteCandidateId)
+        {
+            <section class="delete-confirmation" role="alert">
+                <strong>[ CONFIRMAR EXCLUSÃO ]</strong>
+                <p>@DeleteCandidateLabel(deleteCandidateId)</p>
+                <small>O histórico sairá da interface, mas a auditoria financeira será preservada.</small>
+                <div>
+                    <button type="button"
+                            class="danger-button"
+                            @onclick="ConfirmDeleteConversationAsync"
+                            disabled="@_working">
+                        [ SIM, EXCLUIR ]
+                    </button>
+                    <button type="button"
+                            class="button-secondary"
+                            @onclick="CancelDeleteConversation"
+                            disabled="@_working">
+                        [ CANCELAR ]
+                    </button>
+                </div>
+            </section>
         }
     </aside>
 
@@ -104,6 +168,12 @@
                     @onclick="ArchiveCurrentConversationAsync"
                     disabled="@(_working || _conversationId == Guid.Empty)">
                 [ ARQUIVAR ]
+            </button>
+            <button type="button"
+                    class="danger-button"
+                    @onclick="() => RequestDeleteConversation(_conversationId)"
+                    disabled="@(_working || _conversationId == Guid.Empty)">
+                [ EXCLUIR ]
             </button>
         </div>
     </div>
@@ -271,9 +341,13 @@
     private readonly List<ChatMessageSnapshot> _messages = [];
     private readonly List<ConversationSummary> _conversations = [];
     private readonly List<ConversationSummary> _archivedConversations = [];
+    private const int ConversationPageSize = 8;
     private Guid _conversationId;
     private string _prompt = string.Empty;
     private string _titleDraft = string.Empty;
+    private string _conversationSearchDraft = string.Empty;
+    private string? _conversationSearch;
+    private string? _currentConversationTitle;
     private string? _error;
     private bool _working;
     private bool _showArchived;
@@ -285,6 +359,9 @@
     private CancellationTokenSource? _executionCancellation;
     private string? _attemptIdempotencyKey;
     private ExecutionFailureState? _lastFailure;
+    private ConversationPage? _conversationPage;
+    private int _conversationPageNumber = 1;
+    private Guid? _deleteCandidateId;
     private WalletSnapshot? _snapshot;
     private ChatExecutionPlan? _pendingPlan;
 
@@ -298,9 +375,11 @@
         {
             var conversation = _conversations.FirstOrDefault(
                 x => x.Id == _conversationId);
-            return conversation is null
-                ? $"SESSÃO_{SessionCode}"
-                : ConversationLabel(conversation);
+            return conversation is not null
+                ? ConversationLabel(conversation)
+                : string.IsNullOrWhiteSpace(_currentConversationTitle)
+                    ? $"SESSÃO_{SessionCode}"
+                    : _currentConversationTitle;
         }
     }
 
@@ -523,6 +602,7 @@
         }
 
         _conversationId = conversation.Id;
+        _currentConversationTitle = conversation.Title;
         _renaming = false;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);
@@ -536,13 +616,132 @@
 
     private async Task RefreshConversationsAsync()
     {
+        var page = await ChatStore.SearchConversationsAsync(new ConversationQuery(
+            _conversationSearch,
+            _conversationPageNumber,
+            ConversationPageSize));
+        if (_conversationPageNumber > page.TotalPages)
+        {
+            _conversationPageNumber = page.TotalPages;
+            page = await ChatStore.SearchConversationsAsync(new ConversationQuery(
+                _conversationSearch,
+                _conversationPageNumber,
+                ConversationPageSize));
+        }
+
+        _conversationPage = page;
         _conversations.Clear();
-        _conversations.AddRange(await ChatStore.ListConversationsAsync());
+        _conversations.AddRange(page.Items);
         if (_showArchived)
         {
             _archivedConversations.Clear();
-            _archivedConversations.AddRange(
-                await ChatStore.ListArchivedConversationsAsync());
+            var archived = await ChatStore.SearchConversationsAsync(
+                new ConversationQuery(_conversationSearch, 1, 50, true));
+            _archivedConversations.AddRange(archived.Items);
+        }
+    }
+
+    private async Task ApplyConversationSearchAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            _conversationSearch = string.IsNullOrWhiteSpace(_conversationSearchDraft)
+                ? null
+                : _conversationSearchDraft.Trim();
+            _conversationPageNumber = 1;
+            await RefreshConversationsAsync();
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível buscar no histórico.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ClearConversationSearchAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        try
+        {
+            _conversationSearchDraft = string.Empty;
+            _conversationSearch = null;
+            _conversationPageNumber = 1;
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível limpar a busca.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task PreviousConversationPageAsync()
+    {
+        if (_working || _conversationPage?.HasPreviousPage != true)
+        {
+            return;
+        }
+
+        _working = true;
+        try
+        {
+            _conversationPageNumber--;
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _conversationPageNumber++;
+            _error = "Não foi possível carregar a página anterior.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task NextConversationPageAsync()
+    {
+        if (_working || _conversationPage?.HasNextPage != true)
+        {
+            return;
+        }
+
+        _working = true;
+        try
+        {
+            _conversationPageNumber++;
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _conversationPageNumber--;
+            _error = "Não foi possível carregar a próxima página.";
+        }
+        finally
+        {
+            _working = false;
         }
     }
 
@@ -557,8 +756,9 @@
         _archivedConversations.Clear();
         if (_showArchived)
         {
-            _archivedConversations.AddRange(
-                await ChatStore.ListArchivedConversationsAsync());
+            var archived = await ChatStore.SearchConversationsAsync(
+                new ConversationQuery(_conversationSearch, 1, 50, true));
+            _archivedConversations.AddRange(archived.Items);
         }
     }
 
@@ -571,6 +771,10 @@
 
         _working = true;
         ClearExecutionDraft();
+        _deleteCandidateId = null;
+        _conversationSearchDraft = string.Empty;
+        _conversationSearch = null;
+        _conversationPageNumber = 1;
         try
         {
             var conversation = await ChatStore.CreateConversationAsync();
@@ -596,6 +800,7 @@
         _working = true;
         _renaming = false;
         ClearExecutionDraft();
+        _deleteCandidateId = null;
         try
         {
             if (!await ChatStore.ArchiveConversationAsync(_conversationId))
@@ -635,6 +840,7 @@
             }
 
             ClearExecutionDraft();
+            _deleteCandidateId = null;
             Navigation.NavigateTo($"/chat/{conversationId}");
         }
         catch (Exception)
@@ -688,6 +894,7 @@
             }
 
             await RefreshConversationsAsync();
+            _currentConversationTitle = ConversationTitle.Normalize(_titleDraft);
             _renaming = false;
             _titleDraft = string.Empty;
         }
@@ -710,7 +917,57 @@
         if (!_working && conversationId != _conversationId)
         {
             ClearExecutionDraft();
+            _deleteCandidateId = null;
             Navigation.NavigateTo($"/chat/{conversationId}");
+        }
+    }
+
+    private void RequestDeleteConversation(Guid conversationId)
+    {
+        if (!_working && conversationId != Guid.Empty)
+        {
+            _deleteCandidateId = conversationId;
+            _error = null;
+        }
+    }
+
+    private void CancelDeleteConversation() => _deleteCandidateId = null;
+
+    private async Task ConfirmDeleteConversationAsync()
+    {
+        if (_working || _deleteCandidateId is not Guid conversationId)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.DeleteConversationAsync(conversationId))
+            {
+                _error = "Não foi possível excluir esta conversa.";
+                return;
+            }
+
+            _deleteCandidateId = null;
+            if (conversationId == _conversationId)
+            {
+                ClearExecutionDraft();
+                var next = await ChatStore.GetOrCreateCurrentConversationAsync();
+                Navigation.NavigateTo($"/chat/{next.Id}", replace: true);
+                return;
+            }
+
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível excluir esta conversa.";
+        }
+        finally
+        {
+            _working = false;
         }
     }
 
@@ -740,6 +997,21 @@
         return preview.Length <= maximumLength
             ? preview
             : $"{preview[..maximumLength]}…";
+    }
+
+    private string DeleteCandidateLabel(Guid conversationId)
+    {
+        var conversation = _conversations
+            .Concat(_archivedConversations)
+            .FirstOrDefault(x => x.Id == conversationId);
+        if (conversation is not null)
+        {
+            return ConversationLabel(conversation);
+        }
+
+        return conversationId == _conversationId
+            ? CurrentConversationLabel
+            : $"SESSÃO_{conversationId.ToString("N")[..4].ToUpperInvariant()}";
     }
 
     private static string RoleLabel(ChatMessageRole role) =>

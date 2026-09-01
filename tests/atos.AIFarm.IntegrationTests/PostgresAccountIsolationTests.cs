@@ -53,6 +53,16 @@ public sealed class PostgresAccountIsolationTests
             var renamed = await firstStore.RenameConversationAsync(
                 firstConversation.Id,
                 "  Projeto   confidencial  ");
+            var titleSearch = await firstStore.SearchConversationsAsync(
+                new ConversationQuery("projeto confidencial", 1, 10));
+            var messageSearch = await firstStore.SearchConversationsAsync(
+                new ConversationQuery("mensagem exclusiva", 1, 10));
+            var paged = await firstStore.SearchConversationsAsync(
+                new ConversationQuery(Page: 1, PageSize: 1));
+            var isolatedSearch = await secondStore.SearchConversationsAsync(
+                new ConversationQuery("mensagem exclusiva", 1, 10));
+            var literalWildcardSearch = await firstStore.SearchConversationsAsync(
+                new ConversationQuery("%", 1, 10));
             var crossAccountArchive = await secondStore.ArchiveConversationAsync(
                 firstConversation.Id);
             var archived = await firstStore.ArchiveConversationAsync(firstConversation.Id);
@@ -97,6 +107,20 @@ public sealed class PostgresAccountIsolationTests
             var archivedAfterRestore =
                 await firstStore.ListArchivedConversationsAsync();
             await verificationDb.Entry(archivedRecord).ReloadAsync();
+            var crossAccountDelete = await secondStore.DeleteConversationAsync(
+                additionalFirstConversation.Id);
+            var deleted = await firstStore.DeleteConversationAsync(
+                additionalFirstConversation.Id);
+            var deletedLookup = await firstStore.GetConversationAsync(
+                additionalFirstConversation.Id);
+            var activeAfterDelete = await firstStore.SearchConversationsAsync(
+                new ConversationQuery());
+            var usageAfterDelete = await first
+                .GetRequiredService<IAiUsageQuery>()
+                .GetDashboardAsync();
+            var deletedRecord = await verificationDb.Conversations
+                .SingleAsync(x => x.Id == additionalFirstConversation.Id);
+            await verificationDb.Entry(deletedRecord).ReloadAsync();
 
             Assert.Equal(Aic.FromAic(988), firstWallet.Balance.AvailableMinor);
             Assert.Equal(Aic.FromAic(1_000), secondWallet.Balance.AvailableMinor);
@@ -106,6 +130,17 @@ public sealed class PostgresAccountIsolationTests
             Assert.Null(crossAccountLookup);
             Assert.False(crossAccountRename);
             Assert.True(renamed);
+            Assert.Equal(
+                firstConversation.Id,
+                Assert.Single(titleSearch.Items).Id);
+            Assert.Equal(
+                firstConversation.Id,
+                Assert.Single(messageSearch.Items).Id);
+            Assert.Equal(2, paged.TotalCount);
+            Assert.Single(paged.Items);
+            Assert.True(paged.HasNextPage);
+            Assert.Empty(isolatedSearch.Items);
+            Assert.Empty(literalWildcardSearch.Items);
             Assert.False(crossAccountArchive);
             Assert.True(archived);
             Assert.Null(archivedLookup);
@@ -134,6 +169,14 @@ public sealed class PostgresAccountIsolationTests
             Assert.Equal("Active", archivedRecord.Status);
             Assert.Equal(2, activeAfterRestore.Count);
             Assert.Empty(archivedAfterRestore);
+            Assert.False(crossAccountDelete);
+            Assert.True(deleted);
+            Assert.Null(deletedLookup);
+            Assert.DoesNotContain(
+                activeAfterDelete.Items,
+                x => x.Id == additionalFirstConversation.Id);
+            Assert.Equal("Deleted", deletedRecord.Status);
+            Assert.Equal(firstUsage.Totals, usageAfterDelete.Totals);
             Assert.DoesNotContain(
                 secondSummaries,
                 conversation => conversation.Id == additionalFirstConversation.Id);

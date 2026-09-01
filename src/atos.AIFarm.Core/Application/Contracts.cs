@@ -81,7 +81,8 @@ public sealed record ConversationSnapshot(
     Guid Id,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    IReadOnlyList<ChatMessageSnapshot> Messages);
+    IReadOnlyList<ChatMessageSnapshot> Messages,
+    string? Title = null);
 
 public sealed record ConversationSummary(
     Guid Id,
@@ -90,6 +91,46 @@ public sealed record ConversationSummary(
     DateTimeOffset UpdatedAtUtc,
     int MessageCount,
     string? Preview);
+
+public sealed record ConversationQuery(
+    string? Search = null,
+    int Page = 1,
+    int PageSize = 8,
+    bool Archived = false)
+{
+    public ConversationQuery Normalize()
+    {
+        if (Page < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(Page));
+        }
+        if (PageSize is < 1 or > 50)
+        {
+            throw new ArgumentOutOfRangeException(nameof(PageSize));
+        }
+
+        var search = string.IsNullOrWhiteSpace(Search) ? null : Search.Trim();
+        if (search?.Length > 120)
+        {
+            throw new ArgumentException(
+                "A busca deve ter no máximo 120 caracteres.",
+                nameof(Search));
+        }
+
+        return this with { Search = search };
+    }
+}
+
+public sealed record ConversationPage(
+    IReadOnlyList<ConversationSummary> Items,
+    int TotalCount,
+    int Page,
+    int PageSize)
+{
+    public int TotalPages => Math.Max(1, (TotalCount + PageSize - 1) / PageSize);
+    public bool HasPreviousPage => Page > 1;
+    public bool HasNextPage => Page < TotalPages;
+}
 
 public static class ConversationTitle
 {
@@ -234,6 +275,9 @@ public interface IAiUsageQuery
 
 public interface IChatStore
 {
+    Task<ConversationPage> SearchConversationsAsync(
+        ConversationQuery query,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ConversationSummary>> ListArchivedConversationsAsync(
@@ -252,6 +296,9 @@ public interface IChatStore
     Task<bool> RenameConversationAsync(
         Guid conversationId,
         string title,
+        CancellationToken cancellationToken = default);
+    Task<bool> DeleteConversationAsync(
+        Guid conversationId,
         CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);
