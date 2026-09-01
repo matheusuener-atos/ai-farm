@@ -17,6 +17,7 @@ internal sealed class PostgresFarmLabService(
     private const int BenchmarkTimeoutSeconds = 30;
     private const long BenchmarkMemoryLimitBytes = 256L * 1024 * 1024;
     private const string ManifestVersion = "atos-farm-manifest-v1";
+    internal const string RemoteManifestVersion = "atos-farm-manifest-v2-agent";
     private const string Workload = "SHA256_CHAIN";
     private const string WorkloadVersion = "atos-sha256-chain-v1";
     private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
@@ -59,25 +60,31 @@ internal sealed class PostgresFarmLabService(
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
-        if (node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString())
-            throw new InvalidOperationException(
-                "Este node usa um Compute Agent remoto; o despacho de Jobs será habilitado no próximo incremento.");
+        var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
         if (!Enum.TryParse<FarmNodeStatus>(node.Status, out var nodeStatus) ||
             nodeStatus != FarmNodeStatus.Online)
             throw new InvalidOperationException("Retome o node antes de executar um benchmark.");
+        if (isAgent && timeProvider.GetUtcNow() - node.LastSeenAtUtc > AgentHeartbeatTolerance)
+            throw new InvalidOperationException("O Compute Agent está offline; aguarde um heartbeat válido.");
 
         if (await db.FarmJobs.AnyAsync(
                 x => x.AccountId == identity.AccountId &&
-                     (x.Status == "Queued" || x.Status == "Running" || x.Status == "Verifying"),
+                     (x.Status == "Queued" || x.Status == "Offered" ||
+                      x.Status == "Accepted" || x.Status == "Running" ||
+                      x.Status == "Uploading" || x.Status == "Verifying"),
                 cancellationToken))
             throw new InvalidOperationException("Já existe um Job do laboratório em execução.");
 
         var now = timeProvider.GetUtcNow();
         var jobId = Guid.NewGuid();
         var attemptId = Guid.NewGuid();
+        var manifestVersion = isAgent ? RemoteManifestVersion : ManifestVersion;
+        var manifestSigning = isAgent
+            ? signingOptions.DeriveForAgent(node.Id).Signing
+            : signingOptions;
         var signedManifest = FarmManifestSecurity.Sign(
             new FarmJobManifest(
-                ManifestVersion,
+                manifestVersion,
                 jobId,
                 attemptId,
                 node.Id,
@@ -93,7 +100,7 @@ internal sealed class PostgresFarmLabService(
                 DataClassification,
                 now,
                 now.AddMinutes(5)),
-            signingOptions);
+            manifestSigning);
         var job = new FarmJobRecord
         {
             Id = jobId,
@@ -114,7 +121,12 @@ internal sealed class PostgresFarmLabService(
             CreatedAtUtc = now
         };
         db.FarmJobs.Add(job);
-        AddEvent(db, job, FarmJobStatus.Queued, now, "Manifest fixo aceito pelo laboratório.");
+        AddEvent(db, job, FarmJobStatus.Queued, now, "Manifest fixo criado pelo scheduler do laboratório.");
+        if (isAgent)
+        {
+            job.Status = FarmJobStatus.Offered.ToString();
+            AddEvent(db, job, FarmJobStatus.Offered, now, "Job assinado oferecido ao Compute Agent vinculado.");
+        }
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException exception)
         {
@@ -122,6 +134,9 @@ internal sealed class PostgresFarmLabService(
                 "Não foi possível enfileirar o Job; pode existir outra execução ativa.",
                 exception);
         }
+
+        if (isAgent)
+            return await LoadJobAsync(db, job.Id, cancellationToken);
 
         try
         {
@@ -265,15 +280,18 @@ internal sealed class PostgresFarmLabService(
         FarmJobRecord job,
         out FarmJobManifest? manifest)
     {
+        var verification = job.ManifestVersion == RemoteManifestVersion
+            ? signingOptions.DeriveForAgent(job.NodeId).Signing
+            : signingOptions;
         if (!FarmManifestSecurity.TryVerify(
                 job.ManifestPayload,
                 job.ManifestDigest,
                 job.ManifestSignature,
-                signingOptions,
+                verification,
                 out manifest) ||
             manifest is null)
             return false;
-        return manifest.Version == ManifestVersion &&
+        return manifest.Version is ManifestVersion or RemoteManifestVersion &&
             manifest.JobId == job.Id &&
             manifest.AttemptId == job.AttemptId &&
             manifest.NodeId == job.NodeId &&

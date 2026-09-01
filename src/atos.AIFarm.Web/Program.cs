@@ -301,6 +301,10 @@ app.MapPost("/api/farm/agents/enroll", async (
     {
         return Results.BadRequest(new { error = exception.Message });
     }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
 }).DisableAntiforgery()
   .RequireRateLimiting("farm-agent")
   .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
@@ -325,6 +329,93 @@ app.MapPost("/api/farm/agents/heartbeat", async (
     catch (ArgumentException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapGet("/api/farm/agents/trust", async (
+    HttpRequest request,
+    HttpResponse response,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var trust = await farmAgents.GetTrustAsync(ReadBearer(request), cancellationToken);
+    return trust is null ? Results.Unauthorized() : Results.Ok(trust);
+}).RequireRateLimiting("farm-agent");
+
+app.MapPost("/api/farm/agents/jobs/claim", async (
+    HttpRequest request,
+    HttpResponse response,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var offer = await farmAgents.ClaimJobAsync(ReadBearer(request), cancellationToken);
+    return offer is null ? Results.NoContent() : Results.Ok(offer);
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/jobs/{jobId:guid}/started", async (
+    Guid jobId,
+    HttpRequest request,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+    await farmAgents.MarkJobStartedAsync(ReadBearer(request), jobId, cancellationToken)
+        ? Results.NoContent()
+        : Results.NotFound()).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/jobs/{jobId:guid}/reject", async (
+    Guid jobId,
+    HttpRequest request,
+    FarmRemoteJobRejection rejection,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return await farmAgents.RejectJobAsync(
+            ReadBearer(request), jobId, rejection, cancellationToken)
+            ? Results.NoContent()
+            : Results.NotFound();
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/jobs/{jobId:guid}/result", async (
+    Guid jobId,
+    HttpRequest request,
+    HttpResponse response,
+    FarmRemoteJobResult result,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    try
+    {
+        var acknowledgement = await farmAgents.SubmitResultAsync(
+            ReadBearer(request),
+            jobId,
+            result,
+            cancellationToken);
+        return acknowledgement is null ? Results.NotFound() : Results.Ok(acknowledgement);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
     }
 }).DisableAntiforgery()
   .RequireRateLimiting("farm-agent")
@@ -373,6 +464,14 @@ static Task WriteHealthResponse(HttpContext context, HealthReport report, string
         correlationId = context.TraceIdentifier,
         checks,
     });
+}
+
+static string ReadBearer(HttpRequest request)
+{
+    var authorization = request.Headers.Authorization.ToString();
+    return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? authorization["Bearer ".Length..].Trim()
+        : string.Empty;
 }
 
 static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string contentRootPath)

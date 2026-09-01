@@ -2,7 +2,7 @@ namespace atos.AIFarm.Core.Application;
 
 public enum FarmNodeStatus { Online, Paused, Offline }
 public enum FarmVerificationLevel { Detected, Verified }
-public enum FarmJobStatus { Queued, Running, Verifying, Completed, Failed }
+public enum FarmJobStatus { Queued, Offered, Accepted, Running, Uploading, Verifying, Completed, Failed }
 public enum FarmNodeConnectionKind { Embedded, Agent }
 
 public sealed record FarmNodeSnapshot(
@@ -47,6 +47,31 @@ public sealed record FarmAgentHeartbeatResult(
     bool AcceptJobs,
     DateTimeOffset ServerTimeUtc,
     int HeartbeatIntervalSeconds);
+
+public sealed record FarmAgentTrust(
+    string Algorithm,
+    string VerificationKey,
+    string KeyId);
+
+public sealed record FarmRemoteJobOffer(
+    Guid JobId,
+    Guid AttemptId,
+    string ManifestPayload,
+    string ManifestDigest,
+    string ManifestSignature,
+    string SignatureAlgorithm);
+
+public sealed record FarmRemoteJobResult(
+    string ResultDigest,
+    long DurationMilliseconds);
+
+public sealed record FarmRemoteJobRejection(string Reason);
+
+public sealed record FarmRemoteJobAcknowledgement(
+    Guid JobId,
+    FarmJobStatus Status,
+    bool Verified,
+    long ComputeUnitsMilli);
 
 public sealed record FarmJobEventSnapshot(
     int Sequence,
@@ -109,5 +134,25 @@ public interface IFarmAgentService
     Task<FarmAgentHeartbeatResult?> HeartbeatAsync(
         string credential,
         FarmAgentHeartbeatRequest request,
+        CancellationToken cancellationToken = default);
+    Task<FarmAgentTrust?> GetTrustAsync(
+        string credential,
+        CancellationToken cancellationToken = default);
+    Task<FarmRemoteJobOffer?> ClaimJobAsync(
+        string credential,
+        CancellationToken cancellationToken = default);
+    Task<bool> MarkJobStartedAsync(
+        string credential,
+        Guid jobId,
+        CancellationToken cancellationToken = default);
+    Task<bool> RejectJobAsync(
+        string credential,
+        Guid jobId,
+        FarmRemoteJobRejection rejection,
+        CancellationToken cancellationToken = default);
+    Task<FarmRemoteJobAcknowledgement?> SubmitResultAsync(
+        string credential,
+        Guid jobId,
+        FarmRemoteJobResult result,
         CancellationToken cancellationToken = default);
 }

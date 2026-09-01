@@ -72,6 +72,9 @@ else
             else if (IsOnline)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
+                <button type="button" @onclick="RunBenchmarkAsync" disabled="@_working">
+                    @(_working ? "[ DESPACHANDO... ]" : "[ DESPACHAR BENCHMARK ]")
+                </button>
             }
             else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
             {
@@ -251,7 +254,10 @@ else
     private static string JobStatusLabel(FarmJobStatus status) => status switch
     {
         FarmJobStatus.Queued => "NA FILA",
+        FarmJobStatus.Offered => "OFERECIDO",
+        FarmJobStatus.Accepted => "ACEITO",
         FarmJobStatus.Running => "EXECUTANDO",
+        FarmJobStatus.Uploading => "ENVIANDO",
         FarmJobStatus.Verifying => "VERIFICANDO",
         FarmJobStatus.Completed => "CONCLUÍDO",
         FarmJobStatus.Failed => "FALHOU",

@@ -1,5 +1,7 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using atos.AIFarm.Agent;
 using atos.AIFarm.Core.Application;
 
@@ -7,6 +9,38 @@ namespace atos.AIFarm.UnitTests;
 
 public sealed class AgentClientTests
 {
+    [Fact]
+    public void RemoteManifestRequiresValidNodeSignatureAndAllowlist()
+    {
+        var nodeId = Guid.NewGuid();
+        var configuration = new AgentConfiguration(
+            "https://farm.example.com",
+            nodeId,
+            "credential-target",
+            AgentInventory.Version,
+            30);
+        var key = RandomNumberGenerator.GetBytes(32);
+        var offer = SignedOffer(nodeId, key);
+
+        var manifest = RemoteJobVerifier.Verify(
+            offer,
+            configuration,
+            Convert.ToBase64String(key),
+            DateTimeOffset.UtcNow);
+
+        Assert.Equal(offer.JobId, manifest.JobId);
+        Assert.Throws<InvalidOperationException>(() => RemoteJobVerifier.Verify(
+            offer with { ManifestPayload = offer.ManifestPayload + " " },
+            configuration,
+            Convert.ToBase64String(key),
+            DateTimeOffset.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => RemoteJobVerifier.Verify(
+            offer,
+            configuration,
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
+            DateTimeOffset.UtcNow));
+    }
+
     [Theory]
     [InlineData("http://localhost:5159/", "http://localhost:5159")]
     [InlineData("https://farm.example.com/path", "https://farm.example.com")]
@@ -99,6 +133,40 @@ public sealed class AgentClientTests
     {
         Content = new StringContent(content, Encoding.UTF8, "application/json")
     };
+
+    private static FarmRemoteJobOffer SignedOffer(Guid nodeId, byte[] key)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var manifest = new RemoteJobManifest(
+            "atos-farm-manifest-v2-agent",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            nodeId,
+            "SHA256_CHAIN",
+            "atos-sha256-chain-v1",
+            "DETERMINISTIC_REEXECUTION_V1",
+            Guid.NewGuid().ToString("N"),
+            100_000,
+            30,
+            1,
+            1,
+            "DENY_ALL",
+            "STANDARD",
+            now,
+            now.AddMinutes(5));
+        var payload = JsonSerializer.Serialize(manifest, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        });
+        var bytes = Encoding.UTF8.GetBytes(payload);
+        return new FarmRemoteJobOffer(
+            manifest.JobId,
+            manifest.AttemptId,
+            payload,
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            Convert.ToHexString(HMACSHA256.HashData(key, bytes)).ToLowerInvariant(),
+            "HMAC-SHA256-NODE-V1");
+    }
 
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> response)
         : HttpMessageHandler

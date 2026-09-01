@@ -214,17 +214,18 @@ do runtime; Jobs históricos anteriores permanecem visíveis como legados.
 O PostgreSQL também impede mais de um Job ativo por conta, inclusive entre
 abas ou instâncias concorrentes, e cancelamentos terminalizam a tentativa sem
 emitir CU ou AIC.
-Cada transição é persistida de forma ordenada:
+No laboratório `EMBEDDED`, cada transição é persistida de forma ordenada:
 
     QUEUED → RUNNING → VERIFYING → COMPLETED
                                     ↘ FAILED
 
 Este CU é uma medição técnica experimental e específica dessa política; ainda
 não existe conversão CU → AIC. O laboratório não concede reward, não aceita
-shell, imagem de container, egress ou Jobs enviados pelo usuário. O hardware
-exibido pertence ao host onde a aplicação está executando — localmente, a
-máquina de desenvolvimento; no Render, o container do serviço — e ainda não
-representa um Compute Agent instalado no computador do usuário.
+shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
+`EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
+executando — localmente, a máquina de desenvolvimento; no Render, o container
+do serviço. No modo `AGENT`, o inventário e o benchmark pertencem ao computador
+vinculado.
 
 ### Vínculo experimental do Compute Agent
 
@@ -259,9 +260,21 @@ O Agent envia o inventário e um heartbeat a cada 30 segundos, aplica retry com
 espera crescente quando o Web Service fica indisponível e encerra com `Ctrl+C`.
 HTTP sem TLS é aceito somente em localhost; servidores remotos exigem HTTPS.
 Após 90 segundos sem heartbeat o painel marca o Agent como `OFFLINE`. Nenhuma
-credencial ou código deve ser colocado no Git, em screenshots ou em logs. O
-despacho remoto de Jobs ainda permanece bloqueado: este incremento prova apenas
-identidade, inventário e presença do Agent sem fingir execução no host web.
+credencial ou código deve ser colocado no Git, em screenshots ou em logs.
+
+Com o Agent online, `[ DESPACHAR BENCHMARK ]` cria uma oferta remota. O
+servidor assina o manifesto com uma chave HMAC derivada exclusivamente para o
+Node; o Agent fixa a identidade dessa chave no Windows Credential Manager,
+confere assinatura, validade, vínculo, workload e limites da allowlist antes de
+executar. O Agent devolve somente o digest e a duração, e o servidor reexecuta o
+benchmark para aceitar ou rejeitar a evidência:
+
+    QUEUED → OFFERED → ACCEPTED → RUNNING → UPLOADING → VERIFYING → COMPLETED
+                                                                   ↘ FAILED
+
+Falhas de assinatura, manifesto expirado, resultado divergente ou estado
+inválido encerram a tentativa sem emitir CU ou AIC. Reenvios idempotentes só são
+aceitos quando apresentam exatamente a mesma evidência já concluída.
 
 ## Estado do Marco 1
 
@@ -319,6 +332,7 @@ Implementado:
 - Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
 - protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
 - executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
+- despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

@@ -1,4 +1,6 @@
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using atos.AIFarm.Core.Application;
 
 namespace atos.AIFarm.Agent;
 
@@ -113,6 +115,15 @@ internal static class AgentApplication
                 "Credencial local ausente. Execute 'atos-agent enroll <url>'.");
 
         using var cancellation = CreateCancellation();
+        var trusted = await EnsureManifestTrustAsync(
+            client,
+            configuration,
+            credential,
+            configurationStore,
+            credentialStore,
+            cancellation.Source.Token);
+        configuration = trusted.Configuration;
+        var manifestVerificationKey = trusted.VerificationKey;
         var failures = 0;
         var interval = Math.Clamp(configuration.HeartbeatIntervalSeconds, 10, 300);
         Write("START", $"Node {configuration.NodeId} // {configuration.BaseUrl} // Ctrl+C para parar.");
@@ -129,6 +140,15 @@ internal static class AgentApplication
                 Write(
                     "HEARTBEAT",
                     $"{heartbeat.Status.ToString().ToUpperInvariant()} // ACCEPT_JOBS={heartbeat.AcceptJobs} // PRÓXIMO={interval}s");
+                if (heartbeat.AcceptJobs)
+                {
+                    await ExecuteNextJobAsync(
+                        client,
+                        configuration,
+                        credential,
+                        manifestVerificationKey,
+                        cancellation.Source.Token);
+                }
             }
             catch (AgentAuthenticationException)
             {
@@ -146,6 +166,144 @@ internal static class AgentApplication
             await Task.Delay(TimeSpan.FromSeconds(interval), cancellation.Source.Token);
         }
         return 0;
+    }
+
+    private static async Task<(AgentConfiguration Configuration, string VerificationKey)>
+        EnsureManifestTrustAsync(
+            AgentClient client,
+            AgentConfiguration configuration,
+            string credential,
+            AgentConfigurationStore configurationStore,
+            WindowsCredentialStore credentialStore,
+            CancellationToken cancellationToken)
+    {
+        var trust = await client.GetTrustAsync(configuration, credential, cancellationToken);
+        if (trust.Algorithm != "HMAC-SHA256-NODE-V1")
+            throw new InvalidOperationException("O servidor anunciou um algoritmo de trust não autorizado.");
+        if (configuration.ManifestKeyId is not null &&
+            !string.Equals(configuration.ManifestKeyId, trust.KeyId, StringComparison.Ordinal))
+            throw new AgentAuthenticationException(
+                "A chave de assinatura do servidor mudou. Um novo vínculo explícito é necessário.");
+
+        var target = configuration.ManifestKeyTarget ??
+            $"atos.ai-farm.agent-manifest/{configuration.NodeId:N}";
+        var verificationKey = credentialStore.Read(target);
+        if (string.IsNullOrWhiteSpace(verificationKey))
+        {
+            credentialStore.Save(target, configuration.NodeId.ToString(), trust.VerificationKey);
+            verificationKey = trust.VerificationKey;
+        }
+        var localKeyId = ManifestKeyId(verificationKey);
+        if (!string.Equals(localKeyId, trust.KeyId, StringComparison.Ordinal))
+            throw new AgentAuthenticationException(
+                "A chave de manifesto armazenada localmente não corresponde ao vínculo fixado.");
+        configuration = configuration with
+        {
+            ManifestKeyTarget = target,
+            ManifestKeyId = trust.KeyId
+        };
+        await configurationStore.SaveAsync(configuration, cancellationToken);
+        Write("TRUST", $"HMAC-SHA256-NODE-V1 // KEY_ID={trust.KeyId}");
+        return (configuration, verificationKey);
+    }
+
+    private static string ManifestKeyId(string verificationKey)
+    {
+        byte[] key;
+        try { key = Convert.FromBase64String(verificationKey); }
+        catch (FormatException)
+        {
+            throw new AgentAuthenticationException(
+                "A chave de manifesto armazenada localmente é inválida.");
+        }
+        try
+        {
+            return Convert.ToHexString(SHA256.HashData(key)).ToLowerInvariant()[..16];
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
+    private static async Task ExecuteNextJobAsync(
+        AgentClient client,
+        AgentConfiguration configuration,
+        string credential,
+        string manifestVerificationKey,
+        CancellationToken cancellationToken)
+    {
+        var offer = await client.ClaimJobAsync(configuration, credential, cancellationToken);
+        if (offer is null) return;
+        RemoteJobManifest manifest;
+        try
+        {
+            manifest = RemoteJobVerifier.Verify(
+                offer,
+                configuration,
+                manifestVerificationKey,
+                DateTimeOffset.UtcNow);
+        }
+        catch (InvalidOperationException exception)
+        {
+            await client.RejectJobAsync(
+                configuration,
+                credential,
+                offer.JobId,
+                exception.Message[..Math.Min(exception.Message.Length, 200)],
+                cancellationToken);
+            Write("REJECT", $"JOB={offer.JobId:N} // {exception.Message}");
+            return;
+        }
+
+        await client.MarkJobStartedAsync(
+            configuration,
+            credential,
+            offer.JobId,
+            cancellationToken);
+        Write("JOB", $"RUNNING // {offer.JobId:N} // {manifest.WorkloadVersion}");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var digest = await Task.Run(
+                () => AgentDeterministicBenchmark.Compute(
+                    manifest.Nonce,
+                    manifest.Iterations,
+                    timeout.Token),
+                timeout.Token);
+            stopwatch.Stop();
+            var acknowledgement = await client.SubmitResultAsync(
+                configuration,
+                credential,
+                offer.JobId,
+                new FarmRemoteJobResult(digest, Math.Max(1, stopwatch.ElapsedMilliseconds)),
+                cancellationToken);
+            Write(
+                "JOB",
+                $"{acknowledgement.Status.ToString().ToUpperInvariant()} // VERIFIED={acknowledgement.Verified} // CU={acknowledgement.ComputeUnitsMilli / 1000d:0.000}");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            await client.RejectJobAsync(
+                configuration,
+                credential,
+                offer.JobId,
+                "Timeout local do manifesto.",
+                CancellationToken.None);
+            Write("JOB", $"TIMEOUT // {offer.JobId:N}");
+        }
+        catch (OperationCanceledException)
+        {
+            await client.RejectJobAsync(
+                configuration,
+                credential,
+                offer.JobId,
+                "Agent encerrado durante a execução.",
+                CancellationToken.None);
+            throw;
+        }
     }
 
     private static async Task<int> ShowStatusAsync(

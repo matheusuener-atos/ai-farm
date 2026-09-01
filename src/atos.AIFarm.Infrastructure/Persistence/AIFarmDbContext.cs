@@ -270,7 +270,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("farm_jobs", table =>
             {
-                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
+                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
                 table.HasCheckConstraint(
                     "CK_farm_jobs_manifest_complete",
@@ -282,7 +282,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasIndex(x => x.AccountId)
                 .HasDatabaseName("UX_farm_jobs_account_active")
                 .IsUnique()
-                .HasFilter("\"Status\" IN ('Queued', 'Running', 'Verifying')");
+                .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
             entity.HasIndex(x => x.NodeId);
             entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);

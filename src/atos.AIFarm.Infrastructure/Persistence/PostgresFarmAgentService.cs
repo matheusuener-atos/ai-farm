@@ -9,10 +9,15 @@ namespace atos.AIFarm.Infrastructure.Persistence;
 internal sealed class PostgresFarmAgentService(
     IDbContextFactory<AIFarmDbContext> factory,
     IAIFarmIdentityAccessor identityAccessor,
-    TimeProvider timeProvider) : IFarmAgentService
+    TimeProvider timeProvider,
+    FarmManifestSigningOptions signingOptions) : IFarmAgentService
 {
     internal const int HeartbeatIntervalSeconds = 30;
     internal static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
+    private const string SignatureAlgorithm = "HMAC-SHA256-NODE-V1";
+    private const string Workload = "SHA256_CHAIN";
+    private const string WorkloadVersion = "atos-sha256-chain-v1";
+    private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
 
     public async Task<FarmAgentEnrollment> CreateEnrollmentAsync(
         CancellationToken cancellationToken = default)
@@ -130,6 +135,318 @@ internal sealed class PostgresFarmAgentService(
             status == FarmNodeStatus.Online,
             now,
             HeartbeatIntervalSeconds);
+    }
+
+    public async Task<FarmAgentTrust?> GetTrustAsync(
+        string credential,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null) return null;
+        var key = signingOptions.DeriveForAgent(node.Id);
+        return new FarmAgentTrust(SignatureAlgorithm, key.VerificationKey, key.KeyId);
+    }
+
+    public async Task<FarmRemoteJobOffer?> ClaimJobAsync(
+        string credential,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null || node.Status != FarmNodeStatus.Online.ToString()) return null;
+
+        var jobId = await db.FarmJobs
+            .Where(x => x.NodeId == node.Id &&
+                        (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running"))
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => (Guid?)x.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (jobId is null) return null;
+
+        var accepted = await db.FarmJobs
+            .Where(x => x.Id == jobId && x.Status == "Offered")
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(x => x.Status, FarmJobStatus.Accepted.ToString()),
+                cancellationToken);
+        var job = await db.FarmJobs.SingleAsync(x => x.Id == jobId, cancellationToken);
+        if (!TryReadRemoteManifest(job, out var manifest) || manifest is null ||
+            manifest.ExpiresAtUtc <= timeProvider.GetUtcNow())
+        {
+            await FailJobAsync(db, job, "Manifesto remoto inválido ou expirado.", cancellationToken);
+            return null;
+        }
+        if (accepted == 1)
+        {
+            await AddJobEventAsync(
+                db,
+                job,
+                FarmJobStatus.Accepted,
+                "Compute Agent aceitou a oferta assinada.",
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return new FarmRemoteJobOffer(
+            job.Id,
+            manifest.AttemptId,
+            job.ManifestPayload!,
+            job.ManifestDigest!,
+            job.ManifestSignature!,
+            SignatureAlgorithm);
+    }
+
+    public async Task<bool> MarkJobStartedAsync(
+        string credential,
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null) return false;
+        var now = timeProvider.GetUtcNow();
+        var updated = await db.FarmJobs
+            .Where(x => x.Id == jobId && x.NodeId == node.Id &&
+                        x.Status == "Accepted" && x.ManifestExpiresAtUtc > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.Status, FarmJobStatus.Running.ToString())
+                    .SetProperty(x => x.StartedAtUtc, now),
+                cancellationToken);
+        if (updated == 1)
+        {
+            var job = await db.FarmJobs.SingleAsync(x => x.Id == jobId, cancellationToken);
+            await AddJobEventAsync(
+                db,
+                job,
+                FarmJobStatus.Running,
+                "Agent validou o manifesto e iniciou o runtime autorizado.",
+                cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        var expired = await db.FarmJobs.SingleOrDefaultAsync(
+            x => x.Id == jobId && x.NodeId == node.Id &&
+                 x.Status == FarmJobStatus.Accepted.ToString() &&
+                 x.ManifestExpiresAtUtc <= now,
+            cancellationToken);
+        if (expired is not null)
+        {
+            await FailJobAsync(db, expired, "O manifesto expirou antes do início do runtime.", cancellationToken);
+            return false;
+        }
+        return await db.FarmJobs.AnyAsync(
+            x => x.Id == jobId && x.NodeId == node.Id && x.Status == "Running",
+            cancellationToken);
+    }
+
+    public async Task<bool> RejectJobAsync(
+        string credential,
+        Guid jobId,
+        FarmRemoteJobRejection rejection,
+        CancellationToken cancellationToken = default)
+    {
+        var reason = Required(rejection.Reason, nameof(rejection.Reason), 3, 200);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null) return false;
+        var job = await db.FarmJobs.SingleOrDefaultAsync(
+            x => x.Id == jobId && x.NodeId == node.Id &&
+                 (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running"),
+            cancellationToken);
+        if (job is null) return false;
+        await FailJobAsync(db, job, $"Agent rejeitou o manifesto: {reason}", cancellationToken);
+        return true;
+    }
+
+    public async Task<FarmRemoteJobAcknowledgement?> SubmitResultAsync(
+        string credential,
+        Guid jobId,
+        FarmRemoteJobResult result,
+        CancellationToken cancellationToken = default)
+    {
+        if (result.DurationMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(result.DurationMilliseconds));
+        byte[] suppliedDigest;
+        try { suppliedDigest = Convert.FromHexString(result.ResultDigest); }
+        catch (FormatException exception)
+        {
+            throw new ArgumentException("ResultDigest deve ser hexadecimal.", nameof(result), exception);
+        }
+        if (suppliedDigest.Length != 32)
+            throw new ArgumentException("ResultDigest deve possuir 256 bits.", nameof(result));
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null) return null;
+
+        var existing = await db.FarmJobs.SingleOrDefaultAsync(
+            x => x.Id == jobId && x.NodeId == node.Id,
+            cancellationToken);
+        if (existing is null) return null;
+        if (existing.Status == FarmJobStatus.Completed.ToString())
+        {
+            if (!string.Equals(existing.ResultDigest, result.ResultDigest, StringComparison.OrdinalIgnoreCase) ||
+                existing.DurationMilliseconds != result.DurationMilliseconds)
+                throw new InvalidOperationException("O Job já foi concluído com uma evidência diferente.");
+            return new FarmRemoteJobAcknowledgement(
+                existing.Id,
+                FarmJobStatus.Completed,
+                true,
+                existing.ComputeUnitsMilli);
+        }
+        if (!TryReadRemoteManifest(existing, out var manifest) || manifest is null)
+            throw new InvalidOperationException("O manifesto remoto armazenado não é válido.");
+        if (result.DurationMilliseconds > manifest.TimeoutSeconds * 1000L)
+            throw new InvalidOperationException("A evidência excede o timeout assinado do Job.");
+
+        var claimed = await db.FarmJobs
+            .Where(x => x.Id == jobId && x.NodeId == node.Id &&
+                        (x.Status == "Accepted" || x.Status == "Running"))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(x => x.Status, FarmJobStatus.Uploading.ToString())
+                    .SetProperty(x => x.ResultDigest, result.ResultDigest.ToLowerInvariant())
+                    .SetProperty(x => x.DurationMilliseconds, result.DurationMilliseconds),
+                cancellationToken);
+        if (claimed != 1)
+            throw new InvalidOperationException("O Job não aceita evidência neste estado.");
+
+        var job = await db.FarmJobs.SingleAsync(x => x.Id == jobId, cancellationToken);
+        await AddJobEventAsync(
+            db,
+            job,
+            FarmJobStatus.Uploading,
+            "Evidência SHA-256 recebida do Agent autenticado.",
+            cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+
+        job.Status = FarmJobStatus.Verifying.ToString();
+        await AddJobEventAsync(
+            db,
+            job,
+            FarmJobStatus.Verifying,
+            "Servidor iniciou reexecução determinística independente.",
+            cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+
+        var expected = await Task.Run(
+            () => DeterministicBenchmark.Compute(
+                manifest.Nonce,
+                manifest.Iterations,
+                cancellationToken),
+            cancellationToken);
+        job.ExpectedDigest = expected;
+        var verified = CryptographicOperations.FixedTimeEquals(
+            suppliedDigest,
+            Convert.FromHexString(expected));
+        job.FinishedAtUtc = timeProvider.GetUtcNow();
+        if (!verified)
+        {
+            job.Status = FarmJobStatus.Failed.ToString();
+            job.FailureReason = "A evidência do Agent divergiu da reexecução do verificador.";
+            await AddJobEventAsync(
+                db,
+                job,
+                FarmJobStatus.Failed,
+                "Digest divergente; nenhum CU ou AIC emitido.",
+                cancellationToken);
+        }
+        else
+        {
+            job.Status = FarmJobStatus.Completed.ToString();
+            job.ComputeUnitsMilli = 1_000;
+            node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
+            await AddJobEventAsync(
+                db,
+                job,
+                FarmJobStatus.Completed,
+                "1,000 CU remoto verificado; nenhum AIC emitido.",
+                cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return new FarmRemoteJobAcknowledgement(
+            job.Id,
+            Enum.Parse<FarmJobStatus>(job.Status),
+            verified,
+            job.ComputeUnitsMilli);
+    }
+
+    private async Task<FarmNodeRecord?> AuthenticateNodeAsync(
+        AIFarmDbContext db,
+        string credential,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(credential)) return null;
+        var credentialHash = HashSecret(credential);
+        return await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.AgentCredentialHash == credentialHash && x.ConnectionKind == "Agent",
+            cancellationToken);
+    }
+
+    private bool TryReadRemoteManifest(FarmJobRecord job, out FarmJobManifest? manifest)
+    {
+        var key = signingOptions.DeriveForAgent(job.NodeId);
+        if (!FarmManifestSecurity.TryVerify(
+                job.ManifestPayload,
+                job.ManifestDigest,
+                job.ManifestSignature,
+                key.Signing,
+                out manifest) || manifest is null)
+            return false;
+        return manifest.Version == PostgresFarmLabService.RemoteManifestVersion &&
+            manifest.JobId == job.Id &&
+            manifest.AttemptId == job.AttemptId &&
+            manifest.NodeId == job.NodeId &&
+            manifest.Workload == Workload &&
+            manifest.WorkloadVersion == WorkloadVersion &&
+            manifest.VerificationPolicy == VerificationPolicy &&
+            manifest.Nonce == job.Nonce &&
+            manifest.IssuedAtUtc == job.ManifestIssuedAtUtc &&
+            manifest.ExpiresAtUtc == job.ManifestExpiresAtUtc &&
+            manifest.NetworkPolicy == "DENY_ALL" &&
+            manifest.DataClassification == "STANDARD" &&
+            manifest.Iterations == 100_000 &&
+            manifest.TimeoutSeconds == 30 &&
+            manifest.MaxLogicalProcessors == 1 &&
+            manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024;
+    }
+
+    private async Task FailJobAsync(
+        AIFarmDbContext db,
+        FarmJobRecord job,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        job.Status = FarmJobStatus.Failed.ToString();
+        job.FailureReason = reason;
+        job.FinishedAtUtc = timeProvider.GetUtcNow();
+        await AddJobEventAsync(db, job, FarmJobStatus.Failed, reason, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task AddJobEventAsync(
+        AIFarmDbContext db,
+        FarmJobRecord job,
+        FarmJobStatus status,
+        string detail,
+        CancellationToken cancellationToken)
+    {
+        var persisted = await db.FarmJobEvents
+            .Where(x => x.JobId == job.Id)
+            .MaxAsync(x => (int?)x.Sequence, cancellationToken) ?? 0;
+        var tracked = db.ChangeTracker.Entries<FarmJobEventRecord>()
+            .Count(x => x.State == EntityState.Added && x.Entity.JobId == job.Id);
+        db.FarmJobEvents.Add(new FarmJobEventRecord
+        {
+            Id = Guid.NewGuid(),
+            JobId = job.Id,
+            Sequence = persisted + tracked + 1,
+            Status = status.ToString(),
+            Detail = detail,
+            OccurredAtUtc = timeProvider.GetUtcNow()
+        });
     }
 
     private static FarmAgentEnrollmentRequest Validate(FarmAgentEnrollmentRequest request)

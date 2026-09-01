@@ -1,4 +1,8 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 using atos.AIFarm.Core.Application;
 
 namespace atos.AIFarm.Agent;
@@ -8,7 +12,114 @@ internal sealed record AgentConfiguration(
     Guid NodeId,
     string CredentialTarget,
     string AgentVersion,
-    int HeartbeatIntervalSeconds);
+    int HeartbeatIntervalSeconds,
+    string? ManifestKeyTarget = null,
+    string? ManifestKeyId = null);
+
+internal sealed record RemoteJobManifest(
+    string Version,
+    Guid JobId,
+    Guid AttemptId,
+    Guid NodeId,
+    string Workload,
+    string WorkloadVersion,
+    string VerificationPolicy,
+    string Nonce,
+    int Iterations,
+    int TimeoutSeconds,
+    int MaxLogicalProcessors,
+    long MaxMemoryBytes,
+    string NetworkPolicy,
+    string DataClassification,
+    DateTimeOffset IssuedAtUtc,
+    DateTimeOffset ExpiresAtUtc);
+
+internal static class RemoteJobVerifier
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
+
+    public static RemoteJobManifest Verify(
+        FarmRemoteJobOffer offer,
+        AgentConfiguration configuration,
+        string verificationKey,
+        DateTimeOffset now)
+    {
+        if (offer.SignatureAlgorithm != "HMAC-SHA256-NODE-V1")
+            throw new InvalidOperationException("Algoritmo de assinatura remoto não autorizado.");
+        var payload = Encoding.UTF8.GetBytes(offer.ManifestPayload);
+        var digest = DecodeHex(offer.ManifestDigest, "digest");
+        var signature = DecodeHex(offer.ManifestSignature, "assinatura");
+        byte[] key;
+        try { key = Convert.FromBase64String(verificationKey); }
+        catch (FormatException exception)
+        {
+            throw new InvalidOperationException("Chave de verificação local inválida.", exception);
+        }
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(payload), digest) ||
+                !CryptographicOperations.FixedTimeEquals(HMACSHA256.HashData(key, payload), signature))
+                throw new InvalidOperationException("O manifesto remoto não possui assinatura válida para este Node.");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+
+        var manifest = JsonSerializer.Deserialize<RemoteJobManifest>(offer.ManifestPayload, JsonOptions)
+            ?? throw new InvalidOperationException("Manifesto remoto vazio.");
+        var local = AgentInventory.Heartbeat();
+        if (manifest.Version != "atos-farm-manifest-v2-agent" ||
+            manifest.JobId != offer.JobId ||
+            manifest.AttemptId != offer.AttemptId ||
+            manifest.NodeId != configuration.NodeId ||
+            manifest.Workload != "SHA256_CHAIN" ||
+            manifest.WorkloadVersion != "atos-sha256-chain-v1" ||
+            manifest.VerificationPolicy != "DETERMINISTIC_REEXECUTION_V1" ||
+            manifest.NetworkPolicy != "DENY_ALL" ||
+            manifest.DataClassification != "STANDARD" ||
+            manifest.Iterations != 100_000 ||
+            manifest.TimeoutSeconds != 30 ||
+            manifest.MaxLogicalProcessors is < 1 or > 1 ||
+            manifest.MaxLogicalProcessors > local.LogicalProcessors ||
+            manifest.MaxMemoryBytes is <= 0 or > 256L * 1024 * 1024 ||
+            manifest.MaxMemoryBytes > local.MemoryBytes ||
+            manifest.ExpiresAtUtc <= now)
+            throw new InvalidOperationException("O manifesto remoto viola a allowlist ou os limites locais.");
+        return manifest;
+    }
+
+    private static byte[] DecodeHex(string value, string field)
+    {
+        try
+        {
+            var bytes = Convert.FromHexString(value);
+            if (bytes.Length != 32) throw new FormatException();
+            return bytes;
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidOperationException($"O {field} do manifesto é inválido.", exception);
+        }
+    }
+}
+
+internal static class AgentDeterministicBenchmark
+{
+    public static string Compute(string nonce, int iterations, CancellationToken cancellationToken)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(nonce));
+        for (var index = 0; index < iterations; index++)
+        {
+            if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+            hash = SHA256.HashData(hash);
+        }
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+}
 
 internal static class AgentInventory
 {

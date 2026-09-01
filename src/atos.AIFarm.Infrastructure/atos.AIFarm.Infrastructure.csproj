@@ -23,6 +23,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="atos.AIFarm.IntegrationTests" />
     <InternalsVisibleTo Include="atos.AIFarm.UnitTests" />
   </ItemGroup>
 

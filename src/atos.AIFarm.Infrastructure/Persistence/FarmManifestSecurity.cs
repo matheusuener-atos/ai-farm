@@ -26,10 +26,29 @@ public sealed class FarmManifestSigningOptions
 
     internal ReadOnlySpan<byte> Key => key;
 
+    internal FarmAgentManifestKey DeriveForAgent(Guid nodeId)
+    {
+        var derived = HMACSHA256.HashData(
+            Key,
+            Encoding.UTF8.GetBytes($"atos-agent-manifest-v1:{nodeId:N}"));
+        var verificationKey = Convert.ToBase64String(derived);
+        var keyId = Convert.ToHexString(SHA256.HashData(derived))
+            .ToLowerInvariant()[..16];
+        return new FarmAgentManifestKey(
+            new FarmManifestSigningOptions(verificationKey),
+            verificationKey,
+            keyId);
+    }
+
     public static FarmManifestSigningOptions Development { get; } = new(
         Convert.ToBase64String(SHA256.HashData(
             Encoding.UTF8.GetBytes("atos-ai-farm-development-manifest-key-v1"))));
 }
+
+internal sealed record FarmAgentManifestKey(
+    FarmManifestSigningOptions Signing,
+    string VerificationKey,
+    string KeyId);
 
 internal sealed record FarmJobManifest(
     string Version,

@@ -147,7 +147,65 @@ public sealed class PostgresFarmLabTests
             Assert.Equal(FarmNodeConnectionKind.Agent, online.Node.ConnectionKind);
             Assert.Equal(FarmNodeStatus.Online, online.Node.Status);
             Assert.Equal("atos-agent/0.1.0", online.Node.AgentVersion);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => lab.RunBenchmarkAsync());
+
+            var trust = await agents.GetTrustAsync(linked.Credential);
+            Assert.NotNull(trust);
+            Assert.Equal("HMAC-SHA256-NODE-V1", trust.Algorithm);
+            var offered = await lab.RunBenchmarkAsync();
+            Assert.Equal(FarmJobStatus.Offered, offered.Status);
+            var claimed = await agents.ClaimJobAsync(linked.Credential);
+            Assert.NotNull(claimed);
+            Assert.True(FarmManifestSecurity.TryVerify(
+                claimed.ManifestPayload,
+                claimed.ManifestDigest,
+                claimed.ManifestSignature,
+                new FarmManifestSigningOptions(trust.VerificationKey),
+                out var manifest));
+            Assert.NotNull(manifest);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, claimed.JobId));
+            var digest = DeterministicBenchmark.Compute(manifest.Nonce, manifest.Iterations);
+            var acknowledgement = await agents.SubmitResultAsync(
+                linked.Credential,
+                claimed.JobId,
+                new FarmRemoteJobResult(digest, 10));
+            Assert.NotNull(acknowledgement);
+            Assert.True(acknowledgement.Verified);
+            Assert.Equal(FarmJobStatus.Completed, acknowledgement.Status);
+            var remote = (await lab.GetDashboardAsync()).RecentJobs.Single(x => x.Id == offered.Id);
+            Assert.Equal(
+                [FarmJobStatus.Queued, FarmJobStatus.Offered, FarmJobStatus.Accepted,
+                 FarmJobStatus.Running, FarmJobStatus.Uploading, FarmJobStatus.Verifying,
+                 FarmJobStatus.Completed],
+                remote.Events.Select(x => x.Status).ToArray());
+            var repeated = await agents.SubmitResultAsync(
+                linked.Credential,
+                claimed.JobId,
+                new FarmRemoteJobResult(digest, 10));
+            Assert.NotNull(repeated);
+            Assert.True(repeated.Verified);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                agents.SubmitResultAsync(
+                    linked.Credential,
+                    claimed.JobId,
+                    new FarmRemoteJobResult(digest, 11)));
+            Assert.Null(await agents.GetTrustAsync("afc_invalid"));
+            Assert.Null(await agents.ClaimJobAsync("afc_invalid"));
+
+            var rejectedOffer = await lab.RunBenchmarkAsync();
+            var rejectedClaim = await agents.ClaimJobAsync(linked.Credential);
+            Assert.NotNull(rejectedClaim);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, rejectedClaim.JobId));
+            var rejected = await agents.SubmitResultAsync(
+                linked.Credential,
+                rejectedClaim.JobId,
+                new FarmRemoteJobResult(new string('0', 64), 10));
+            Assert.NotNull(rejected);
+            Assert.False(rejected.Verified);
+            Assert.Equal(FarmJobStatus.Failed, rejected.Status);
+            Assert.Equal(0, rejected.ComputeUnitsMilli);
+            Assert.Equal(
+                FarmJobStatus.Failed,
+                (await lab.GetDashboardAsync()).RecentJobs.Single(x => x.Id == rejectedOffer.Id).Status);
 
             clock.Advance(TimeSpan.FromSeconds(91));
             var offline = await lab.GetDashboardAsync();
