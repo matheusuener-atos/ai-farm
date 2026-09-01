@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/atos.AIFarm.Agent/atos.AIFarm.Agent.csproj" />
     <Project Path="src/atos.AIFarm.Core/atos.AIFarm.Core.csproj" />
     <Project Path="src/atos.AIFarm.Infrastructure/atos.AIFarm.Infrastructure.csproj" />
     <Project Path="src/atos.AIFarm.Web/atos.AIFarm.Web.csproj" />

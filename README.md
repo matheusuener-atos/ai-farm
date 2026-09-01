@@ -234,41 +234,30 @@ O usuário autenticado pode gerar um código de vínculo de uso único, válido 
 Agent recebe uma credencial de heartbeat que só é armazenada como SHA-256 no
 PostgreSQL; a credencial em texto puro é retornada uma única vez.
 
-Enquanto o executável dedicado do Agent não faz parte da solução, o protocolo
-pode ser provado em desenvolvimento com PowerShell. Copie o código exibido no
-painel e execute:
+O executável dedicado está no projeto `atos.AIFarm.Agent`. Na primeira
+instalação, gere o código em `/farm` e execute:
 
 ```powershell
-$baseUrl = "http://localhost:5159"
-$enrollmentToken = "afe_COLE_O_CODIGO_AQUI"
-$inventory = @{
-    name = $env:COMPUTERNAME
-    runtime = ".NET 10 // Windows"
-    logicalProcessors = [Environment]::ProcessorCount
-    memoryBytes = [GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes
-    agentVersion = "atos-agent/manual-v1"
-} | ConvertTo-Json
-$linked = Invoke-RestMethod -Method Post `
-    -Uri "$baseUrl/api/farm/agents/enroll" `
-    -Headers @{ "X-Enrollment-Token" = $enrollmentToken } `
-    -ContentType "application/json" -Body $inventory
+dotnet run --project src/atos.AIFarm.Agent -- enroll http://localhost:5159
 ```
 
-Envie então um heartbeat com a credencial retornada em `$linked.credential`:
+O código é solicitado sem ecoar seu conteúdo. O Agent grava somente sua
+configuração não sensível em `%LOCALAPPDATA%\atos-ai-farm\agent.json`; a
+credencial fica no Windows Credential Manager. Para conferir o vínculo:
 
 ```powershell
-$heartbeat = @{
-    runtime = ".NET 10 // Windows"
-    logicalProcessors = [Environment]::ProcessorCount
-    memoryBytes = [GC]::GetGCMemoryInfo().TotalAvailableMemoryBytes
-    agentVersion = "atos-agent/manual-v1"
-} | ConvertTo-Json
-Invoke-RestMethod -Method Post `
-    -Uri "$baseUrl/api/farm/agents/heartbeat" `
-    -Headers @{ Authorization = "Bearer $($linked.credential)" } `
-    -ContentType "application/json" -Body $heartbeat
+dotnet run --project src/atos.AIFarm.Agent -- status
 ```
 
+Para manter o node online, inicie o processo e deixe o terminal aberto:
+
+```powershell
+dotnet run --project src/atos.AIFarm.Agent -- run
+```
+
+O Agent envia o inventário e um heartbeat a cada 30 segundos, aplica retry com
+espera crescente quando o Web Service fica indisponível e encerra com `Ctrl+C`.
+HTTP sem TLS é aceito somente em localhost; servidores remotos exigem HTTPS.
 Após 90 segundos sem heartbeat o painel marca o Agent como `OFFLINE`. Nenhuma
 credencial ou código deve ser colocado no Git, em screenshots ou em logs. O
 despacho remoto de Jobs ainda permanece bloqueado: este incremento prova apenas
@@ -329,6 +318,7 @@ Implementado:
 - exportação autenticada e portável de conversas em Markdown e JSON.
 - Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
 - protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
+- executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
