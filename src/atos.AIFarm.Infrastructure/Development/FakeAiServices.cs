@@ -31,23 +31,67 @@ public sealed class InMemoryChatStore : IChatStore
 {
     private readonly object _sync = new();
     private readonly ConcurrentDictionary<string, ChatExecutionResult> _results = new(StringComparer.Ordinal);
-    private readonly List<ChatMessageSnapshot> _messages = [];
-    private Guid? _conversationId;
-    private DateTimeOffset _createdAtUtc;
-    private DateTimeOffset _updatedAtUtc;
+    private readonly Dictionary<Guid, ConversationState> _conversations = [];
+
+    public Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            IReadOnlyList<ConversationSummary> summaries = _conversations.Values
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => new ConversationSummary(
+                    x.Id,
+                    x.CreatedAtUtc,
+                    x.UpdatedAtUtc,
+                    x.Messages.Count,
+                    x.Messages.LastOrDefault()?.Content))
+                .ToArray();
+            return Task.FromResult(summaries);
+        }
+    }
+
+    public Task<ConversationSnapshot> CreateConversationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var conversation = new ConversationState(Guid.NewGuid(), now, now);
+            _conversations.Add(conversation.Id, conversation);
+            return Task.FromResult(Snapshot(conversation));
+        }
+    }
+
+    public Task<ConversationSnapshot?> GetConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(
+                _conversations.TryGetValue(conversationId, out var conversation)
+                    ? Snapshot(conversation)
+                    : null);
+        }
+    }
 
     public Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {
         lock (_sync)
         {
-            if (_conversationId is null)
+            var conversation = _conversations.Values
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .FirstOrDefault();
+            if (conversation is null)
             {
-                _conversationId = Guid.NewGuid();
-                _createdAtUtc = _updatedAtUtc = DateTimeOffset.UtcNow;
+                var now = DateTimeOffset.UtcNow;
+                conversation = new ConversationState(Guid.NewGuid(), now, now);
+                _conversations.Add(conversation.Id, conversation);
             }
 
-            return Task.FromResult(Snapshot());
+            return Task.FromResult(Snapshot(conversation));
         }
     }
 
@@ -71,19 +115,18 @@ public sealed class InMemoryChatStore : IChatStore
             }
 
             var now = DateTimeOffset.UtcNow;
-            if (_conversationId is null)
+            if (!_conversations.TryGetValue(result.ConversationId, out var conversation))
             {
-                _conversationId = result.ConversationId;
-                _createdAtUtc = now;
+                throw new InvalidOperationException("A conversa não existe.");
             }
-            _messages.Add(new ChatMessageSnapshot(
+            conversation.Messages.Add(new ChatMessageSnapshot(
                 Guid.NewGuid(),
                 ChatMessageRole.User,
                 prompt,
                 ChatMessageStatus.Completed,
                 result.OperationId,
                 now));
-            _messages.Add(new ChatMessageSnapshot(
+            conversation.Messages.Add(new ChatMessageSnapshot(
                 Guid.NewGuid(),
                 ChatMessageRole.Assistant,
                 result.Response,
@@ -93,15 +136,26 @@ public sealed class InMemoryChatStore : IChatStore
                 result.Route,
                 result.EstimatedCostMinor,
                 result.ActualCostMinor));
-            _updatedAtUtc = now;
+            conversation.UpdatedAtUtc = now;
         }
 
         return Task.CompletedTask;
     }
 
-    private ConversationSnapshot Snapshot() => new(
-        _conversationId!.Value,
-        _createdAtUtc,
-        _updatedAtUtc,
-        [.. _messages.OrderBy(x => x.CreatedAtUtc)]);
+    private static ConversationSnapshot Snapshot(ConversationState conversation) => new(
+        conversation.Id,
+        conversation.CreatedAtUtc,
+        conversation.UpdatedAtUtc,
+        [.. conversation.Messages.OrderBy(x => x.CreatedAtUtc)]);
+
+    private sealed class ConversationState(
+        Guid id,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset updatedAtUtc)
+    {
+        public Guid Id { get; } = id;
+        public DateTimeOffset CreatedAtUtc { get; } = createdAtUtc;
+        public DateTimeOffset UpdatedAtUtc { get; set; } = updatedAtUtc;
+        public List<ChatMessageSnapshot> Messages { get; } = [];
+    }
 }

@@ -55,6 +55,13 @@ public sealed record ConversationSnapshot(
     DateTimeOffset UpdatedAtUtc,
     IReadOnlyList<ChatMessageSnapshot> Messages);
 
+public sealed record ConversationSummary(
+    Guid Id,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    int MessageCount,
+    string? Preview);
+
 public interface IPriceEstimator
 {
     Task<PriceEstimate> EstimateAsync(string prompt, CancellationToken cancellationToken);
@@ -81,6 +88,13 @@ public sealed record ChatExecutionResult(
 
 public interface IChatStore
 {
+    Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
+        CancellationToken cancellationToken = default);
+    Task<ConversationSnapshot> CreateConversationAsync(
+        CancellationToken cancellationToken = default);
+    Task<ConversationSnapshot?> GetConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);
     Task<ChatExecutionResult?> FindAsync(string idempotencyKey, CancellationToken cancellationToken);

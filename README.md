@@ -114,6 +114,8 @@ Implementado:
 - persistência idempotente de AiRequest e AiExecution;
 - persistência de Conversation e Message com correlação à execução;
 - recuperação do histórico do Chat após restart;
+- criação, listagem e seleção de múltiplas conversas por conta;
+- acesso a conversas validado antes de qualquer reserva no Ledger;
 - preflight do Chat com rota, catálogo e limite em AIC antes da reserva;
 - confirmação explícita antes de executar o Provider e alterar o Ledger;
 - teste de persistência real do Chat contra PostgreSQL;

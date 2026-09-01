@@ -403,6 +403,62 @@ public sealed class PostgresChatStore(
     IAIFarmIdentityAccessor identityAccessor)
     : IChatStore
 {
+    public async Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.Conversations
+            .Where(x => x.AccountId == identity.AccountId && x.Status == "Active")
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => new ConversationSummary(
+                x.Id,
+                x.CreatedAtUtc,
+                x.UpdatedAtUtc,
+                db.Messages.Count(message => message.ConversationId == x.Id),
+                db.Messages
+                    .Where(message => message.ConversationId == x.Id)
+                    .OrderByDescending(message => message.CreatedAtUtc)
+                    .Select(message => message.Content)
+                    .FirstOrDefault()))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<ConversationSnapshot> CreateConversationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var conversation = new ConversationRecord
+        {
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            Status = "Active",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        db.Conversations.Add(conversation);
+        await db.SaveChangesAsync(cancellationToken);
+        return await LoadConversationAsync(db, conversation, cancellationToken);
+    }
+
+    public async Task<ConversationSnapshot?> GetConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 x.Status == "Active",
+            cancellationToken);
+        return conversation is null
+            ? null
+            : await LoadConversationAsync(db, conversation, cancellationToken);
+    }
+
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {

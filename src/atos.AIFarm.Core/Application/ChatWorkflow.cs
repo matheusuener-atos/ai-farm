@@ -69,6 +69,11 @@ public sealed class ChatWorkflow(
             throw new ArgumentException("O plano de execução é inválido.", nameof(plan));
         }
 
+        if (await chat.GetConversationAsync(conversationId, cancellationToken) is null)
+        {
+            throw new InvalidOperationException("A conversa não existe ou não pertence à conta atual.");
+        }
+
         var replay = await chat.FindAsync(idempotencyKey, cancellationToken);
         if (replay is not null)
         {

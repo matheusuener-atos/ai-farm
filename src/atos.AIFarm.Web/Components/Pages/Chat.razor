@@ -1,9 +1,11 @@
 @page "/chat"
+@page "/chat/{ConversationId:guid}"
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject ChatWorkflow Workflow
 @inject IChatStore ChatStore
 @inject IWalletService Wallet
+@inject NavigationManager Navigation
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
 
@@ -13,7 +15,28 @@
     <p>ROTA // MELHOR DISPONÍVEL</p>
 </div>
 
-<section class="terminal chat-terminal" aria-label="Conversa com IA">
+<div class="chat-workspace">
+    <aside class="conversation-panel" aria-label="Histórico de conversas">
+        <div class="conversation-panel-header">
+            <span>CONVERSAS</span>
+            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">[ NOVA ]</button>
+        </div>
+        <div class="conversation-list">
+            @foreach (var conversation in _conversations)
+            {
+                <button type="button"
+                        class="@ConversationClass(conversation.Id)"
+                        @onclick="() => SelectConversation(conversation.Id)"
+                        disabled="@_working">
+                    <strong>@ConversationLabel(conversation)</strong>
+                    <span>@ConversationPreview(conversation)</span>
+                    <small>@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm") // @conversation.MessageCount MSG</small>
+                </button>
+            }
+        </div>
+    </aside>
+
+    <section class="terminal chat-terminal" aria-label="Conversa com IA">
     <div class="terminal-title">[ SESSÃO_@SessionCode ] <span class="status">● ONLINE</span></div>
 
     @if (_messages.Count == 0)
@@ -95,10 +118,15 @@
             </div>
         </div>
     </div>
-</section>
+    </section>
+</div>
 
 @code {
+    [Parameter]
+    public Guid? ConversationId { get; set; }
+
     private readonly List<ChatMessageSnapshot> _messages = [];
+    private readonly List<ConversationSummary> _conversations = [];
     private Guid _conversationId;
     private string _prompt = string.Empty;
     private string? _error;
@@ -110,7 +138,7 @@
         ? "----"
         : _conversationId.ToString("N")[..4].ToUpperInvariant();
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
         await RefreshConversationAsync();
         await RefreshWalletAsync();
@@ -214,10 +242,89 @@
 
     private async Task RefreshConversationAsync()
     {
-        var conversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+        ConversationSnapshot? conversation;
+        if (ConversationId is Guid requestedId)
+        {
+            conversation = await ChatStore.GetConversationAsync(requestedId);
+            if (conversation is null)
+            {
+                _error = "A conversa solicitada não foi encontrada.";
+                Navigation.NavigateTo("/chat", replace: true);
+                return;
+            }
+        }
+        else
+        {
+            conversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+        }
+
         _conversationId = conversation.Id;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);
+        await RefreshConversationsAsync();
+
+        if (ConversationId is null)
+        {
+            Navigation.NavigateTo($"/chat/{conversation.Id}", replace: true);
+        }
+    }
+
+    private async Task RefreshConversationsAsync()
+    {
+        _conversations.Clear();
+        _conversations.AddRange(await ChatStore.ListConversationsAsync());
+    }
+
+    private async Task CreateConversationAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        _pendingPlan = null;
+        try
+        {
+            var conversation = await ChatStore.CreateConversationAsync();
+            Navigation.NavigateTo($"/chat/{conversation.Id}");
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível criar uma nova conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void SelectConversation(Guid conversationId)
+    {
+        if (!_working && conversationId != _conversationId)
+        {
+            _pendingPlan = null;
+            _error = null;
+            Navigation.NavigateTo($"/chat/{conversationId}");
+        }
+    }
+
+    private string ConversationClass(Guid conversationId) =>
+        conversationId == _conversationId ? "conversation-item active" : "conversation-item";
+
+    private static string ConversationLabel(ConversationSummary conversation) =>
+        $"SESSÃO_{conversation.Id.ToString("N")[..4].ToUpperInvariant()}";
+
+    private static string ConversationPreview(ConversationSummary conversation)
+    {
+        const int maximumLength = 54;
+        var preview = string.IsNullOrWhiteSpace(conversation.Preview)
+            ? "Nova conversa"
+            : conversation.Preview.Trim();
+        return preview.Length <= maximumLength
+            ? preview
+            : $"{preview[..maximumLength]}…";
     }
 
     private static string RoleLabel(ChatMessageRole role) =>

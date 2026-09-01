@@ -154,6 +154,54 @@ public sealed class ChatWorkflowTests
         _ = recreatedWorkflow;
     }
 
+    [Fact]
+    public async Task ConversationsCanBeCreatedListedAndLoadedIndependently()
+    {
+        var chat = new InMemoryChatStore();
+        var first = await chat.CreateConversationAsync();
+        var second = await chat.CreateConversationAsync();
+
+        await chat.SaveCompletedAsync(
+            "histórico da primeira",
+            "first-conversation",
+            new ChatExecutionResult(
+                first.Id,
+                Guid.NewGuid(),
+                "resposta da primeira",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+
+        var summaries = await chat.ListConversationsAsync();
+        var restoredFirst = await chat.GetConversationAsync(first.Id);
+        var restoredSecond = await chat.GetConversationAsync(second.Id);
+
+        Assert.Equal(2, summaries.Count);
+        Assert.Equal(first.Id, summaries[0].Id);
+        Assert.Equal(2, summaries[0].MessageCount);
+        Assert.Equal("resposta da primeira", summaries[0].Preview);
+        Assert.Equal(2, restoredFirst?.Messages.Count);
+        Assert.Empty(restoredSecond!.Messages);
+    }
+
+    [Fact]
+    public async Task UnknownConversationIsRejectedBeforeWalletReservation()
+    {
+        var wallet = await FundedWalletAsync();
+        var provider = new CountingProvider();
+        var workflow = NewWorkflow(wallet, provider);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.SendAsync(Guid.NewGuid(), "não cobrar", "unknown-conversation"));
+        var snapshot = await wallet.GetSnapshotAsync();
+
+        Assert.Equal(0, provider.CallCount);
+        Assert.Single(snapshot.Transactions);
+        Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
+    }
+
     private static ChatWorkflow NewWorkflow(
         IWalletService wallet,
         IAiProvider provider,

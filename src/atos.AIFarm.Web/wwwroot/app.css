@@ -52,6 +52,17 @@ h1 span { color: var(--purple); }
 .page-heading > p:last-child { color: var(--muted); font-size: .78rem; }
 .terminal { border: 1px solid #494946; }
 .terminal-title { border-bottom: 1px solid #494946; padding: .8rem 1rem; display: flex; justify-content: space-between; }
+.chat-workspace { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.conversation-panel { border: 1px solid #494946; min-width: 0; }
+.conversation-panel-header { min-height: 49px; padding: .55rem .7rem; display: flex; align-items: center; justify-content: space-between; gap: .6rem; border-bottom: 1px solid #494946; color: var(--muted); font-size: .72rem; }
+.conversation-panel-header button { padding: .45rem .65rem; font-size: .7rem; }
+.conversation-list { display: grid; max-height: 650px; overflow-y: auto; }
+.conversation-item { display: grid; gap: .4rem; width: 100%; padding: .9rem; border: 0; border-bottom: 1px solid #292927; color: var(--white); background: transparent; text-align: left; }
+.conversation-item:hover { color: var(--white); background: #111110; }
+.conversation-item.active { box-shadow: inset 3px 0 var(--purple); background: var(--purple-deep); }
+.conversation-item strong { color: var(--purple-bright); font-size: .76rem; }
+.conversation-item span { min-width: 0; overflow: hidden; color: var(--white); font-size: .72rem; line-height: 1.4; }
+.conversation-item small { color: var(--muted); font-size: .62rem; }
 .chat-terminal { min-height: 560px; display: flex; flex-direction: column; }
 .empty-state { margin: auto; padding: 3rem 1rem; text-align: center; max-width: 700px; line-height: 1.7; }
 .message { padding: 1.3rem; border-bottom: 1px solid #292927; display: grid; grid-template-columns: 100px 1fr; gap: .8rem; }
@@ -113,6 +124,8 @@ code { color: var(--white); }
     main { padding-top: 3rem; }
     .balance-panel, .composer-footer { align-items: flex-start; flex-direction: column; }
     .action-grid, .wallet-grid { grid-template-columns: 1fr; }
+    .chat-workspace { grid-template-columns: 1fr; }
+    .conversation-list { max-height: 230px; }
     .action { min-height: 170px; }
     .message { grid-template-columns: 1fr; }
     .message small { grid-column: 1; }

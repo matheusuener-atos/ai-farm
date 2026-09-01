@@ -40,18 +40,27 @@ public sealed class PostgresAccountIsolationTests
             var secondWallet = await second
                 .GetRequiredService<IWalletService>()
                 .GetSnapshotAsync();
-            var firstConversation = await first
-                .GetRequiredService<IChatStore>()
-                .GetOrCreateCurrentConversationAsync();
-            var secondConversation = await second
-                .GetRequiredService<IChatStore>()
-                .GetOrCreateCurrentConversationAsync();
+            var firstStore = first.GetRequiredService<IChatStore>();
+            var secondStore = second.GetRequiredService<IChatStore>();
+            var firstConversation = await firstStore.GetOrCreateCurrentConversationAsync();
+            var secondConversation = await secondStore.GetOrCreateCurrentConversationAsync();
+            var additionalFirstConversation = await firstStore.CreateConversationAsync();
+            var crossAccountLookup = await secondStore.GetConversationAsync(
+                additionalFirstConversation.Id);
+            var firstSummaries = await firstStore.ListConversationsAsync();
+            var secondSummaries = await secondStore.ListConversationsAsync();
 
             Assert.Equal(Aic.FromAic(988), firstWallet.Balance.AvailableMinor);
             Assert.Equal(Aic.FromAic(1_000), secondWallet.Balance.AvailableMinor);
             Assert.Equal(2, firstConversation.Messages.Count);
             Assert.Empty(secondConversation.Messages);
             Assert.NotEqual(firstConversation.Id, secondConversation.Id);
+            Assert.Null(crossAccountLookup);
+            Assert.Equal(2, firstSummaries.Count);
+            Assert.Single(secondSummaries);
+            Assert.DoesNotContain(
+                secondSummaries,
+                conversation => conversation.Id == additionalFirstConversation.Id);
         }
         finally
         {
