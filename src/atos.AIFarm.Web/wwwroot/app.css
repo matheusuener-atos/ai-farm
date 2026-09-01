@@ -15,9 +15,13 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 2rem; padding: 1.25rem clamp(1rem, 5vw, 5rem); border-bottom: 1px solid #343432; }
 .brand { text-decoration: none; color: var(--purple); font-size: 1.2rem; font-weight: 900; letter-spacing: .08em; }
 .brand span { color: var(--white); }
-nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+nav { display: flex; gap: 1.25rem; flex-wrap: wrap; align-items: center; }
 nav a { text-decoration: none; color: var(--muted); font-size: .82rem; }
 nav a.active, nav a:hover { color: var(--purple-bright); }
+nav form { margin: 0; }
+.account-name { color: var(--green); font-size: .72rem; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.nav-button { border: 0; padding: 0; color: var(--muted); background: transparent; font-size: .82rem; }
+.nav-button:hover { color: var(--purple-bright); background: transparent; }
 main { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: clamp(2.5rem, 7vw, 7rem) 0; }
 footer { padding: 1rem clamp(1rem, 5vw, 5rem); color: #686865; border-top: 1px solid #20201f; font-size: .72rem; }
 .hero { max-width: 950px; }
@@ -91,6 +95,16 @@ code { color: var(--white); }
 .placeholder { padding: 2rem; line-height: 1.8; }
 .placeholder .terminal-title { margin: -2rem -2rem 2rem; }
 .text-link { display: inline-block; color: var(--purple); margin-top: 2rem; }
+.auth-panel { width: min(520px, 100%); margin: 0 auto; border: 1px solid var(--purple); padding: clamp(1.5rem, 5vw, 3rem); }
+.auth-panel h1 { font-size: clamp(2.4rem, 8vw, 4.5rem); }
+.auth-form { display: grid; gap: .8rem; margin-top: 2rem; }
+.auth-form label { color: var(--muted); font-size: .72rem; letter-spacing: .08em; }
+.auth-form input[type="text"], .auth-form input[type="email"], .auth-form input[type="password"] { width: 100%; border: 1px solid #494946; background: #090909; color: var(--white); padding: .9rem; font: inherit; }
+.auth-form input:focus { outline: 1px solid var(--purple); }
+.auth-check { display: flex; align-items: center; gap: .6rem; margin: .5rem 0; }
+.auth-check input { accent-color: var(--purple); }
+.auth-form .error { margin: 0 0 .5rem; }
+.auth-form .error p { margin-bottom: .4rem; }
 #blazor-error-ui { background: var(--amber); color: var(--black); bottom: 0; display: none; left: 0; padding: 1rem; position: fixed; width: 100%; z-index: 1000; }
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 1rem; }
 @media (max-width: 700px) {

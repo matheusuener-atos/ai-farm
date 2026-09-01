@@ -1,11 +1,12 @@
 using atos.AIFarm.Core.Application;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace atos.AIFarm.Infrastructure;
 
 public sealed class ReservationExpirationWorker(
-    IWalletService wallet,
+    IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
     ILogger<ReservationExpirationWorker> logger) : BackgroundService
 {
@@ -18,7 +19,10 @@ public sealed class ReservationExpirationWorker(
         {
             try
             {
-                var expired = await wallet.ExpireReservationsAsync(
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var expirationService = scope.ServiceProvider
+                    .GetRequiredService<IReservationExpirationService>();
+                var expired = await expirationService.ExpireAsync(
                     timeProvider.GetUtcNow(),
                     stoppingToken);
                 if (expired > 0)

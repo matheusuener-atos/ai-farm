@@ -28,11 +28,11 @@ dotnet test atos.AIFarm.slnx
 dotnet run --project src/atos.AIFarm.Web
 ```
 
-Em `Development`, o app carrega `.env.local`, usa o Neon Postgres e concede
-1.000 AIC promocionais de forma idempotente. Sem `DATABASE_URL`, usa os
-adapters em memória. Fora de `Development`, `DATABASE_URL` é obrigatória e o
-arquivo `.env.local` nunca é carregado. Não use os valores do Fake Provider
-como preço real.
+Em Development, o app carrega .env.local, usa o Neon Postgres e concede
+1.000 AIC promocionais por conta de forma idempotente. DATABASE_URL é
+obrigatória porque contas autenticadas, Wallet e Chat são persistidos no mesmo
+PostgreSQL. Fora de Development, o arquivo .env.local nunca é carregado. Não
+use os valores do Fake Provider como preço real.
 
 ## Neon
 
@@ -85,6 +85,21 @@ Quando o cliente não envia um identificador de correlação válido, a aplicaç
 gera um automaticamente. Os health checks não retornam credenciais nem detalhes
 internos de exceções.
 
+## Autenticação
+
+A primeira versão usa ASP.NET Core Identity com cookies HTTP-only e usuários
+persistidos no schema aifarm do Neon. Cadastro, login e logout são nativos do
+Blazor; não existe dependência de Neon Auth ou de outro provedor externo.
+
+- e-mail único por usuário;
+- senha mínima de 8 caracteres, com maiúscula, minúscula, número e símbolo;
+- bloqueio por 5 minutos após 5 tentativas inválidas;
+- confirmação de e-mail desabilitada nesta primeira versão;
+- Wallet, Ledger, Chat e chaves de idempotência filtrados pela conta autenticada.
+
+As páginas de produto exigem autenticação. Health checks permanecem anônimos
+para que o Render possa monitorar o serviço.
+
 ## Estado do Marco 1
 
 Implementado:
@@ -108,10 +123,11 @@ Implementado:
 - rejeição de captura tardia após o vencimento da reserva;
 - health checks separados para processo vivo e dependências prontas;
 - correlação de requisições HTTP sem registrar prompts ou corpos;
+- cadastro, login e logout com ASP.NET Core Identity;
+- Wallet, Ledger e Chat isolados pela conta autenticada;
 - UI responsiva no sistema visual terminal/ASCII.
 
-Pendente para concluir o Marco 1:
-
-- autenticação mínima e isolamento por conta;
+O Marco 1 está funcionalmente completo com o Fake Provider. Integrações reais,
+políticas comerciais e a Farm distribuída continuam fora deste marco.
 
 Consulte [ADR 0001](docs/ADR/0001-ledger-experimental.md) para as decisões experimentais deste incremento.

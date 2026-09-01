@@ -1,4 +1,6 @@
 @page "/chat"
+@rendermode InteractiveServer
+@attribute [Authorize]
 @inject ChatWorkflow Workflow
 @inject IChatStore ChatStore
 @inject IWalletService Wallet

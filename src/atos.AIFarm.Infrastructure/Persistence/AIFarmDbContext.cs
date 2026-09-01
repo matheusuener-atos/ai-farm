@@ -1,8 +1,11 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace atos.AIFarm.Infrastructure.Persistence;
 
-public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options) : DbContext(options)
+public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
+    : IdentityDbContext<AIFarmUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<AccountRecord> Accounts => Set<AccountRecord>();
     public DbSet<WalletRecord> Wallets => Set<WalletRecord>();
@@ -16,7 +19,16 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options) :
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
         modelBuilder.HasDefaultSchema("aifarm");
+
+        modelBuilder.Entity<AIFarmUser>().ToTable("auth_users");
+        modelBuilder.Entity<IdentityRole<Guid>>().ToTable("auth_roles");
+        modelBuilder.Entity<IdentityUserClaim<Guid>>().ToTable("auth_user_claims");
+        modelBuilder.Entity<IdentityUserLogin<Guid>>().ToTable("auth_user_logins");
+        modelBuilder.Entity<IdentityUserToken<Guid>>().ToTable("auth_user_tokens");
+        modelBuilder.Entity<IdentityUserRole<Guid>>().ToTable("auth_user_roles");
+        modelBuilder.Entity<IdentityRoleClaim<Guid>>().ToTable("auth_role_claims");
 
         modelBuilder.Entity<AccountRecord>(entity =>
         {

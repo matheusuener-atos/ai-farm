@@ -13,13 +13,17 @@ public static class DependencyInjection
     public static IServiceCollection AddAIFarmDevelopment(this IServiceCollection services)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton<IAIFarmIdentityAccessor>(
+            new FixedAIFarmIdentityAccessor(AIFarmIdentity.Development));
         services.AddSingleton<IAIFarmReadinessProbe, InMemoryReadinessProbe>();
         services.AddSingleton<IWalletService, InMemoryWalletService>();
+        services.AddScoped<IReservationExpirationService,
+            CurrentWalletReservationExpirationService>();
         services.AddSingleton<IChatStore, InMemoryChatStore>();
         services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
         services.AddSingleton<IAiRouteSelector, BestAvailableRouteSelector>();
         services.AddSingleton<IAiProvider, FakeAiProvider>();
-        services.AddSingleton<ChatWorkflow>();
+        services.AddScoped<ChatWorkflow>();
         services.AddHostedService<ReservationExpirationWorker>();
         return services;
     }
@@ -33,12 +37,20 @@ public static class DependencyInjection
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
-        services.TryAddSingleton(identity ?? AIFarmIdentity.Development);
+        if (identity is not null)
+        {
+            services.RemoveAll<IAIFarmIdentityAccessor>();
+            services.AddSingleton<IAIFarmIdentityAccessor>(
+                new FixedAIFarmIdentityAccessor(identity));
+        }
         services.RemoveAll<IWalletService>();
         services.RemoveAll<IChatStore>();
+        services.RemoveAll<IReservationExpirationService>();
         services.RemoveAll<IAIFarmReadinessProbe>();
-        services.AddSingleton<IWalletService, PostgresWalletService>();
-        services.AddSingleton<IChatStore, PostgresChatStore>();
+        services.AddScoped<IWalletService, PostgresWalletService>();
+        services.AddScoped<IChatStore, PostgresChatStore>();
+        services.AddSingleton<IReservationExpirationService,
+            PostgresReservationExpirationService>();
         services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();
         return services;
     }

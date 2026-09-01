@@ -1,9 +1,15 @@
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Infrastructure;
+using atos.AIFarm.Infrastructure.Persistence;
 using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
+using atos.AIFarm.Web.Components.Account;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +24,17 @@ builder.Logging.AddDebug();
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<IdentityRedirectManager>();
+builder.Services.AddScoped<AuthenticationStateProvider,
+    IdentityRevalidatingAuthenticationStateProvider>();
+builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultScheme = IdentityConstants.ApplicationScheme;
+        options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
+    })
+    .AddIdentityCookies();
+builder.Services.AddAuthorization();
 if (builder.Environment.IsDevelopment())
 {
     var developmentKeys = Path.Combine(builder.Environment.ContentRootPath, ".aifarm-keys");
@@ -26,6 +43,9 @@ if (builder.Environment.IsDevelopment())
         .PersistKeysToFileSystem(new DirectoryInfo(developmentKeys));
 }
 builder.Services.AddAIFarmDevelopment();
+builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
+builder.Services.AddScoped<IAIFarmIdentityAccessor,
+    AuthenticatedAIFarmIdentityAccessor>();
 builder.Services.AddHealthChecks()
     .AddCheck<AIFarmReadinessHealthCheck>("aifarm_dependencies", tags: ["ready"]);
 
@@ -35,14 +55,29 @@ var postgresConnection =
 var postgresMigrationConnection =
     builder.Configuration["DATABASE_URL_UNPOOLED"] ??
     builder.Configuration.GetConnectionString("AIFarmMigrations");
-if (builder.Environment.IsDevelopment() is false && string.IsNullOrWhiteSpace(postgresConnection))
+if (string.IsNullOrWhiteSpace(postgresConnection))
 {
-    throw new InvalidOperationException("DATABASE_URL is required outside Development.");
+    throw new InvalidOperationException(
+        "DATABASE_URL is required because authenticated accounts are persisted in PostgreSQL.");
 }
-if (!string.IsNullOrWhiteSpace(postgresConnection))
-{
-    builder.Services.AddAIFarmPostgres(postgresConnection);
-}
+builder.Services.AddAIFarmPostgres(postgresConnection);
+builder.Services.AddIdentityCore<AIFarmUser>(options =>
+    {
+        options.User.RequireUniqueEmail = true;
+        options.SignIn.RequireConfirmedAccount = false;
+        options.Password.RequiredLength = 8;
+        options.Password.RequireDigit = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = true;
+        options.Lockout.AllowedForNewUsers = true;
+        options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
+        options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+    })
+    .AddEntityFrameworkStores<AIFarmDbContext>()
+    .AddSignInManager()
+    .AddDefaultTokenProviders();
 
 var app = builder.Build();
 
@@ -73,6 +108,8 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
@@ -90,8 +127,14 @@ var readinessOptions = new HealthCheckOptions
 };
 app.MapHealthChecks("/health/ready", readinessOptions);
 app.MapHealthChecks("/health", readinessOptions);
-
-await app.Services.InitializeAIFarmAsync();
+app.MapPost("/account/logout", async (
+    SignInManager<AIFarmUser> signInManager,
+    [FromForm] string? returnUrl) =>
+{
+    await signInManager.SignOutAsync();
+    return Results.LocalRedirect(
+        string.IsNullOrWhiteSpace(returnUrl) ? "~/" : $"~/{returnUrl.TrimStart('/')}");
+}).RequireAuthorization();
 
 app.Run();
 

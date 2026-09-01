@@ -5,22 +5,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace atos.AIFarm.Infrastructure.Persistence;
 
-public sealed record AIFarmIdentity(Guid AccountId, Guid WalletId, string DisplayName)
-{
-    public static AIFarmIdentity Development { get; } = new(
-        Guid.Parse("a7a0a7a0-0000-4000-8000-000000000001"),
-        Guid.Parse("a7a0a7a0-0000-4000-8000-000000000002"),
-        "atos Development");
-}
-
 public sealed class PostgresWalletService(
     IDbContextFactory<AIFarmDbContext> factory,
-    AIFarmIdentity identity,
+    IAIFarmIdentityAccessor identityAccessor,
     TimeProvider timeProvider) : IWalletService
 {
     public async Task<WalletSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        await EnsureInitializedAsync(cancellationToken);
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await EnsureInitializedAsync(identity, cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var transactionRecords = await db.LedgerTransactions
             .Where(x => x.WalletId == identity.WalletId)
@@ -47,9 +40,9 @@ public sealed class PostgresWalletService(
 
         var availableByBucket = Enum.GetValues<CreditBucket>().ToDictionary(
             bucket => bucket,
-            bucket => BalanceFor(entryRecords, AvailableAccount(bucket)));
+            bucket => BalanceFor(entryRecords, AvailableAccount(identity, bucket)));
         var reserved = Enum.GetValues<CreditBucket>()
-            .Sum(bucket => BalanceFor(entryRecords, ReservedAccount(bucket)));
+            .Sum(bucket => BalanceFor(entryRecords, ReservedAccount(identity, bucket)));
         return new WalletSnapshot(
             identity.WalletId,
             new WalletBalance(availableByBucket.Values.Sum(), reserved, availableByBucket),
@@ -61,8 +54,9 @@ public sealed class PostgresWalletService(
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         EnsurePositive(amountMinor);
-        await using var db = await OpenLockedAsync(cancellationToken);
+        await using var db = await OpenLockedAsync(identity, cancellationToken);
         if (await db.LedgerTransactions.AnyAsync(
                 x => x.WalletId == identity.WalletId &&
                      x.IdempotencyKey == idempotencyKey,
@@ -74,12 +68,13 @@ public sealed class PostgresWalletService(
 
         AddBalancedTransaction(
             db,
+            identity,
             LedgerTransactionType.Grant,
             Guid.NewGuid(),
             idempotencyKey,
             "Crédito promocional de desenvolvimento",
             timeProvider.GetUtcNow(),
-            (AvailableAccount(CreditBucket.Promotional), CreditBucket.Promotional, LedgerDirection.Debit, amountMinor),
+            (AvailableAccount(identity, CreditBucket.Promotional), CreditBucket.Promotional, LedgerDirection.Debit, amountMinor),
             ("atos:PROMOTIONAL_POOL", CreditBucket.Promotional, LedgerDirection.Credit, amountMinor));
         await SaveAndCommitAsync(db, cancellationToken);
     }
@@ -90,8 +85,9 @@ public sealed class PostgresWalletService(
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         EnsurePositive(amountMinor);
-        await using var db = await OpenLockedAsync(cancellationToken);
+        await using var db = await OpenLockedAsync(identity, cancellationToken);
         var existing = await db.BalanceReservations.SingleOrDefaultAsync(
             x => x.WalletId == identity.WalletId &&
                  x.IdempotencyKey == idempotencyKey,
@@ -102,7 +98,7 @@ public sealed class PostgresWalletService(
             return new ReservationResult(existing.Id, existing.ReservedAmountMinor);
         }
 
-        var availableCode = AvailableAccount(CreditBucket.Promotional);
+        var availableCode = AvailableAccount(identity, CreditBucket.Promotional);
         var available = await (
             from entry in db.LedgerEntries
             join transaction in db.LedgerTransactions on entry.TransactionId equals transaction.Id
@@ -131,12 +127,13 @@ public sealed class PostgresWalletService(
         db.BalanceReservations.Add(reservation);
         AddBalancedTransaction(
             db,
+            identity,
             LedgerTransactionType.Reserve,
             operationId,
             $"{idempotencyKey}:ledger",
             "Reserva para execução de IA",
             now,
-            (ReservedAccount(CreditBucket.Promotional), CreditBucket.Promotional, LedgerDirection.Debit, amountMinor),
+            (ReservedAccount(identity, CreditBucket.Promotional), CreditBucket.Promotional, LedgerDirection.Debit, amountMinor),
             (availableCode, CreditBucket.Promotional, LedgerDirection.Credit, amountMinor));
         await SaveAndCommitAsync(db, cancellationToken);
         return new ReservationResult(reservation.Id, amountMinor);
@@ -148,8 +145,9 @@ public sealed class PostgresWalletService(
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        await using var db = await OpenLockedAsync(cancellationToken);
-        if (await TransactionExistsAsync(db, idempotencyKey, cancellationToken))
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await OpenLockedAsync(identity, cancellationToken);
+        if (await TransactionExistsAsync(db, identity, idempotencyKey, cancellationToken))
         {
             await db.Database.CommitTransactionAsync(cancellationToken);
             return;
@@ -170,26 +168,28 @@ public sealed class PostgresWalletService(
         var bucket = Enum.Parse<CreditBucket>(reservation.Bucket);
         AddBalancedTransaction(
             db,
+            identity,
             LedgerTransactionType.Capture,
             reservation.OperationId,
             idempotencyKey,
             "Liquidação do custo real de IA",
             now,
             ("atos:AI_CONSUMPTION", bucket, LedgerDirection.Debit, actualAmountMinor),
-            (ReservedAccount(bucket), bucket, LedgerDirection.Credit, actualAmountMinor));
+            (ReservedAccount(identity, bucket), bucket, LedgerDirection.Credit, actualAmountMinor));
 
         var remainder = reservation.ReservedAmountMinor - actualAmountMinor;
         if (remainder > 0)
         {
             AddBalancedTransaction(
                 db,
+                identity,
                 LedgerTransactionType.Release,
                 reservation.OperationId,
                 $"{idempotencyKey}:remainder",
                 "Liberação da diferença entre estimativa e custo real",
                 now,
-                (AvailableAccount(bucket), bucket, LedgerDirection.Debit, remainder),
-                (ReservedAccount(bucket), bucket, LedgerDirection.Credit, remainder));
+                (AvailableAccount(identity, bucket), bucket, LedgerDirection.Debit, remainder),
+                (ReservedAccount(identity, bucket), bucket, LedgerDirection.Credit, remainder));
         }
 
         reservation.CapturedAmountMinor = actualAmountMinor;
@@ -203,8 +203,9 @@ public sealed class PostgresWalletService(
         string reason,
         CancellationToken cancellationToken = default)
     {
-        await using var db = await OpenLockedAsync(cancellationToken);
-        if (await TransactionExistsAsync(db, idempotencyKey, cancellationToken))
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await OpenLockedAsync(identity, cancellationToken);
+        if (await TransactionExistsAsync(db, identity, idempotencyKey, cancellationToken))
         {
             await db.Database.CommitTransactionAsync(cancellationToken);
             return;
@@ -227,13 +228,14 @@ public sealed class PostgresWalletService(
         var bucket = Enum.Parse<CreditBucket>(reservation.Bucket);
         AddBalancedTransaction(
             db,
+            identity,
             LedgerTransactionType.Release,
             reservation.OperationId,
             idempotencyKey,
             reason,
             timeProvider.GetUtcNow(),
-            (AvailableAccount(bucket), bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor),
-            (ReservedAccount(bucket), bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor));
+            (AvailableAccount(identity, bucket), bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor),
+            (ReservedAccount(identity, bucket), bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor));
         reservation.Status = nameof(ReservationStatus.Released);
         await SaveAndCommitAsync(db, cancellationToken);
     }
@@ -242,7 +244,8 @@ public sealed class PostgresWalletService(
         DateTimeOffset utcNow,
         CancellationToken cancellationToken = default)
     {
-        await using var db = await OpenLockedAsync(cancellationToken);
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await OpenLockedAsync(identity, cancellationToken);
         var expired = await db.BalanceReservations
             .Where(x =>
                 x.WalletId == identity.WalletId &&
@@ -256,13 +259,14 @@ public sealed class PostgresWalletService(
             var bucket = Enum.Parse<CreditBucket>(reservation.Bucket);
             AddBalancedTransaction(
                 db,
+                identity,
                 LedgerTransactionType.Release,
                 reservation.OperationId,
                 $"reservation:{reservation.Id:N}:expiry",
                 "Liberação automática de reserva expirada",
                 utcNow,
-                (AvailableAccount(bucket), bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor),
-                (ReservedAccount(bucket), bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor));
+                (AvailableAccount(identity, bucket), bucket, LedgerDirection.Debit, reservation.ReservedAmountMinor),
+                (ReservedAccount(identity, bucket), bucket, LedgerDirection.Credit, reservation.ReservedAmountMinor));
             reservation.Status = nameof(ReservationStatus.Expired);
         }
 
@@ -270,7 +274,9 @@ public sealed class PostgresWalletService(
         return expired.Count;
     }
 
-    private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
+    private async Task EnsureInitializedAsync(
+        AIFarmIdentity identity,
+        CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (!await db.Accounts.AnyAsync(x => x.Id == identity.AccountId, cancellationToken))
@@ -293,9 +299,11 @@ public sealed class PostgresWalletService(
         }
     }
 
-    private async Task<AIFarmDbContext> OpenLockedAsync(CancellationToken cancellationToken)
+    private async Task<AIFarmDbContext> OpenLockedAsync(
+        AIFarmIdentity identity,
+        CancellationToken cancellationToken)
     {
-        await EnsureInitializedAsync(cancellationToken);
+        await EnsureInitializedAsync(identity, cancellationToken);
         var db = await factory.CreateDbContextAsync(cancellationToken);
         await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         _ = await db.Wallets.FromSqlInterpolated(
@@ -314,6 +322,7 @@ public sealed class PostgresWalletService(
 
     private Task<bool> TransactionExistsAsync(
         AIFarmDbContext db,
+        AIFarmIdentity identity,
         string idempotencyKey,
         CancellationToken cancellationToken) =>
         db.LedgerTransactions.AnyAsync(
@@ -323,6 +332,7 @@ public sealed class PostgresWalletService(
 
     private void AddBalancedTransaction(
         AIFarmDbContext db,
+        AIFarmIdentity identity,
         LedgerTransactionType type,
         Guid correlationId,
         string idempotencyKey,
@@ -373,10 +383,10 @@ public sealed class PostgresWalletService(
                 ? x.AmountMinor
                 : -x.AmountMinor);
 
-    private string AvailableAccount(CreditBucket bucket) =>
+    private static string AvailableAccount(AIFarmIdentity identity, CreditBucket bucket) =>
         $"WALLET:{identity.WalletId}:{bucket}:AVAILABLE";
 
-    private string ReservedAccount(CreditBucket bucket) =>
+    private static string ReservedAccount(AIFarmIdentity identity, CreditBucket bucket) =>
         $"WALLET:{identity.WalletId}:{bucket}:RESERVED";
 
     private static void EnsurePositive(long amountMinor)
@@ -390,12 +400,13 @@ public sealed class PostgresWalletService(
 
 public sealed class PostgresChatStore(
     IDbContextFactory<AIFarmDbContext> factory,
-    AIFarmIdentity identity)
+    IAIFarmIdentityAccessor identityAccessor)
     : IChatStore
 {
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var conversation = await db.Conversations
             .Where(x => x.AccountId == identity.AccountId && x.Status == "Active")
@@ -423,6 +434,7 @@ public sealed class PostgresChatStore(
         string idempotencyKey,
         CancellationToken cancellationToken)
     {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var stored = await (
             from request in db.AiRequests
@@ -454,6 +466,7 @@ public sealed class PostgresChatStore(
         ChatExecutionResult result,
         CancellationToken cancellationToken)
     {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (await db.AiRequests.AnyAsync(
                 x => x.AccountId == identity.AccountId &&
