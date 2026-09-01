@@ -92,7 +92,9 @@ public sealed class OpenAiProviderException(
     public string? RequestId { get; } = requestId;
 }
 
-public sealed class OpenAiResponsesProvider : IAiProviderClient, IDisposable
+public sealed class OpenAiResponsesProvider :
+    IAiStreamingProviderClient,
+    IDisposable
 {
     private readonly OpenAiProviderOptions _options;
     private readonly IAiPriceCatalog _catalog;
@@ -159,7 +161,104 @@ public sealed class OpenAiResponsesProvider : IAiProviderClient, IDisposable
             throw new InvalidOperationException("A OpenAI não concluiu a resposta.");
         }
 
-        var content = ReadOutputText(root);
+        return ReadCompletedResult(root, catalogEntry);
+    }
+
+    public async Task<AiProviderResult> ExecuteStreamingAsync(
+        AiProviderRequest request,
+        AiTextDeltaHandler onDelta,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(onDelta);
+        var catalogEntry = _catalog.Get(request.Route);
+        using var message = new HttpRequestMessage(HttpMethod.Post, _options.ResponsesEndpoint)
+        {
+            Content = JsonContent.Create(new
+            {
+                model = _options.Model,
+                input = request.Prompt,
+                max_output_tokens = catalogEntry.MaximumOutputUnits,
+                store = false,
+                stream = true
+            })
+        };
+        using var response = await _httpClient.SendAsync(
+            message,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        EnsureSuccess(response);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+        var content = new StringBuilder();
+        AiProviderResult? result = null;
+
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            if (!line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var data = line["data:".Length..].TrimStart();
+            if (data.Length == 0 || data == "[DONE]")
+            {
+                continue;
+            }
+
+            using var document = JsonDocument.Parse(data);
+            var root = document.RootElement;
+            var eventType = root.TryGetProperty("type", out var type)
+                ? type.GetString()
+                : null;
+            switch (eventType)
+            {
+                case "response.output_text.delta":
+                    if (root.TryGetProperty("delta", out var deltaElement) &&
+                        deltaElement.GetString() is { Length: > 0 } delta)
+                    {
+                        content.Append(delta);
+                        await onDelta(delta, cancellationToken);
+                    }
+                    break;
+                case "response.completed":
+                    if (!root.TryGetProperty("response", out var completed))
+                    {
+                        throw new InvalidOperationException(
+                            "A OpenAI concluiu o stream sem o resultado final.");
+                    }
+                    result = ReadCompletedResult(
+                        completed,
+                        catalogEntry,
+                        content.ToString());
+                    break;
+                case "response.failed":
+                case "response.incomplete":
+                    throw new InvalidOperationException(
+                        "A OpenAI não concluiu a resposta em streaming.");
+            }
+        }
+
+        return result ?? throw new InvalidOperationException(
+            "O stream da OpenAI terminou sem confirmação de conclusão.");
+    }
+
+    private static AiProviderResult ReadCompletedResult(
+        JsonElement root,
+        AiPriceCatalogEntry catalogEntry,
+        string? streamedContent = null)
+    {
+        var status = root.TryGetProperty("status", out var statusElement)
+            ? statusElement.GetString()
+            : null;
+        if (!string.Equals(status, "completed", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("A OpenAI não concluiu a resposta.");
+        }
+
+        var content = string.IsNullOrWhiteSpace(streamedContent)
+            ? ReadOutputText(root)
+            : streamedContent;
         if (!root.TryGetProperty("usage", out var usage) ||
             !usage.TryGetProperty("input_tokens", out var inputTokens) ||
             !usage.TryGetProperty("output_tokens", out var outputTokens))
@@ -174,6 +273,19 @@ public sealed class OpenAiResponsesProvider : IAiProviderClient, IDisposable
             inputUnits,
             outputUnits,
             catalogEntry.Cost(inputUnits, outputUnits));
+    }
+
+    private static void EnsureSuccess(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var requestId = response.Headers.TryGetValues("x-request-id", out var values)
+            ? values.FirstOrDefault()
+            : null;
+        throw new OpenAiProviderException(response.StatusCode, requestId);
     }
 
     public void Dispose() => _httpClient.Dispose();

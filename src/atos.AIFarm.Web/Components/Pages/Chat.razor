@@ -6,6 +6,7 @@
 @inject IChatStore ChatStore
 @inject IWalletService Wallet
 @inject NavigationManager Navigation
+@implements IDisposable
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
 
@@ -85,7 +86,9 @@
             <span>[ @CurrentConversationLabel ]</span>
         }
         <div class="terminal-actions">
-            <span class="status">● ONLINE</span>
+            <span class="@(_streaming ? "status streaming-status" : "status")">
+                ● @(_streaming ? _executionStatus : "ONLINE")
+            </span>
             @if (!_renaming)
             {
                 <button type="button"
@@ -122,6 +125,15 @@
             {
                 <small>@meta</small>
             }
+        </article>
+    }
+
+    @if (_streaming)
+    {
+        <article class="message streaming-message" aria-live="polite" aria-label="Resposta em geração">
+            <span class="purple">atos_AI&gt;</span>
+            <p>@(_streamingResponse.Length == 0 ? "AGUARDANDO PRIMEIRO TOKEN" : _streamingResponse.ToString())<span class="stream-cursor" aria-hidden="true"></span></p>
+            <small>@_executionStatus // @_pendingPlan?.Route.Provider // @_pendingPlan?.Route.Model</small>
         </article>
     }
 
@@ -165,7 +177,18 @@
         <div class="composer-footer">
             <span>DISPONÍVEL // @(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</span>
             <div class="composer-actions">
-                @if (_pendingPlan is null)
+                @if (_streaming)
+                {
+                    <button type="button"
+                            class="cancel-generation"
+                            @onclick="CancelExecution"
+                            disabled="@(_executionCancellation?.IsCancellationRequested ?? true)">
+                        @((_executionCancellation?.IsCancellationRequested ?? false)
+                            ? "[ INTERROMPENDO... ]"
+                            : "[ INTERROMPER ]")
+                    </button>
+                }
+                else if (_pendingPlan is null)
                 {
                     <button type="button" @onclick="PrepareAsync" disabled="@_working">
                         @(_working ? "[ CALCULANDO... ]" : "[ CALCULAR CUSTO ]")
@@ -200,6 +223,10 @@
     private bool _working;
     private bool _showArchived;
     private bool _renaming;
+    private bool _streaming;
+    private string _executionStatus = "CONECTANDO";
+    private readonly System.Text.StringBuilder _streamingResponse = new();
+    private CancellationTokenSource? _executionCancellation;
     private WalletSnapshot? _snapshot;
     private ChatExecutionPlan? _pendingPlan;
 
@@ -271,6 +298,11 @@
         }
 
         _working = true;
+        _streaming = true;
+        _executionStatus = "CONECTANDO";
+        _streamingResponse.Clear();
+        var executionCancellation = new CancellationTokenSource();
+        _executionCancellation = executionCancellation;
         _error = null;
         _messages.Add(new ChatMessageSnapshot(
             Guid.NewGuid(),
@@ -282,10 +314,12 @@
 
         try
         {
-            await Workflow.SendAsync(
+            await Workflow.SendStreamingAsync(
                 _conversationId,
                 plan,
-                Guid.NewGuid().ToString("N"));
+                Guid.NewGuid().ToString("N"),
+                AppendDeltaAsync,
+                executionCancellation.Token);
             await RefreshConversationAsync();
             _prompt = string.Empty;
             _pendingPlan = null;
@@ -293,6 +327,12 @@
         catch (InsufficientBalanceException exception)
         {
             _error = exception.Message;
+            await RefreshConversationAsync();
+        }
+        catch (OperationCanceledException) when (
+            executionCancellation.IsCancellationRequested)
+        {
+            _error = "Geração interrompida. A reserva foi liberada e nenhum custo foi capturado.";
             await RefreshConversationAsync();
         }
         catch (Exception)
@@ -303,8 +343,34 @@
         finally
         {
             await RefreshWalletAsync();
+            executionCancellation.Dispose();
+            _executionCancellation = null;
+            _streaming = false;
+            _streamingResponse.Clear();
+            _executionStatus = "CONECTANDO";
             _working = false;
         }
+    }
+
+    private async ValueTask AppendDeltaAsync(
+        string delta,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _streamingResponse.Append(delta);
+        _executionStatus = "GERANDO";
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CancelExecution()
+    {
+        if (!_streaming || _executionCancellation is null)
+        {
+            return;
+        }
+
+        _executionStatus = "INTERROMPENDO";
+        _executionCancellation.Cancel();
     }
 
     private void CancelPlan()
@@ -561,4 +627,10 @@
         message.ActualCostMinor is null
             ? null
             : $"{message.Route.Provider} // {message.Route.Model} // RESERVADO {Aic.Format(message.EstimatedCostMinor.Value)} // LIQUIDADO {Aic.Format(message.ActualCostMinor.Value)}";
+
+    public void Dispose()
+    {
+        _executionCancellation?.Cancel();
+        _executionCancellation?.Dispose();
+    }
 }

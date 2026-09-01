@@ -144,6 +144,18 @@ public interface IAiProvider
     Task<AiProviderResult> ExecuteAsync(AiProviderRequest request, CancellationToken cancellationToken);
 }
 
+public delegate ValueTask AiTextDeltaHandler(
+    string delta,
+    CancellationToken cancellationToken);
+
+public interface IAiStreamingProvider : IAiProvider
+{
+    Task<AiProviderResult> ExecuteStreamingAsync(
+        AiProviderRequest request,
+        AiTextDeltaHandler onDelta,
+        CancellationToken cancellationToken);
+}
+
 public sealed record ChatExecutionResult(
     Guid ConversationId,
     Guid OperationId,

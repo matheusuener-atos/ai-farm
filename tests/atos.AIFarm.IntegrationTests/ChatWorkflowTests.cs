@@ -1,3 +1,4 @@
+using System.Text;
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure.Development;
@@ -115,6 +116,71 @@ public sealed class ChatWorkflowTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
         var snapshot = await wallet.GetSnapshotAsync();
 
+        Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
+        Assert.Equal(0, snapshot.Balance.ReservedMinor);
+        Assert.Equal(
+            "Cancelled",
+            Assert.Single((await chat.GetDashboardAsync()).RecentExecutions).Status);
+    }
+
+    [Fact]
+    public async Task StreamingPublishesDeltasThenPersistsCompletedResponse()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var workflow = NewWorkflow(wallet, new FakeAiProvider(), chat);
+        var plan = await workflow.PrepareAsync("responda em partes");
+        var content = new StringBuilder();
+
+        var result = await workflow.SendStreamingAsync(
+            conversation.Id,
+            plan,
+            "stream-success",
+            (delta, _) =>
+            {
+                content.Append(delta);
+                return ValueTask.CompletedTask;
+            });
+        var stored = await chat.GetConversationAsync(conversation.Id);
+
+        Assert.Equal(result.Response, content.ToString());
+        Assert.Equal(result.Response, stored!.Messages.Last().Content);
+        Assert.Equal(ChatMessageStatus.Completed, stored.Messages.Last().Status);
+        Assert.Equal(Aic.FromAic(988), (await wallet.GetSnapshotAsync()).Balance.AvailableMinor);
+    }
+
+    [Fact]
+    public async Task CancellingMidStreamDiscardsPartialResponseAndReleasesReservation()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var provider = new StreamingWaitingProvider();
+        var workflow = NewWorkflow(wallet, provider, chat);
+        var plan = await workflow.PrepareAsync("interromper stream");
+        using var cancellation = new CancellationTokenSource();
+        var content = new StringBuilder();
+
+        var execution = workflow.SendStreamingAsync(
+            conversation.Id,
+            plan,
+            "stream-cancel",
+            (delta, _) =>
+            {
+                content.Append(delta);
+                return ValueTask.CompletedTask;
+            },
+            cancellation.Token);
+        await provider.Started;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
+        var snapshot = await wallet.GetSnapshotAsync();
+        var stored = await chat.GetConversationAsync(conversation.Id);
+
+        Assert.Equal("parcial", content.ToString());
+        Assert.Empty(stored!.Messages);
         Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
         Assert.Equal(0, snapshot.Balance.ReservedMinor);
         Assert.Equal(
@@ -413,6 +479,30 @@ public sealed class ChatWorkflowTests
         {
             CallCount++;
             return Task.FromResult(new AiProviderResult("ok", 1, 1, Aic.FromAic(1)));
+        }
+    }
+
+    private sealed class StreamingWaitingProvider : IAiStreamingProvider
+    {
+        private readonly TaskCompletionSource _started = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public Task<AiProviderResult> ExecuteAsync(
+            AiProviderRequest request,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public async Task<AiProviderResult> ExecuteStreamingAsync(
+            AiProviderRequest request,
+            AiTextDeltaHandler onDelta,
+            CancellationToken cancellationToken)
+        {
+            await onDelta("parcial", cancellationToken);
+            _started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Inalcançável");
         }
     }
 

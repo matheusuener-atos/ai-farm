@@ -48,6 +48,52 @@ public sealed class OpenAiResponsesProviderTests
     }
 
     [Fact]
+    public async Task ResponsesApiStreamsTextDeltasAndReturnsFinalUsage()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                data: {"type":"response.created","response":{"status":"in_progress"}}
+
+                data: {"type":"response.output_text.delta","delta":"Olá "}
+
+                data: {"type":"response.output_text.delta","delta":"mundo"}
+
+                data: {"type":"response.completed","response":{"status":"completed","output_text":"Olá mundo","usage":{"input_tokens":120,"output_tokens":30}}}
+
+                data: [DONE]
+
+                """,
+                Encoding.UTF8,
+                "text/event-stream")
+        });
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("olá", CancellationToken.None);
+        var deltas = new List<string>();
+
+        var result = await provider.ExecuteStreamingAsync(
+            new AiProviderRequest("segredo do usuário", route),
+            (delta, _) =>
+            {
+                deltas.Add(delta);
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.Equal(["Olá ", "mundo"], deltas);
+        Assert.Equal("Olá mundo", result.Content);
+        Assert.Equal(120, result.InputUnits);
+        Assert.Equal(30, result.OutputUnits);
+        Assert.Equal(225, result.ActualCostMinor);
+        using var body = JsonDocument.Parse(handler.RequestBody!);
+        Assert.True(body.RootElement.GetProperty("stream").GetBoolean());
+        Assert.False(body.RootElement.GetProperty("store").GetBoolean());
+    }
+
+    [Fact]
     public async Task CatalogPinsRouteAndReservesMaximumOutput()
     {
         var options = Options();

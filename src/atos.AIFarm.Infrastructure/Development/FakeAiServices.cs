@@ -18,7 +18,9 @@ public sealed class BestAvailableRouteSelector : IAiRouteSelector
         Task.FromResult(new AiRoute("atos Fake Provider", "atos-fake-chat-v1", "demo-2026-08"));
 }
 
-public sealed class FakeAiProvider : IAiProviderClient, IAiProvider
+public sealed class FakeAiProvider :
+    IAiStreamingProviderClient,
+    IAiStreamingProvider
 {
     public async Task<AiProviderResult> ExecuteAsync(
         AiProviderRequest request,
@@ -27,6 +29,27 @@ public sealed class FakeAiProvider : IAiProviderClient, IAiProvider
         await Task.Delay(350, cancellationToken);
         var response = $"Resposta simulada para validar o ciclo financeiro: “{request.Prompt.Trim()}”";
         return new AiProviderResult(response, request.Prompt.Length, response.Length, Aic.FromAic(12));
+    }
+
+    public async Task<AiProviderResult> ExecuteStreamingAsync(
+        AiProviderRequest request,
+        AiTextDeltaHandler onDelta,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(onDelta);
+        var response = $"Resposta simulada para validar o ciclo financeiro: “{request.Prompt.Trim()}”";
+        foreach (var chunk in response.Chunk(8))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(45, cancellationToken);
+            await onDelta(new string(chunk), cancellationToken);
+        }
+
+        return new AiProviderResult(
+            response,
+            request.Prompt.Length,
+            response.Length,
+            Aic.FromAic(12));
     }
 }
 

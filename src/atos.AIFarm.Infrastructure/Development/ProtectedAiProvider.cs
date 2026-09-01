@@ -9,6 +9,14 @@ public interface IAiProviderClient
         CancellationToken cancellationToken);
 }
 
+public interface IAiStreamingProviderClient : IAiProviderClient
+{
+    Task<AiProviderResult> ExecuteStreamingAsync(
+        AiProviderRequest request,
+        AiTextDeltaHandler onDelta,
+        CancellationToken cancellationToken);
+}
+
 public sealed record AiProviderProtectionOptions(
     TimeSpan Timeout,
     int CircuitBreakerFailureThreshold,
@@ -23,7 +31,7 @@ public sealed record AiProviderProtectionOptions(
 public sealed class AiProviderUnavailableException(string message)
     : InvalidOperationException(message);
 
-public sealed class ProtectedAiProvider : IAiProvider
+public sealed class ProtectedAiProvider : IAiStreamingProvider
 {
     private readonly IAiProviderClient _client;
     private readonly AiProviderProtectionOptions _options;
@@ -53,6 +61,34 @@ public sealed class ProtectedAiProvider : IAiProvider
 
     public async Task<AiProviderResult> ExecuteAsync(
         AiProviderRequest request,
+        CancellationToken cancellationToken) =>
+        await ExecuteProtectedAsync(
+            token => _client.ExecuteAsync(request, token),
+            cancellationToken);
+
+    public async Task<AiProviderResult> ExecuteStreamingAsync(
+        AiProviderRequest request,
+        AiTextDeltaHandler onDelta,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(onDelta);
+        if (_client is not IAiStreamingProviderClient streamingClient)
+        {
+            var result = await ExecuteAsync(request, cancellationToken);
+            await onDelta(result.Content, cancellationToken);
+            return result;
+        }
+
+        return await ExecuteProtectedAsync(
+            token => streamingClient.ExecuteStreamingAsync(
+                request,
+                onDelta,
+                token),
+            cancellationToken);
+    }
+
+    private async Task<AiProviderResult> ExecuteProtectedAsync(
+        Func<CancellationToken, Task<AiProviderResult>> execute,
         CancellationToken cancellationToken)
     {
         EnsureCircuitIsClosed();
@@ -61,7 +97,7 @@ public sealed class ProtectedAiProvider : IAiProvider
 
         try
         {
-            var result = await _client.ExecuteAsync(request, timeout.Token);
+            var result = await execute(timeout.Token);
             RecordSuccess();
             return result;
         }

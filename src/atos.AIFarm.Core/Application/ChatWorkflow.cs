@@ -83,7 +83,36 @@ public sealed class ChatWorkflow(
         Guid conversationId,
         ChatExecutionPlan plan,
         string idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        await SendCoreAsync(
+            conversationId,
+            plan,
+            idempotencyKey,
+            null,
+            cancellationToken);
+
+    public async Task<ChatExecutionResult> SendStreamingAsync(
+        Guid conversationId,
+        ChatExecutionPlan plan,
+        string idempotencyKey,
+        AiTextDeltaHandler onDelta,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(onDelta);
+        return await SendCoreAsync(
+            conversationId,
+            plan,
+            idempotencyKey,
+            onDelta,
+            cancellationToken);
+    }
+
+    private async Task<ChatExecutionResult> SendCoreAsync(
+        Guid conversationId,
+        ChatExecutionPlan plan,
+        string idempotencyKey,
+        AiTextDeltaHandler? onDelta,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (string.IsNullOrWhiteSpace(plan.Prompt) || plan.MaximumCostMinor <= 0)
@@ -99,6 +128,10 @@ public sealed class ChatWorkflow(
         var replay = await chat.FindAsync(idempotencyKey, cancellationToken);
         if (replay is not null)
         {
+            if (onDelta is not null)
+            {
+                await onDelta(replay.Response, cancellationToken);
+            }
             return replay with { WasReplayed = true };
         }
 
@@ -112,9 +145,23 @@ public sealed class ChatWorkflow(
         var startedAtUtc = _timeProvider.GetUtcNow();
         try
         {
-            var providerResult = await provider.ExecuteAsync(
-                new AiProviderRequest(plan.Prompt, plan.Route),
-                cancellationToken);
+            var request = new AiProviderRequest(plan.Prompt, plan.Route);
+            AiProviderResult providerResult;
+            if (onDelta is not null && provider is IAiStreamingProvider streamingProvider)
+            {
+                providerResult = await streamingProvider.ExecuteStreamingAsync(
+                    request,
+                    onDelta,
+                    cancellationToken);
+            }
+            else
+            {
+                providerResult = await provider.ExecuteAsync(request, cancellationToken);
+                if (onDelta is not null)
+                {
+                    await onDelta(providerResult.Content, cancellationToken);
+                }
+            }
             var finishedAtUtc = _timeProvider.GetUtcNow();
             ValidateProviderResult(providerResult, plan.MaximumCostMinor);
             await wallet.CaptureAsync(
