@@ -308,6 +308,8 @@ code { color: var(--white); }
 .farm-jobs > .muted { padding: 1rem; }
 .farm-job { padding: 1rem; border-top: 1px solid #292927; }
 .farm-job header { display: flex; justify-content: space-between; gap: 1rem; }
+.farm-job-actions { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.farm-job-actions button { padding: .35rem .6rem; font-size: .68rem; }
 .farm-job dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: 1rem 0; }
 .farm-job dl > div { min-width: 0; }
 .farm-job dt { color: var(--muted); font-size: .65rem; }

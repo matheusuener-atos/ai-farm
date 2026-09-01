@@ -155,6 +155,11 @@ internal sealed class PostgresFarmAgentService(
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
         if (node is null || node.Status != FarmNodeStatus.Online.ToString()) return null;
+        await FarmJobLifecycle.ExpireAsync(
+            db,
+            timeProvider.GetUtcNow(),
+            cancellationToken,
+            nodeId: node.Id);
 
         var jobId = await db.FarmJobs
             .Where(x => x.NodeId == node.Id &&
@@ -170,10 +175,28 @@ internal sealed class PostgresFarmAgentService(
                 setters => setters.SetProperty(x => x.Status, FarmJobStatus.Accepted.ToString()),
                 cancellationToken);
         var job = await db.FarmJobs.SingleAsync(x => x.Id == jobId, cancellationToken);
-        if (!TryReadRemoteManifest(job, out var manifest) || manifest is null ||
-            manifest.ExpiresAtUtc <= timeProvider.GetUtcNow())
+        if (job.Status is not ("Offered" or "Accepted" or "Running"))
+            return null;
+        if (!TryReadRemoteManifest(job, out var manifest) || manifest is null)
         {
-            await FailJobAsync(db, job, "Manifesto remoto inválido ou expirado.", cancellationToken);
+            await FarmJobLifecycle.TryTerminateAsync(
+                db,
+                job.Id,
+                FarmJobStatus.Rejected,
+                "Manifesto remoto inválido.",
+                timeProvider.GetUtcNow(),
+                cancellationToken);
+            return null;
+        }
+        if (manifest.ExpiresAtUtc <= timeProvider.GetUtcNow())
+        {
+            await FarmJobLifecycle.TryTerminateAsync(
+                db,
+                job.Id,
+                FarmJobStatus.TimedOut,
+                "Manifesto remoto expirado antes do aceite.",
+                timeProvider.GetUtcNow(),
+                cancellationToken);
             return null;
         }
         if (accepted == 1)
@@ -233,7 +256,13 @@ internal sealed class PostgresFarmAgentService(
             cancellationToken);
         if (expired is not null)
         {
-            await FailJobAsync(db, expired, "O manifesto expirou antes do início do runtime.", cancellationToken);
+            await FarmJobLifecycle.TryTerminateAsync(
+                db,
+                expired.Id,
+                FarmJobStatus.TimedOut,
+                "O manifesto expirou antes do início do runtime.",
+                timeProvider.GetUtcNow(),
+                cancellationToken);
             return false;
         }
         return await db.FarmJobs.AnyAsync(
@@ -256,8 +285,19 @@ internal sealed class PostgresFarmAgentService(
                  (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running"),
             cancellationToken);
         if (job is null) return false;
-        await FailJobAsync(db, job, $"Agent rejeitou o manifesto: {reason}", cancellationToken);
-        return true;
+        var status = rejection.Kind switch
+        {
+            FarmRemoteJobRejectionKind.Timeout => FarmJobStatus.TimedOut,
+            FarmRemoteJobRejectionKind.Cancelled => FarmJobStatus.Cancelled,
+            _ => FarmJobStatus.Rejected
+        };
+        return await FarmJobLifecycle.TryTerminateAsync(
+            db,
+            job.Id,
+            status,
+            $"Agent encerrou a oferta ({rejection.Kind}): {reason}",
+            timeProvider.GetUtcNow(),
+            cancellationToken);
     }
 
     public async Task<FarmRemoteJobAcknowledgement?> SubmitResultAsync(
@@ -296,10 +336,34 @@ internal sealed class PostgresFarmAgentService(
                 true,
                 existing.ComputeUnitsMilli);
         }
+        if (FarmJobLifecycle.ActiveStatuses.Contains(existing.Status) &&
+            existing.ManifestExpiresAtUtc <= timeProvider.GetUtcNow())
+        {
+            return await TerminateAndAcknowledgeAsync(
+                db,
+                existing.Id,
+                FarmJobStatus.TimedOut,
+                "A evidência chegou após a validade do manifesto.",
+                cancellationToken);
+        }
         if (!TryReadRemoteManifest(existing, out var manifest) || manifest is null)
-            throw new InvalidOperationException("O manifesto remoto armazenado não é válido.");
+        {
+            return await TerminateAndAcknowledgeAsync(
+                db,
+                existing.Id,
+                FarmJobStatus.Rejected,
+                "O manifesto remoto armazenado não é válido.",
+                cancellationToken);
+        }
         if (result.DurationMilliseconds > manifest.TimeoutSeconds * 1000L)
-            throw new InvalidOperationException("A evidência excede o timeout assinado do Job.");
+        {
+            return await TerminateAndAcknowledgeAsync(
+                db,
+                existing.Id,
+                FarmJobStatus.TimedOut,
+                "A evidência excedeu o timeout assinado do Job.",
+                cancellationToken);
+        }
 
         var claimed = await db.FarmJobs
             .Where(x => x.Id == jobId && x.NodeId == node.Id &&
@@ -373,6 +437,31 @@ internal sealed class PostgresFarmAgentService(
             job.ComputeUnitsMilli);
     }
 
+    private async Task<FarmRemoteJobAcknowledgement> TerminateAndAcknowledgeAsync(
+        AIFarmDbContext db,
+        Guid jobId,
+        FarmJobStatus requestedStatus,
+        string detail,
+        CancellationToken cancellationToken)
+    {
+        await FarmJobLifecycle.TryTerminateAsync(
+            db,
+            jobId,
+            requestedStatus,
+            detail,
+            timeProvider.GetUtcNow(),
+            cancellationToken);
+        var current = await db.FarmJobs
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == jobId, cancellationToken);
+        var status = Enum.Parse<FarmJobStatus>(current.Status);
+        return new FarmRemoteJobAcknowledgement(
+            current.Id,
+            status,
+            status == FarmJobStatus.Completed,
+            current.ComputeUnitsMilli);
+    }
+
     private async Task<FarmNodeRecord?> AuthenticateNodeAsync(
         AIFarmDbContext db,
         string credential,
@@ -411,19 +500,6 @@ internal sealed class PostgresFarmAgentService(
             manifest.TimeoutSeconds == 30 &&
             manifest.MaxLogicalProcessors == 1 &&
             manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024;
-    }
-
-    private async Task FailJobAsync(
-        AIFarmDbContext db,
-        FarmJobRecord job,
-        string reason,
-        CancellationToken cancellationToken)
-    {
-        job.Status = FarmJobStatus.Failed.ToString();
-        job.FailureReason = reason;
-        job.FinishedAtUtc = timeProvider.GetUtcNow();
-        await AddJobEventAsync(db, job, FarmJobStatus.Failed, reason, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task AddJobEventAsync(

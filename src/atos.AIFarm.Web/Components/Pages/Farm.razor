@@ -126,7 +126,18 @@ else
                 <article class="farm-job">
                     <header>
                         <strong>@job.Workload // @ShortId(job.Id)</strong>
-                        <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
+                        <div class="farm-job-actions">
+                            <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
+                            @if (!IsEmbedded && CanCancel(job.Status))
+                            {
+                                <button type="button"
+                                        class="button-secondary"
+                                        @onclick="() => CancelJobAsync(job.Id)"
+                                        disabled="@_working">
+                                    [ CANCELAR ]
+                                </button>
+                            }
+                        </div>
                     </header>
                     <dl>
                         <div><dt>VERSÃO</dt><dd>@job.WorkloadVersion</dd></div>
@@ -230,6 +241,17 @@ else
         finally { _working = false; }
     }
 
+    private async Task CancelJobAsync(Guid jobId)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try { _dashboard = await FarmLab.CancelJobAsync(jobId); }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        { _error = exception.Message; }
+        finally { _working = false; }
+    }
+
     private async Task ReloadAsync()
     {
         try { _dashboard = await FarmLab.GetDashboardAsync(); }
@@ -261,12 +283,18 @@ else
         FarmJobStatus.Verifying => "VERIFICANDO",
         FarmJobStatus.Completed => "CONCLUÍDO",
         FarmJobStatus.Failed => "FALHOU",
+        FarmJobStatus.Cancelled => "CANCELADO",
+        FarmJobStatus.TimedOut => "TIMEOUT",
+        FarmJobStatus.Rejected => "REJEITADO",
         _ => status.ToString().ToUpperInvariant()
     };
 
     private static string JobStatusClass(FarmJobStatus status) =>
         status == FarmJobStatus.Completed ? "green" :
-        status == FarmJobStatus.Failed ? "error-text" : "amber";
+        status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? "error-text" : "amber";
+
+    private static bool CanCancel(FarmJobStatus status) =>
+        status is FarmJobStatus.Offered or FarmJobStatus.Accepted or FarmJobStatus.Running;
 
     private static string FormatCu(long milli) => $"{milli / 1000d:0.000} CU";
     private static string ShortId(Guid id) => id.ToString("N")[..8];

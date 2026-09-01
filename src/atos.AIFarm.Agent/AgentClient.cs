@@ -108,13 +108,14 @@ internal sealed class AgentClient(HttpClient httpClient)
         string credential,
         Guid jobId,
         string reason,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        FarmRemoteJobRejectionKind kind = FarmRemoteJobRejectionKind.Policy)
     {
         using var message = Authorized(
             HttpMethod.Post,
             $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/jobs/{jobId}/reject",
             credential);
-        message.Content = JsonContent.Create(new FarmRemoteJobRejection(reason), options: JsonOptions);
+        message.Content = JsonContent.Create(new FarmRemoteJobRejection(reason, kind), options: JsonOptions);
         using var response = await httpClient.SendAsync(message, cancellationToken);
         EnsureAuthorized(response);
         response.EnsureSuccessStatusCode();

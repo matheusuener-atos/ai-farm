@@ -767,7 +767,7 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_farm_jobs_manifest_complete", "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR (\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed')");
+                            t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                         });
                 });
 

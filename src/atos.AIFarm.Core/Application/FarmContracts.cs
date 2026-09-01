@@ -2,8 +2,22 @@ namespace atos.AIFarm.Core.Application;
 
 public enum FarmNodeStatus { Online, Paused, Offline }
 public enum FarmVerificationLevel { Detected, Verified }
-public enum FarmJobStatus { Queued, Offered, Accepted, Running, Uploading, Verifying, Completed, Failed }
+public enum FarmJobStatus
+{
+    Queued,
+    Offered,
+    Accepted,
+    Running,
+    Uploading,
+    Verifying,
+    Completed,
+    Failed,
+    Cancelled,
+    TimedOut,
+    Rejected
+}
 public enum FarmNodeConnectionKind { Embedded, Agent }
+public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public sealed record FarmNodeSnapshot(
     Guid Id,
@@ -65,7 +79,9 @@ public sealed record FarmRemoteJobResult(
     string ResultDigest,
     long DurationMilliseconds);
 
-public sealed record FarmRemoteJobRejection(string Reason);
+public sealed record FarmRemoteJobRejection(
+    string Reason,
+    FarmRemoteJobRejectionKind Kind = FarmRemoteJobRejectionKind.Policy);
 
 public sealed record FarmRemoteJobAcknowledgement(
     Guid JobId,
@@ -122,6 +138,7 @@ public interface IFarmLabService
     Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default);
     Task<FarmDashboard> SetNodeStatusAsync(FarmNodeStatus status, CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
+    Task<FarmDashboard> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default);
 }
 
 public interface IFarmAgentService

@@ -270,7 +270,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("farm_jobs", table =>
             {
-                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed')");
+                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
                 table.HasCheckConstraint(
                     "CK_farm_jobs_manifest_complete",

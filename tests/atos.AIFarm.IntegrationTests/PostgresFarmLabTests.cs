@@ -207,6 +207,56 @@ public sealed class PostgresFarmLabTests
                 FarmJobStatus.Failed,
                 (await lab.GetDashboardAsync()).RecentJobs.Single(x => x.Id == rejectedOffer.Id).Status);
 
+            var runtimeOffer = await lab.RunBenchmarkAsync();
+            var runtimeClaim = await agents.ClaimJobAsync(linked.Credential);
+            Assert.NotNull(runtimeClaim);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, runtimeClaim.JobId));
+            clock.Advance(TimeSpan.FromSeconds(31));
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(request.Runtime, 8, request.MemoryBytes, request.AgentVersion));
+            Assert.NotNull(heartbeat);
+            var runtimeTimedOut = (await lab.GetDashboardAsync()).RecentJobs
+                .Single(x => x.Id == runtimeOffer.Id);
+            Assert.Equal(FarmJobStatus.TimedOut, runtimeTimedOut.Status);
+            Assert.Contains("30 segundos", runtimeTimedOut.Events[^1].Detail, StringComparison.OrdinalIgnoreCase);
+
+            var expiringOffer = await lab.RunBenchmarkAsync();
+            clock.Advance(TimeSpan.FromMinutes(6));
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(request.Runtime, 8, request.MemoryBytes, request.AgentVersion));
+            Assert.NotNull(heartbeat);
+            var afterWatchdog = await lab.GetDashboardAsync();
+            var timedOut = afterWatchdog.RecentJobs.Single(x => x.Id == expiringOffer.Id);
+            Assert.Equal(FarmJobStatus.TimedOut, timedOut.Status);
+            Assert.Equal(FarmJobStatus.TimedOut, timedOut.Events[^1].Status);
+            Assert.Equal(0, timedOut.ComputeUnitsMilli);
+
+            var cancellable = await lab.RunBenchmarkAsync();
+            var afterCancellation = await lab.CancelJobAsync(cancellable.Id);
+            var cancelled = afterCancellation.RecentJobs.Single(x => x.Id == cancellable.Id);
+            Assert.Equal(FarmJobStatus.Cancelled, cancelled.Status);
+            Assert.Equal(FarmJobStatus.Cancelled, cancelled.Events[^1].Status);
+            Assert.Equal(
+                FarmJobStatus.Cancelled,
+                (await lab.CancelJobAsync(cancellable.Id)).RecentJobs
+                    .Single(x => x.Id == cancellable.Id).Status);
+
+            var policyOffer = await lab.RunBenchmarkAsync();
+            var policyClaim = await agents.ClaimJobAsync(linked.Credential);
+            Assert.NotNull(policyClaim);
+            Assert.True(await agents.RejectJobAsync(
+                linked.Credential,
+                policyClaim.JobId,
+                new FarmRemoteJobRejection(
+                    "Política local recusou o workload.",
+                    FarmRemoteJobRejectionKind.Policy)));
+            var policyRejected = (await lab.GetDashboardAsync()).RecentJobs
+                .Single(x => x.Id == policyOffer.Id);
+            Assert.Equal(FarmJobStatus.Rejected, policyRejected.Status);
+            Assert.Equal(0, policyRejected.ComputeUnitsMilli);
+
             clock.Advance(TimeSpan.FromSeconds(91));
             var offline = await lab.GetDashboardAsync();
             Assert.Equal(FarmNodeStatus.Offline, offline.Node.Status);

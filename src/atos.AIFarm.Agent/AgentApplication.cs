@@ -291,7 +291,8 @@ internal static class AgentApplication
                 credential,
                 offer.JobId,
                 "Timeout local do manifesto.",
-                CancellationToken.None);
+                CancellationToken.None,
+                FarmRemoteJobRejectionKind.Timeout);
             Write("JOB", $"TIMEOUT // {offer.JobId:N}");
         }
         catch (OperationCanceledException)
@@ -301,7 +302,8 @@ internal static class AgentApplication
                 credential,
                 offer.JobId,
                 "Agent encerrado durante a execução.",
-                CancellationToken.None);
+                CancellationToken.None,
+                FarmRemoteJobRejectionKind.Cancelled);
             throw;
         }
     }

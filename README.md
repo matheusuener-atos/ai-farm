@@ -270,11 +270,20 @@ executar. O Agent devolve somente o digest e a duração, e o servidor reexecuta
 benchmark para aceitar ou rejeitar a evidência:
 
     QUEUED → OFFERED → ACCEPTED → RUNNING → UPLOADING → VERIFYING → COMPLETED
-                                                                   ↘ FAILED
+       │         │          │          │          │          │
+       └─────────┴──────────┴──────────┴──────────┴──────────┴→ FAILED
+                                  ├→ CANCELLED
+                                  ├→ TIMED_OUT
+                                  └→ REJECTED
 
 Falhas de assinatura, manifesto expirado, resultado divergente ou estado
 inválido encerram a tentativa sem emitir CU ou AIC. Reenvios idempotentes só são
-aceitos quando apresentam exatamente a mesma evidência já concluída.
+aceitos quando apresentam exatamente a mesma evidência já concluída. O watchdog
+terminaliza ofertas abandonadas ao fim da validade assinada e runtimes que
+ultrapassam 30 segundos, liberando o índice de Job ativo para um novo despacho.
+Enquanto a oferta estiver em `OFFERED`, `ACCEPTED` ou `RUNNING`, o usuário
+pode cancelá-la no painel; a atualização condicional impede corrida com o envio
+da evidência pelo Agent.
 
 ## Estado do Marco 1
 
@@ -333,6 +342,7 @@ Implementado:
 - protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
 - executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
 - despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
+- cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
