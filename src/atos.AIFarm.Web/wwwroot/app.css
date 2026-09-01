@@ -97,14 +97,21 @@ h1 span { color: var(--purple); }
 .message { padding: 1.3rem; border-bottom: 1px solid #292927; display: grid; grid-template-columns: 100px 1fr; gap: .8rem; }
 .message p { margin: 0; line-height: 1.6; }
 .message small { grid-column: 2; color: var(--muted); line-height: 1.5; }
-.message-action {
+.message-actions {
     grid-column: 2;
-    justify-self: start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+}
+.message-action {
     margin-top: .25rem;
     border-color: #494946;
     color: var(--muted);
     font-size: .68rem;
 }
+.branch-draft { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; padding: .8rem; border: 1px solid var(--purple); background: var(--purple-deep); }
+.branch-draft > div { display: grid; gap: .35rem; }
+.branch-draft small { color: var(--muted); }
 .streaming-message { background: rgba(159, 77, 255, .05); }
 .streaming-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .streaming-status { animation: terminal-pulse 1.1s steps(2, end) infinite; }
@@ -205,6 +212,8 @@ code { color: var(--white); }
     .action { min-height: 170px; }
     .message { grid-template-columns: 1fr; }
     .message small { grid-column: 1; }
+    .message-actions { grid-column: 1; }
+    .branch-draft { align-items: stretch; flex-direction: column; }
     .execution-plan-header { flex-direction: column; }
     .execution-plan dl { grid-template-columns: 1fr; }
     .terminal-title { align-items: flex-start; gap: .7rem; }

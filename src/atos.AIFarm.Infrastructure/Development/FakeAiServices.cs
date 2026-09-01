@@ -111,7 +111,8 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
                     x.CreatedAtUtc,
                     x.UpdatedAtUtc,
                     x.Messages.Count,
-                    x.Messages.LastOrDefault()?.Content))
+                    x.Messages.LastOrDefault()?.Content,
+                    x.ParentConversationId))
                 .ToArray();
             return Task.FromResult(summaries);
         }
@@ -131,7 +132,8 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
                     x.CreatedAtUtc,
                     x.UpdatedAtUtc,
                     x.Messages.Count,
-                    x.Messages.LastOrDefault()?.Content))
+                    x.Messages.LastOrDefault()?.Content,
+                    x.ParentConversationId))
                 .ToArray();
             return Task.FromResult(summaries);
         }
@@ -237,6 +239,45 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
             conversation.IsDeleted = true;
             conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
             return Task.FromResult(true);
+        }
+    }
+
+    public Task<ConversationSnapshot> BranchConversationAsync(
+        Guid conversationId,
+        Guid branchMessageId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_conversations.TryGetValue(conversationId, out var source)
+                || source.IsArchived
+                || source.IsDeleted)
+            {
+                throw new InvalidOperationException("A conversa original não existe.");
+            }
+
+            var branchIndex = source.Messages.FindIndex(x => x.Id == branchMessageId);
+            if (branchIndex < 0)
+            {
+                throw new InvalidOperationException("A mensagem de ramificação não existe.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var branch = new ConversationState(
+                Guid.NewGuid(),
+                now,
+                now,
+                source.Id,
+                branchMessageId)
+            {
+                Title = ConversationTitle.Normalize(
+                    $"{source.Title ?? $"SESSÃO_{source.Id.ToString("N")[..4].ToUpperInvariant()}"} / RAMO")
+            };
+            branch.Messages.AddRange(source.Messages
+                .Take(branchIndex)
+                .Select(message => message with { Id = Guid.NewGuid() }));
+            _conversations.Add(branch.Id, branch);
+            return Task.FromResult(Snapshot(branch));
         }
     }
 
@@ -389,7 +430,9 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         conversation.CreatedAtUtc,
         conversation.UpdatedAtUtc,
         [.. conversation.Messages.OrderBy(x => x.CreatedAtUtc)],
-        conversation.Title);
+        conversation.Title,
+        conversation.ParentConversationId,
+        conversation.BranchedFromMessageId);
 
     private static ConversationSummary Summary(ConversationState conversation) => new(
         conversation.Id,
@@ -397,17 +440,22 @@ public sealed class InMemoryChatStore : IChatStore, IAiUsageQuery
         conversation.CreatedAtUtc,
         conversation.UpdatedAtUtc,
         conversation.Messages.Count,
-        conversation.Messages.LastOrDefault()?.Content);
+        conversation.Messages.LastOrDefault()?.Content,
+        conversation.ParentConversationId);
 
     private sealed class ConversationState(
         Guid id,
         DateTimeOffset createdAtUtc,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        Guid? parentConversationId = null,
+        Guid? branchedFromMessageId = null)
     {
         public Guid Id { get; } = id;
         public DateTimeOffset CreatedAtUtc { get; } = createdAtUtc;
         public DateTimeOffset UpdatedAtUtc { get; set; } = updatedAtUtc;
         public string? Title { get; set; }
+        public Guid? ParentConversationId { get; } = parentConversationId;
+        public Guid? BranchedFromMessageId { get; } = branchedFromMessageId;
         public bool IsArchived { get; set; }
         public bool IsDeleted { get; set; }
         public List<ChatMessageSnapshot> Messages { get; } = [];

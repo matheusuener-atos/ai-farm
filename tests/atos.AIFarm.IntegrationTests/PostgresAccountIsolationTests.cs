@@ -11,6 +11,65 @@ public sealed class PostgresAccountIsolationTests
 {
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task ConversationBranchPersistsLineageAndKeepsSourceUnchanged()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var identity = NewIdentity("branch");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var store = provider.GetRequiredService<IChatStore>();
+            var original = await store.CreateConversationAsync();
+            var firstOperation = Guid.NewGuid();
+            var secondOperation = Guid.NewGuid();
+            await SaveExchangeAsync(
+                store,
+                original.Id,
+                firstOperation,
+                "contexto inicial",
+                "resposta inicial");
+            await SaveExchangeAsync(
+                store,
+                original.Id,
+                secondOperation,
+                "mensagem a editar",
+                "resposta a preservar");
+
+            var source = await store.GetConversationAsync(original.Id);
+            var branchPoint = source!.Messages.Single(
+                x => x.OperationId == secondOperation &&
+                     x.Role == ChatMessageRole.User);
+            var branch = await store.BranchConversationAsync(
+                original.Id,
+                branchPoint.Id);
+            var reloadedSource = await store.GetConversationAsync(original.Id);
+            var reloadedBranch = await store.GetConversationAsync(branch.Id);
+            var branchSummary = (await store.ListConversationsAsync())
+                .Single(x => x.Id == branch.Id);
+
+            Assert.Equal(original.Id, reloadedBranch?.ParentConversationId);
+            Assert.Equal(branchPoint.Id, reloadedBranch?.BranchedFromMessageId);
+            Assert.Equal(2, reloadedBranch?.Messages.Count);
+            Assert.Equal(4, reloadedSource?.Messages.Count);
+            Assert.Contains(
+                reloadedSource!.Messages,
+                x => x.Content == "resposta a preservar");
+            Assert.Equal(original.Id, branchSummary.ParentConversationId);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, identity);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task WalletAndConversationAreIsolatedByAccount()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
@@ -204,6 +263,25 @@ public sealed class PostgresAccountIsolationTests
         return services.BuildServiceProvider();
     }
 
+    private static Task SaveExchangeAsync(
+        IChatStore store,
+        Guid conversationId,
+        Guid operationId,
+        string prompt,
+        string response) =>
+        store.SaveCompletedAsync(
+            prompt,
+            $"integration:branch:{operationId:N}",
+            new ChatExecutionResult(
+                conversationId,
+                operationId,
+                response,
+                new AiRoute("test-provider", "test-model", "test-v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+
     private static async Task CleanupAsync(
         string connectionString,
         params AIFarmIdentity[] identities)
@@ -232,6 +310,13 @@ public sealed class PostgresAccountIsolationTests
             x => requestIds.Contains(x.AiRequestId)));
         db.AiRequests.RemoveRange(db.AiRequests.Where(
             x => accountIds.Contains(x.AccountId)));
+        await db.SaveChangesAsync();
+
+        db.Conversations.RemoveRange(db.Conversations.Where(
+            x => accountIds.Contains(x.AccountId) &&
+                 x.ParentConversationId != null));
+        await db.SaveChangesAsync();
+
         db.Conversations.RemoveRange(db.Conversations.Where(
             x => accountIds.Contains(x.AccountId)));
         db.BalanceReservations.RemoveRange(db.BalanceReservations.Where(

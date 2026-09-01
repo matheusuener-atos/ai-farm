@@ -82,7 +82,9 @@ public sealed record ConversationSnapshot(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     IReadOnlyList<ChatMessageSnapshot> Messages,
-    string? Title = null);
+    string? Title = null,
+    Guid? ParentConversationId = null,
+    Guid? BranchedFromMessageId = null);
 
 public sealed record ConversationSummary(
     Guid Id,
@@ -90,7 +92,8 @@ public sealed record ConversationSummary(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     int MessageCount,
-    string? Preview);
+    string? Preview,
+    Guid? ParentConversationId = null);
 
 public sealed record ConversationQuery(
     string? Search = null,
@@ -299,6 +302,10 @@ public interface IChatStore
         CancellationToken cancellationToken = default);
     Task<bool> DeleteConversationAsync(
         Guid conversationId,
+        CancellationToken cancellationToken = default);
+    Task<ConversationSnapshot> BranchConversationAsync(
+        Guid conversationId,
+        Guid branchMessageId,
         CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);

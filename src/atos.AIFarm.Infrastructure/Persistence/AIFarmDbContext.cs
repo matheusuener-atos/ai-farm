@@ -96,11 +96,17 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.ToTable("conversations");
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.UpdatedAtUtc });
+            entity.HasIndex(x => x.ParentConversationId);
+            entity.HasIndex(x => x.BranchedFromMessageId);
             entity.Property(x => x.Title).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(32);
             entity.HasOne<AccountRecord>()
                 .WithMany()
                 .HasForeignKey(x => x.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ConversationRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.ParentConversationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -231,6 +237,8 @@ public sealed class ConversationRecord
     public Guid Id { get; set; }
     public Guid AccountId { get; set; }
     public string? Title { get; set; }
+    public Guid? ParentConversationId { get; set; }
+    public Guid? BranchedFromMessageId { get; set; }
     public string Status { get; set; } = "Active";
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }

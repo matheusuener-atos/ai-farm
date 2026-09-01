@@ -7,6 +7,7 @@
 @inject IChatStore ChatStore
 @inject IWalletService Wallet
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @implements IDisposable
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
@@ -52,7 +53,7 @@
                         disabled="@_working">
                     <strong>@ConversationLabel(conversation)</strong>
                     <span>@ConversationPreview(conversation)</span>
-                    <small>@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm") // @conversation.MessageCount MSG</small>
+                    <small>@(conversation.ParentConversationId.HasValue ? "RAMO // " : null)@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm") // @conversation.MessageCount MSG</small>
                 </button>
             }
         </div>
@@ -148,7 +149,7 @@
         }
         else
         {
-            <span>[ @CurrentConversationLabel ]</span>
+            <span>[ @CurrentConversationLabel ] @(_currentConversationParentId.HasValue ? "// RAMO" : null)</span>
         }
         <div class="terminal-actions">
             <span class="@(_streaming ? "status streaming-status" : "status")">
@@ -196,15 +197,32 @@
             {
                 <small>@meta</small>
             }
-            @if (CanRegenerate(message))
-            {
+            <div class="message-actions">
+                <button type="button"
+                        class="message-action"
+                        @onclick="() => CopyMessageAsync(message)"
+                        disabled="@_working">
+                    @(_copiedMessageId == message.Id ? "[ COPIADO ]" : "[ COPIAR ]")
+                </button>
+                @if (message.Role == ChatMessageRole.User)
+                {
+                    <button type="button"
+                            class="message-action"
+                            @onclick="() => StartEditBranch(message)"
+                            disabled="@_working">
+                        [ EDITAR / RAMIFICAR ]
+                    </button>
+                }
+                @if (CanRegenerate(message))
+                {
                 <button type="button"
                         class="message-action"
                         @onclick="() => PrepareRegenerationAsync(message.OperationId)"
                         disabled="@_working">
                     [ GERAR OUTRA RESPOSTA ]
                 </button>
-            }
+                }
+            </div>
         </article>
     }
 
@@ -257,6 +275,21 @@
 
     <div class="composer">
         <label for="prompt">MENSAGEM</label>
+        @if (_editingBranch || _regenerating)
+        {
+            <section class="branch-draft" aria-live="polite">
+                <div>
+                    <strong>@(_regenerating ? "[ NOVA RESPOSTA EM UM RAMO ]" : "[ EDIÇÃO EM UM RAMO ]")</strong>
+                    <small>A conversa original será preservada integralmente.</small>
+                </div>
+                @if (_pendingPlan is null)
+                {
+                    <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
+                        [ CANCELAR RAMO ]
+                    </button>
+                }
+            </section>
+        }
         <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Digite sua tarefa..." rows="3"></textarea>
 
         @if (_pendingPlan is not null)
@@ -354,6 +387,7 @@
     private bool _renaming;
     private bool _streaming;
     private bool _regenerating;
+    private bool _editingBranch;
     private string _executionStatus = "CONECTANDO";
     private readonly System.Text.StringBuilder _streamingResponse = new();
     private CancellationTokenSource? _executionCancellation;
@@ -362,6 +396,11 @@
     private ConversationPage? _conversationPage;
     private int _conversationPageNumber = 1;
     private Guid? _deleteCandidateId;
+    private Guid? _copiedMessageId;
+    private Guid? _branchSourceConversationId;
+    private Guid? _branchMessageId;
+    private Guid? _branchConversationId;
+    private Guid? _currentConversationParentId;
     private WalletSnapshot? _snapshot;
     private ChatExecutionPlan? _pendingPlan;
 
@@ -442,6 +481,30 @@
         }
 
         _working = true;
+        var executionConversationId = _conversationId;
+        if (_branchSourceConversationId is Guid sourceConversationId &&
+            _branchMessageId is Guid branchMessageId)
+        {
+            try
+            {
+                if (_branchConversationId is null)
+                {
+                    var branch = await ChatStore.BranchConversationAsync(
+                        sourceConversationId,
+                        branchMessageId);
+                    _branchConversationId = branch.Id;
+                }
+
+                executionConversationId = _branchConversationId!.Value;
+            }
+            catch (Exception)
+            {
+                _error = "Não foi possível criar a ramificação da conversa.";
+                _working = false;
+                return;
+            }
+        }
+
         _streaming = true;
         _executionStatus = "CONECTANDO";
         _streamingResponse.Clear();
@@ -460,17 +523,28 @@
         try
         {
             await Workflow.SendStreamingAsync(
-                _conversationId,
+                executionConversationId,
                 plan,
                 idempotencyKey,
                 AppendDeltaAsync,
                 executionCancellation.Token);
-            await RefreshConversationAsync();
+            if (executionConversationId == _conversationId)
+            {
+                await RefreshConversationAsync();
+            }
             _prompt = string.Empty;
             _pendingPlan = null;
             _attemptIdempotencyKey = null;
             _lastFailure = null;
             _regenerating = false;
+            _editingBranch = false;
+            _branchSourceConversationId = null;
+            _branchMessageId = null;
+            _branchConversationId = null;
+            if (executionConversationId != _conversationId)
+            {
+                Navigation.NavigateTo($"/chat/{executionConversationId}");
+            }
         }
         catch (InsufficientBalanceException exception)
         {
@@ -561,12 +635,44 @@
 
         _prompt = source.Content;
         _regenerating = true;
+        _editingBranch = false;
+        _branchSourceConversationId = _conversationId;
+        _branchMessageId = source.Id;
+        _branchConversationId = null;
         _lastFailure = null;
         _attemptIdempotencyKey = null;
         await PrepareAsync();
         if (_pendingPlan is null)
         {
-            _regenerating = false;
+            ClearBranchDraft();
+        }
+    }
+
+    private void StartEditBranch(ChatMessageSnapshot message)
+    {
+        if (_working || message.Role != ChatMessageRole.User)
+        {
+            return;
+        }
+
+        ClearExecutionDraft();
+        _prompt = message.Content;
+        _editingBranch = true;
+        _branchSourceConversationId = _conversationId;
+        _branchMessageId = message.Id;
+    }
+
+    private async Task CopyMessageAsync(ChatMessageSnapshot message)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("atosChat.copyText", message.Content);
+            _copiedMessageId = message.Id;
+            _error = null;
+        }
+        catch (JSException)
+        {
+            _error = "O navegador não permitiu copiar esta mensagem.";
         }
     }
 
@@ -603,6 +709,7 @@
 
         _conversationId = conversation.Id;
         _currentConversationTitle = conversation.Title;
+        _currentConversationParentId = conversation.ParentConversationId;
         _renaming = false;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);
@@ -977,7 +1084,17 @@
         _attemptIdempotencyKey = null;
         _lastFailure = null;
         _regenerating = false;
+        ClearBranchDraft();
         _error = null;
+    }
+
+    private void ClearBranchDraft()
+    {
+        _regenerating = false;
+        _editingBranch = false;
+        _branchSourceConversationId = null;
+        _branchMessageId = null;
+        _branchConversationId = null;
     }
 
     private string ConversationClass(Guid conversationId) =>

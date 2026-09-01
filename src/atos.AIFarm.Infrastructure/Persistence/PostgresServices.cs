@@ -440,7 +440,8 @@ public sealed class PostgresChatStore(
                     .Where(message => message.ConversationId == x.Id)
                     .OrderByDescending(message => message.CreatedAtUtc)
                     .Select(message => message.Content)
-                    .FirstOrDefault()))
+                    .FirstOrDefault(),
+                x.ParentConversationId))
             .ToArrayAsync(cancellationToken);
         return new ConversationPage(
             items,
@@ -467,7 +468,8 @@ public sealed class PostgresChatStore(
                     .Where(message => message.ConversationId == x.Id)
                     .OrderByDescending(message => message.CreatedAtUtc)
                     .Select(message => message.Content)
-                    .FirstOrDefault()))
+                    .FirstOrDefault(),
+                x.ParentConversationId))
             .ToArrayAsync(cancellationToken);
     }
 
@@ -489,7 +491,8 @@ public sealed class PostgresChatStore(
                     .Where(message => message.ConversationId == x.Id)
                     .OrderByDescending(message => message.CreatedAtUtc)
                     .Select(message => message.Content)
-                    .FirstOrDefault()))
+                    .FirstOrDefault(),
+                x.ParentConversationId))
             .ToArrayAsync(cancellationToken);
     }
 
@@ -616,6 +619,69 @@ public sealed class PostgresChatStore(
         conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<ConversationSnapshot> BranchConversationAsync(
+        Guid conversationId,
+        Guid branchMessageId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var source = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 x.Status == "Active",
+            cancellationToken);
+        if (source is null)
+        {
+            throw new InvalidOperationException("A conversa original não existe.");
+        }
+
+        var sourceMessages = await db.Messages
+            .Where(x => x.ConversationId == source.Id)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ThenBy(x => x.Role == nameof(ChatMessageRole.User) ? 0 : 1)
+            .ThenBy(x => x.Id)
+            .ToArrayAsync(cancellationToken);
+        var branchIndex = Array.FindIndex(
+            sourceMessages,
+            message => message.Id == branchMessageId);
+        if (branchIndex < 0)
+        {
+            throw new InvalidOperationException("A mensagem de ramificação não existe.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var branch = new ConversationRecord
+        {
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            ParentConversationId = source.Id,
+            BranchedFromMessageId = branchMessageId,
+            Title = ConversationTitle.Normalize(
+                $"{source.Title ?? $"SESSÃO_{source.Id.ToString("N")[..4].ToUpperInvariant()}"} / RAMO"),
+            Status = "Active",
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        db.Conversations.Add(branch);
+        db.Messages.AddRange(sourceMessages
+            .Take(branchIndex)
+            .Select(message => new MessageRecord
+            {
+                Id = Guid.NewGuid(),
+                ConversationId = branch.Id,
+                OperationId = message.OperationId,
+                AiExecutionId = message.AiExecutionId,
+                Role = message.Role,
+                Content = message.Content,
+                Status = message.Status,
+                IdempotencyKey = $"branch:{branch.Id:N}:{message.Id:N}",
+                CreatedAtUtc = message.CreatedAtUtc
+            }));
+        await db.SaveChangesAsync(cancellationToken);
+        return await LoadConversationAsync(db, branch, cancellationToken);
     }
 
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
@@ -861,7 +927,9 @@ public sealed class PostgresChatStore(
             conversation.CreatedAtUtc,
             conversation.UpdatedAtUtc,
             messages,
-            conversation.Title);
+            conversation.Title,
+            conversation.ParentConversationId,
+            conversation.BranchedFromMessageId);
     }
 
     private static string EscapeLikePattern(string value) =>

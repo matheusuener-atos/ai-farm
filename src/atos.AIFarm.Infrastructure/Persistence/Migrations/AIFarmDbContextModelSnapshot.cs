@@ -408,8 +408,14 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BranchedFromMessageId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ParentConversationId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -424,6 +430,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BranchedFromMessageId");
+
+                    b.HasIndex("ParentConversationId");
 
                     b.HasIndex("AccountId", "UpdatedAtUtc");
 
@@ -671,6 +681,11 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.ConversationRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ParentConversationId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.LedgerEntryRecord", b =>

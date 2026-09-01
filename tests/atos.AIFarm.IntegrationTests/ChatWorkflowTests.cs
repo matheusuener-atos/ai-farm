@@ -402,6 +402,82 @@ public sealed class ChatWorkflowTests
         Assert.Single((await chat.GetDashboardAsync()).RecentExecutions);
     }
 
+    [Fact]
+    public async Task EditingFromMessageCreatesBranchAndPreservesOriginalHistory()
+    {
+        var chat = new InMemoryChatStore();
+        var original = await chat.CreateConversationAsync();
+        var firstOperation = Guid.NewGuid();
+        var secondOperation = Guid.NewGuid();
+        await chat.SaveCompletedAsync(
+            "primeira pergunta",
+            "branch:first",
+            new ChatExecutionResult(
+                original.Id,
+                firstOperation,
+                "primeira resposta",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+        await chat.SaveCompletedAsync(
+            "pergunta que será editada",
+            "branch:second",
+            new ChatExecutionResult(
+                original.Id,
+                secondOperation,
+                "resposta original preservada",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+
+        var beforeBranch = await chat.GetConversationAsync(original.Id);
+        var branchPoint = beforeBranch!.Messages.Single(
+            x => x.OperationId == secondOperation && x.Role == ChatMessageRole.User);
+        var branch = await chat.BranchConversationAsync(
+            original.Id,
+            branchPoint.Id);
+
+        Assert.Equal(original.Id, branch.ParentConversationId);
+        Assert.Equal(branchPoint.Id, branch.BranchedFromMessageId);
+        Assert.EndsWith(" / RAMO", branch.Title);
+        Assert.Collection(
+            branch.Messages,
+            message => Assert.Equal("primeira pergunta", message.Content),
+            message => Assert.Equal("primeira resposta", message.Content));
+        Assert.DoesNotContain(branch.Messages, x => x.Id == beforeBranch.Messages[0].Id);
+
+        await chat.SaveCompletedAsync(
+            "pergunta editada",
+            "branch:edited",
+            new ChatExecutionResult(
+                branch.Id,
+                Guid.NewGuid(),
+                "nova continuação",
+                new AiRoute("test", "test", "v1"),
+                Aic.FromAic(2),
+                Aic.FromAic(1),
+                false),
+            CancellationToken.None);
+
+        var unchangedOriginal = await chat.GetConversationAsync(original.Id);
+        var completedBranch = await chat.GetConversationAsync(branch.Id);
+        var branchSummary = (await chat.ListConversationsAsync())
+            .Single(x => x.Id == branch.Id);
+
+        Assert.Equal(4, unchangedOriginal!.Messages.Count);
+        Assert.Contains(
+            unchangedOriginal.Messages,
+            x => x.Content == "resposta original preservada");
+        Assert.Equal(4, completedBranch!.Messages.Count);
+        Assert.Equal("pergunta editada", completedBranch.Messages[^2].Content);
+        Assert.Equal("nova continuação", completedBranch.Messages[^1].Content);
+        Assert.Equal(original.Id, branchSummary.ParentConversationId);
+    }
+
     [Theory]
     [InlineData(0, 8)]
     [InlineData(1, 0)]
