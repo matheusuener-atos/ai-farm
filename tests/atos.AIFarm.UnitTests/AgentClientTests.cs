@@ -39,6 +39,14 @@ public sealed class AgentClientTests
             configuration,
             Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
             DateTimeOffset.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => RemoteJobVerifier.Verify(
+            offer,
+            configuration with
+            {
+                Policy = configuration.EffectivePolicy with { AcceptJobs = false }
+            },
+            Convert.ToBase64String(key),
+            DateTimeOffset.UtcNow));
     }
 
     [Theory]
@@ -82,6 +90,9 @@ public sealed class AgentClientTests
         Assert.Equal("Bearer", captured!.Headers.Authorization!.Scheme);
         Assert.Equal("secret-value", captured.Headers.Authorization.Parameter);
         Assert.Contains("\"agentVersion\":\"atos-agent/0.1.0\"", body);
+        Assert.Contains("\"acceptJobs\":true", body);
+        Assert.Contains("\"maxLogicalProcessors\":1", body);
+        Assert.Contains("\"maxMemoryBytes\":268435456", body);
         Assert.Equal("https://farm.example.com/api/farm/agents/heartbeat", captured.RequestUri!.ToString());
     }
 
@@ -115,7 +126,8 @@ public sealed class AgentClientTests
                 Guid.NewGuid(),
                 "credential-target",
                 AgentInventory.Version,
-                30);
+                30,
+                Policy: new AgentLocalPolicy(true, 1, 128L * 1024 * 1024));
 
             await store.SaveAsync(expected);
             var restored = await store.LoadAsync();

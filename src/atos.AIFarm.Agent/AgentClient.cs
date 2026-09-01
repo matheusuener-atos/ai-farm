@@ -42,7 +42,9 @@ internal sealed class AgentClient(HttpClient httpClient)
             HttpMethod.Post,
             $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/heartbeat")
         {
-            Content = JsonContent.Create(AgentInventory.Heartbeat(), options: JsonOptions)
+            Content = JsonContent.Create(
+                AgentInventory.Heartbeat(configuration.EffectivePolicy),
+                options: JsonOptions)
         };
         message.Headers.Authorization = new("Bearer", credential);
         using var response = await httpClient.SendAsync(message, cancellationToken);

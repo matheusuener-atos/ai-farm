@@ -77,6 +77,8 @@ internal sealed class PostgresFarmLabService(
             throw new InvalidOperationException("Retome o node antes de executar um benchmark.");
         if (isAgent && timeProvider.GetUtcNow() - node.LastSeenAtUtc > AgentHeartbeatTolerance)
             throw new InvalidOperationException("O Compute Agent está offline; aguarde um heartbeat válido.");
+        if (isAgent && !node.AgentAcceptJobs)
+            throw new InvalidOperationException("A política local do Compute Agent está pausada.");
 
         if (await db.FarmJobs.AnyAsync(
                 x => x.AccountId == identity.AccountId &&
@@ -104,7 +106,9 @@ internal sealed class PostgresFarmLabService(
                 BenchmarkIterations,
                 BenchmarkTimeoutSeconds,
                 1,
-                Math.Min(node.MemoryBytes, BenchmarkMemoryLimitBytes),
+                Math.Min(
+                    Math.Min(node.MemoryBytes, BenchmarkMemoryLimitBytes),
+                    node.AgentMaxMemoryBytes ?? node.MemoryBytes),
                 NetworkPolicy,
                 DataClassification,
                 now,
@@ -405,6 +409,8 @@ internal sealed class PostgresFarmLabService(
             timeProvider.GetUtcNow() - node.LastSeenAtUtc <= AgentHeartbeatTolerance;
         var persistedStatus = Enum.Parse<FarmNodeStatus>(node.Status);
         var effectiveStatus = heartbeatFresh ? persistedStatus : FarmNodeStatus.Offline;
+        var acceptJobs = effectiveStatus == FarmNodeStatus.Online &&
+            (connectionKind == FarmNodeConnectionKind.Embedded || node.AgentAcceptJobs);
         return new FarmNodeSnapshot(
             node.Id,
             node.Name,
@@ -416,7 +422,10 @@ internal sealed class PostgresFarmLabService(
             node.LastSeenAtUtc,
             connectionKind,
             node.AgentVersion,
-            heartbeatFresh);
+            heartbeatFresh,
+            acceptJobs,
+            node.AgentMaxLogicalProcessors ?? node.LogicalProcessors,
+            node.AgentMaxMemoryBytes ?? node.MemoryBytes);
     }
 
     private FarmJobSnapshot ToSnapshot(

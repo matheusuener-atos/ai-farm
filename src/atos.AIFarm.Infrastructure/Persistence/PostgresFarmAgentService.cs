@@ -94,6 +94,9 @@ internal sealed class PostgresFarmAgentService(
         node.AgentVersion = normalized.AgentVersion;
         node.AgentCredentialHash = HashSecret(credential);
         node.AgentCredentialIssuedAtUtc = now;
+        node.AgentAcceptJobs = true;
+        node.AgentMaxLogicalProcessors = Math.Min(1, normalized.LogicalProcessors);
+        node.AgentMaxMemoryBytes = Math.Min(256L * 1024 * 1024, normalized.MemoryBytes);
         node.ConnectionKind = FarmNodeConnectionKind.Agent.ToString();
         node.Status = FarmNodeStatus.Online.ToString();
         node.VerificationLevel = FarmVerificationLevel.Detected.ToString();
@@ -123,6 +126,9 @@ internal sealed class PostgresFarmAgentService(
         node.LogicalProcessors = normalized.LogicalProcessors;
         node.MemoryBytes = normalized.MemoryBytes;
         node.AgentVersion = normalized.AgentVersion;
+        node.AgentAcceptJobs = normalized.AcceptJobs;
+        node.AgentMaxLogicalProcessors = normalized.MaxLogicalProcessors;
+        node.AgentMaxMemoryBytes = normalized.MaxMemoryBytes;
         node.LastSeenAtUtc = now;
         if (node.Status == FarmNodeStatus.Offline.ToString())
             node.Status = FarmNodeStatus.Online.ToString();
@@ -132,7 +138,7 @@ internal sealed class PostgresFarmAgentService(
         return new FarmAgentHeartbeatResult(
             node.Id,
             status,
-            status == FarmNodeStatus.Online,
+            status == FarmNodeStatus.Online && node.AgentAcceptJobs,
             now,
             HeartbeatIntervalSeconds);
     }
@@ -154,7 +160,10 @@ internal sealed class PostgresFarmAgentService(
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
-        if (node is null || node.Status != FarmNodeStatus.Online.ToString()) return null;
+        if (node is null ||
+            node.Status != FarmNodeStatus.Online.ToString() ||
+            !node.AgentAcceptJobs)
+            return null;
         await FarmJobLifecycle.ExpireAsync(
             db,
             timeProvider.GetUtcNow(),
@@ -539,11 +548,25 @@ internal sealed class PostgresFarmAgentService(
     private static FarmAgentHeartbeatRequest Validate(FarmAgentHeartbeatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var logicalProcessors = Positive(request.LogicalProcessors, nameof(request.LogicalProcessors), 1024);
+        var memoryBytes = Positive(
+            request.MemoryBytes,
+            nameof(request.MemoryBytes),
+            16L * 1024 * 1024 * 1024 * 1024);
+        var maxLogicalProcessors = request.MaxLogicalProcessors == 0
+            ? Math.Min(1, logicalProcessors)
+            : Positive(request.MaxLogicalProcessors, nameof(request.MaxLogicalProcessors), logicalProcessors);
+        var maxMemoryBytes = request.MaxMemoryBytes == 0
+            ? Math.Min(256L * 1024 * 1024, memoryBytes)
+            : Positive(request.MaxMemoryBytes, nameof(request.MaxMemoryBytes), memoryBytes);
         return new FarmAgentHeartbeatRequest(
             Required(request.Runtime, nameof(request.Runtime), 3, 500),
-            Positive(request.LogicalProcessors, nameof(request.LogicalProcessors), 1024),
-            Positive(request.MemoryBytes, nameof(request.MemoryBytes), 16L * 1024 * 1024 * 1024 * 1024),
-            Required(request.AgentVersion, nameof(request.AgentVersion), 1, 80));
+            logicalProcessors,
+            memoryBytes,
+            Required(request.AgentVersion, nameof(request.AgentVersion), 1, 80),
+            request.AcceptJobs,
+            maxLogicalProcessors,
+            maxMemoryBytes);
     }
 
     private static string Required(string value, string name, int minimum, int maximum)

@@ -242,6 +242,12 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");
                 table.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
                 table.HasCheckConstraint("CK_farm_nodes_connection_kind", "\"ConnectionKind\" IN ('Embedded', 'Agent')");
+                table.HasCheckConstraint(
+                    "CK_farm_nodes_agent_cpu_limit",
+                    "\"AgentMaxLogicalProcessors\" IS NULL OR (\"AgentMaxLogicalProcessors\" >= 1 AND \"AgentMaxLogicalProcessors\" <= \"LogicalProcessors\")");
+                table.HasCheckConstraint(
+                    "CK_farm_nodes_agent_memory_limit",
+                    "\"AgentMaxMemoryBytes\" IS NULL OR (\"AgentMaxMemoryBytes\" >= 1 AND \"AgentMaxMemoryBytes\" <= \"MemoryBytes\")");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.AccountId).IsUnique();
@@ -252,6 +258,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.ConnectionKind).HasMaxLength(24).HasDefaultValue("Embedded");
             entity.Property(x => x.AgentVersion).HasMaxLength(80);
             entity.Property(x => x.AgentCredentialHash).HasMaxLength(64);
+            entity.Property(x => x.AgentAcceptJobs).HasDefaultValue(true);
             entity.Property(x => x.Runtime).HasMaxLength(500);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -339,6 +346,9 @@ public sealed class FarmNodeRecord
     public string? AgentVersion { get; set; }
     public string? AgentCredentialHash { get; set; }
     public DateTimeOffset? AgentCredentialIssuedAtUtc { get; set; }
+    public bool AgentAcceptJobs { get; set; } = true;
+    public int? AgentMaxLogicalProcessors { get; set; }
+    public long? AgentMaxMemoryBytes { get; set; }
     public string Runtime { get; set; } = string.Empty;
     public int LogicalProcessors { get; set; }
     public long MemoryBytes { get; set; }

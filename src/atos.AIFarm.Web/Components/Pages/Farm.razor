@@ -57,6 +57,18 @@ else
                 <span>CONEXÃO</span>
                 <strong>@ConnectionLabel(_dashboard.Node.ConnectionKind)</strong>
             </article>
+            <article>
+                <span>POLÍTICA LOCAL</span>
+                <strong class="@(CanAcceptJobs ? null : "amber")">@(CanAcceptJobs ? "ACEITANDO JOBS" : "PAUSADA")</strong>
+            </article>
+            <article>
+                <span>CPU AUTORIZADA</span>
+                <strong>@_dashboard.Node.AuthorizedLogicalProcessors</strong>
+            </article>
+            <article>
+                <span>MEMÓRIA AUTORIZADA</span>
+                <strong>@FormatBytes(_dashboard.Node.AuthorizedMemoryBytes)</strong>
+            </article>
         </div>
 
         <p class="farm-runtime">@_dashboard.Node.Runtime</p>
@@ -72,8 +84,8 @@ else
             else if (IsOnline)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
-                <button type="button" @onclick="RunBenchmarkAsync" disabled="@_working">
-                    @(_working ? "[ DESPACHANDO... ]" : "[ DESPACHAR BENCHMARK ]")
+                <button type="button" @onclick="RunBenchmarkAsync" disabled="@(_working || !CanAcceptJobs)">
+                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : "[ DESPACHAR BENCHMARK ]")
                 </button>
             }
             else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
@@ -85,7 +97,7 @@ else
                 <button type="button" disabled>[ AGUARDANDO HEARTBEAT ]</button>
             }
         </div>
-        <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // SEM SHELL // SEM REDE // SEM AIC</small>
+        <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // LIMITES LOCAIS // SEM SHELL // SEM REDE // SEM AIC</small>
     </section>
 
     <section class="terminal farm-agent-panel">
@@ -195,6 +207,7 @@ else
     private FarmAgentEnrollment? _enrollment;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
     private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
+    private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 

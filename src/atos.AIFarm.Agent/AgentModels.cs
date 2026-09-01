@@ -7,6 +7,33 @@ using atos.AIFarm.Core.Application;
 
 namespace atos.AIFarm.Agent;
 
+internal sealed record AgentLocalPolicy(
+    bool AcceptJobs,
+    int MaxLogicalProcessors,
+    long MaxMemoryBytes)
+{
+    public static AgentLocalPolicy Default() => new(
+        true,
+        Math.Min(1, AgentInventory.LogicalProcessors),
+        Math.Min(256L * 1024 * 1024, AgentInventory.MemoryBytes));
+
+    public static AgentLocalPolicy Normalize(AgentLocalPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        if (policy.MaxLogicalProcessors < 1 ||
+            policy.MaxLogicalProcessors > AgentInventory.LogicalProcessors)
+            throw new ArgumentOutOfRangeException(
+                nameof(policy.MaxLogicalProcessors),
+                $"CPU autorizada deve estar entre 1 e {AgentInventory.LogicalProcessors}.");
+        if (policy.MaxMemoryBytes < 1 ||
+            policy.MaxMemoryBytes > AgentInventory.MemoryBytes)
+            throw new ArgumentOutOfRangeException(
+                nameof(policy.MaxMemoryBytes),
+                "Memória autorizada deve ser positiva e não pode exceder a memória detectada.");
+        return policy;
+    }
+}
+
 internal sealed record AgentConfiguration(
     string BaseUrl,
     Guid NodeId,
@@ -14,7 +41,12 @@ internal sealed record AgentConfiguration(
     string AgentVersion,
     int HeartbeatIntervalSeconds,
     string? ManifestKeyTarget = null,
-    string? ManifestKeyId = null);
+    string? ManifestKeyId = null,
+    AgentLocalPolicy? Policy = null)
+{
+    public AgentLocalPolicy EffectivePolicy =>
+        AgentLocalPolicy.Normalize(Policy ?? AgentLocalPolicy.Default());
+}
 
 internal sealed record RemoteJobManifest(
     string Version,
@@ -71,7 +103,7 @@ internal static class RemoteJobVerifier
 
         var manifest = JsonSerializer.Deserialize<RemoteJobManifest>(offer.ManifestPayload, JsonOptions)
             ?? throw new InvalidOperationException("Manifesto remoto vazio.");
-        var local = AgentInventory.Heartbeat();
+        var local = AgentInventory.Heartbeat(configuration.EffectivePolicy);
         if (manifest.Version != "atos-farm-manifest-v2-agent" ||
             manifest.JobId != offer.JobId ||
             manifest.AttemptId != offer.AttemptId ||
@@ -84,9 +116,10 @@ internal static class RemoteJobVerifier
             manifest.Iterations != 100_000 ||
             manifest.TimeoutSeconds != 30 ||
             manifest.MaxLogicalProcessors is < 1 or > 1 ||
-            manifest.MaxLogicalProcessors > local.LogicalProcessors ||
+            !local.AcceptJobs ||
+            manifest.MaxLogicalProcessors > local.MaxLogicalProcessors ||
             manifest.MaxMemoryBytes is <= 0 or > 256L * 1024 * 1024 ||
-            manifest.MaxMemoryBytes > local.MemoryBytes ||
+            manifest.MaxMemoryBytes > local.MaxMemoryBytes ||
             manifest.ExpiresAtUtc <= now)
             throw new InvalidOperationException("O manifesto remoto viola a allowlist ou os limites locais.");
         return manifest;
@@ -124,19 +157,28 @@ internal static class AgentDeterministicBenchmark
 internal static class AgentInventory
 {
     public const string Version = "atos-agent/0.1.0";
+    public static int LogicalProcessors => Math.Max(1, Environment.ProcessorCount);
+    public static long MemoryBytes => Memory();
 
     public static FarmAgentEnrollmentRequest Enrollment() => new(
         Environment.MachineName.ToUpperInvariant(),
         Runtime(),
-        Math.Max(1, Environment.ProcessorCount),
-        Memory(),
+        LogicalProcessors,
+        MemoryBytes,
         Version);
 
-    public static FarmAgentHeartbeatRequest Heartbeat() => new(
+    public static FarmAgentHeartbeatRequest Heartbeat(AgentLocalPolicy? policy = null)
+    {
+        var effective = AgentLocalPolicy.Normalize(policy ?? AgentLocalPolicy.Default());
+        return new(
         Runtime(),
-        Math.Max(1, Environment.ProcessorCount),
-        Memory(),
-        Version);
+        LogicalProcessors,
+        MemoryBytes,
+        Version,
+        effective.AcceptJobs,
+        effective.MaxLogicalProcessors,
+        effective.MaxMemoryBytes);
+    }
 
     private static string Runtime() =>
         $"{RuntimeInformation.FrameworkDescription} // {RuntimeInformation.OSDescription}";

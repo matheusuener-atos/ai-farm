@@ -30,7 +30,10 @@ public sealed record FarmNodeSnapshot(
     DateTimeOffset LastSeenAtUtc,
     FarmNodeConnectionKind ConnectionKind,
     string? AgentVersion,
-    bool IsHeartbeatFresh);
+    bool IsHeartbeatFresh,
+    bool AcceptJobs,
+    int AuthorizedLogicalProcessors,
+    long AuthorizedMemoryBytes);
 
 public sealed record FarmAgentEnrollment(
     Guid Id,
@@ -53,7 +56,10 @@ public sealed record FarmAgentHeartbeatRequest(
     string Runtime,
     int LogicalProcessors,
     long MemoryBytes,
-    string AgentVersion);
+    string AgentVersion,
+    bool AcceptJobs = true,
+    int MaxLogicalProcessors = 0,
+    long MaxMemoryBytes = 0);
 
 public sealed record FarmAgentHeartbeatResult(
     Guid NodeId,

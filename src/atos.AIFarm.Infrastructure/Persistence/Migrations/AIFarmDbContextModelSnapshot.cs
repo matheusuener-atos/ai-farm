@@ -780,12 +780,23 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("AgentAcceptJobs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("AgentCredentialHash")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
                     b.Property<DateTimeOffset?>("AgentCredentialIssuedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("AgentMaxLogicalProcessors")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("AgentMaxMemoryBytes")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("AgentVersion")
                         .HasMaxLength(80)
@@ -840,6 +851,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.ToTable("farm_nodes", "aifarm", t =>
                         {
+                            t.HasCheckConstraint("CK_farm_nodes_agent_cpu_limit", "\"AgentMaxLogicalProcessors\" IS NULL OR (\"AgentMaxLogicalProcessors\" >= 1 AND \"AgentMaxLogicalProcessors\" <= \"LogicalProcessors\")");
+
+                            t.HasCheckConstraint("CK_farm_nodes_agent_memory_limit", "\"AgentMaxMemoryBytes\" IS NULL OR (\"AgentMaxMemoryBytes\" >= 1 AND \"AgentMaxMemoryBytes\" <= \"MemoryBytes\")");
+
                             t.HasCheckConstraint("CK_farm_nodes_connection_kind", "\"ConnectionKind\" IN ('Embedded', 'Agent')");
 
                             t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");

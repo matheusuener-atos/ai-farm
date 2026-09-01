@@ -25,6 +25,9 @@ internal static class AgentApplication
                 "import" => await ImportAsync(args, configurationStore, credentialStore),
                 "run" => await RunHeartbeatsAsync(client, configurationStore, credentialStore),
                 "status" => await ShowStatusAsync(configurationStore, credentialStore),
+                "pause" => await SetAvailabilityAsync(false, configurationStore),
+                "resume" => await SetAvailabilityAsync(true, configurationStore),
+                "limits" => await SetLimitsAsync(args, configurationStore),
                 "help" or "--help" or "-h" => ShowHelp(),
                 _ => UnknownCommand(command)
             };
@@ -74,7 +77,8 @@ internal static class AgentApplication
             enrollment.NodeId,
             target,
             AgentInventory.Version,
-            enrollment.HeartbeatIntervalSeconds), cancellation.Source.Token);
+            enrollment.HeartbeatIntervalSeconds,
+            Policy: AgentLocalPolicy.Default()), cancellation.Source.Token);
         Write("OK", $"Node {enrollment.NodeId} vinculado. A credencial está no Windows Credential Manager.");
         return 0;
     }
@@ -98,7 +102,8 @@ internal static class AgentApplication
             nodeId,
             target,
             AgentInventory.Version,
-            30));
+            30,
+            Policy: AgentLocalPolicy.Default()));
         Write("OK", $"Node {nodeId} importado para o Windows Credential Manager.");
         return 0;
     }
@@ -126,11 +131,19 @@ internal static class AgentApplication
         var manifestVerificationKey = trusted.VerificationKey;
         var failures = 0;
         var interval = Math.Clamp(configuration.HeartbeatIntervalSeconds, 10, 300);
-        Write("START", $"Node {configuration.NodeId} // {configuration.BaseUrl} // Ctrl+C para parar.");
+        Write(
+            "START",
+            $"Node {configuration.NodeId} // {configuration.BaseUrl} // {PolicyLabel(configuration.EffectivePolicy)} // Ctrl+C para parar.");
         while (!cancellation.Source.IsCancellationRequested)
         {
             try
             {
+                var latest = await RequiredConfigurationAsync(configurationStore);
+                if (latest.NodeId != configuration.NodeId ||
+                    latest.CredentialTarget != configuration.CredentialTarget)
+                    throw new AgentAuthenticationException(
+                        "O vínculo local mudou. Reinicie o processo do Agent.");
+                configuration = latest with { Policy = latest.EffectivePolicy };
                 var heartbeat = await client.HeartbeatAsync(
                     configuration,
                     credential,
@@ -200,7 +213,8 @@ internal static class AgentApplication
         configuration = configuration with
         {
             ManifestKeyTarget = target,
-            ManifestKeyId = trust.KeyId
+            ManifestKeyId = trust.KeyId,
+            Policy = configuration.EffectivePolicy
         };
         await configurationStore.SaveAsync(configuration, cancellationToken);
         Write("TRUST", $"HMAC-SHA256-NODE-V1 // KEY_ID={trust.KeyId}");
@@ -319,10 +333,52 @@ internal static class AgentApplication
             return 1;
         }
         var credential = credentialStore.Read(configuration.CredentialTarget);
+        var policy = configuration.EffectivePolicy;
         Write(
             "STATUS",
-            $"NODE={configuration.NodeId} // SERVER={configuration.BaseUrl} // CREDENTIAL={(credential is null ? "AUSENTE" : "SEGURA")}");
+            $"NODE={configuration.NodeId} // SERVER={configuration.BaseUrl} // CREDENTIAL={(credential is null ? "AUSENTE" : "SEGURA")} // {PolicyLabel(policy)}");
         return credential is null ? 1 : 0;
+    }
+
+    private static async Task<int> SetAvailabilityAsync(
+        bool acceptJobs,
+        AgentConfigurationStore configurationStore)
+    {
+        var configuration = await RequiredConfigurationAsync(configurationStore);
+        var policy = configuration.EffectivePolicy with { AcceptJobs = acceptJobs };
+        await configurationStore.SaveAsync(configuration with { Policy = policy });
+        Write(
+            acceptJobs ? "RESUME" : "PAUSE",
+            acceptJobs
+                ? "Novos Jobs serão aceitos após o próximo heartbeat."
+                : "Nenhum novo Job será aceito; uma execução atual poderá terminar.");
+        return 0;
+    }
+
+    private static async Task<int> SetLimitsAsync(
+        string[] args,
+        AgentConfigurationStore configurationStore)
+    {
+        if (args.Length < 3 ||
+            !int.TryParse(args[1], out var logicalProcessors) ||
+            !long.TryParse(args[2], out var memoryMegabytes))
+            throw new ArgumentException("Uso: atos-agent limits <cpu> <memoria-mb>");
+        long memoryBytes;
+        try { memoryBytes = checked(memoryMegabytes * 1024L * 1024L); }
+        catch (OverflowException)
+        {
+            throw new ArgumentOutOfRangeException(nameof(memoryMegabytes));
+        }
+        var configuration = await RequiredConfigurationAsync(configurationStore);
+        var policy = AgentLocalPolicy.Normalize(
+            configuration.EffectivePolicy with
+            {
+                MaxLogicalProcessors = logicalProcessors,
+                MaxMemoryBytes = memoryBytes
+            });
+        await configurationStore.SaveAsync(configuration with { Policy = policy });
+        Write("LIMITS", PolicyLabel(policy));
+        return 0;
     }
 
     private static async Task<AgentConfiguration> RequiredConfigurationAsync(
@@ -369,6 +425,9 @@ internal static class AgentApplication
         Console.WriteLine("  atos-agent enroll [url]  Vincula esta máquina usando código de uso único.");
         Console.WriteLine("  atos-agent run           Envia heartbeats até Ctrl+C.");
         Console.WriteLine("  atos-agent status        Mostra configuração e presença da credencial.");
+        Console.WriteLine("  atos-agent pause         Para de aceitar novos Jobs após o Job atual.");
+        Console.WriteLine("  atos-agent resume        Volta a aceitar novos Jobs.");
+        Console.WriteLine("  atos-agent limits <cpu> <memoria-mb>  Define a capacidade máxima autorizada.");
         return 0;
     }
 
@@ -381,6 +440,9 @@ internal static class AgentApplication
 
     private static void Write(string status, string message) =>
         Console.WriteLine($"{DateTimeOffset.Now:HH:mm:ss} // {status} // {message}");
+
+    private static string PolicyLabel(AgentLocalPolicy policy) =>
+        $"ACCEPT_JOBS={policy.AcceptJobs} // CPU_MAX={policy.MaxLogicalProcessors} // MEMORY_MAX={policy.MaxMemoryBytes / 1024 / 1024}MB";
 
     private static CancellationRegistration CreateCancellation() => new();
 

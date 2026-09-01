@@ -262,6 +262,22 @@ HTTP sem TLS é aceito somente em localhost; servidores remotos exigem HTTPS.
 Após 90 segundos sem heartbeat o painel marca o Agent como `OFFLINE`. Nenhuma
 credencial ou código deve ser colocado no Git, em screenshots ou em logs.
 
+O proprietário controla localmente se a máquina aceita novos Jobs e quanto do
+hardware pode ser anunciado. A política fica no mesmo `agent.json`, é relida a
+cada heartbeat e nunca pode ser ampliada pelo servidor:
+
+```powershell
+dotnet run --project src/atos.AIFarm.Agent -- pause
+dotnet run --project src/atos.AIFarm.Agent -- resume
+dotnet run --project src/atos.AIFarm.Agent -- limits 1 256
+```
+
+`limits` recebe CPU lógica e memória em MiB. `pause` não interrompe o Job
+atual: apenas drena o Agent e impede novos despachos e claims. O painel mantém o
+Node online, mas mostra a política local pausada e seus limites efetivos. Esses
+limites são uma política de admissão assinada; isolamento rígido de CPU/memória
+no sistema operacional ainda não faz parte deste runtime experimental.
+
 Com o Agent online, `[ DESPACHAR BENCHMARK ]` cria uma oferta remota. O
 servidor assina o manifesto com uma chave HMAC derivada exclusivamente para o
 Node; o Agent fixa a identidade dessa chave no Windows Credential Manager,
@@ -343,6 +359,7 @@ Implementado:
 - executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
 - despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
 - cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
+- política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

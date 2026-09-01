@@ -147,6 +147,41 @@ public sealed class PostgresFarmLabTests
             Assert.Equal(FarmNodeConnectionKind.Agent, online.Node.ConnectionKind);
             Assert.Equal(FarmNodeStatus.Online, online.Node.Status);
             Assert.Equal("atos-agent/0.1.0", online.Node.AgentVersion);
+            Assert.True(online.Node.AcceptJobs);
+            Assert.Equal(1, online.Node.AuthorizedLogicalProcessors);
+            Assert.Equal(256L * 1024 * 1024, online.Node.AuthorizedMemoryBytes);
+
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime,
+                    8,
+                    request.MemoryBytes,
+                    request.AgentVersion,
+                    AcceptJobs: false,
+                    MaxLogicalProcessors: 1,
+                    MaxMemoryBytes: 128L * 1024 * 1024));
+            Assert.NotNull(heartbeat);
+            Assert.False(heartbeat.AcceptJobs);
+            var locallyPaused = await lab.GetDashboardAsync();
+            Assert.Equal(FarmNodeStatus.Online, locallyPaused.Node.Status);
+            Assert.False(locallyPaused.Node.AcceptJobs);
+            Assert.Equal(128L * 1024 * 1024, locallyPaused.Node.AuthorizedMemoryBytes);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => lab.RunBenchmarkAsync());
+            Assert.Null(await agents.ClaimJobAsync(linked.Credential));
+
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime,
+                    8,
+                    request.MemoryBytes,
+                    request.AgentVersion,
+                    AcceptJobs: true,
+                    MaxLogicalProcessors: 1,
+                    MaxMemoryBytes: 128L * 1024 * 1024));
+            Assert.NotNull(heartbeat);
+            Assert.True(heartbeat.AcceptJobs);
 
             var trust = await agents.GetTrustAsync(linked.Credential);
             Assert.NotNull(trust);
