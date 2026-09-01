@@ -635,6 +635,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("AttemptId")
+                        .HasColumnType("uuid");
+
                     b.Property<long>("ComputeUnitsMilli")
                         .HasColumnType("bigint");
 
@@ -654,6 +657,27 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset?>("FinishedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ManifestDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ManifestExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ManifestIssuedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ManifestPayload")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ManifestSignature")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ManifestVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<Guid>("NodeId")
                         .HasColumnType("uuid");
@@ -692,6 +716,14 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_farm_jobs_account_active")
+                        .HasFilter("\"Status\" IN ('Queued', 'Running', 'Verifying')");
+
+                    b.HasIndex("AttemptId")
+                        .IsUnique();
+
                     b.HasIndex("NodeId");
 
                     b.HasIndex("AccountId", "CreatedAtUtc");
@@ -699,6 +731,8 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.ToTable("farm_jobs", "aifarm", t =>
                         {
                             t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
+
+                            t.HasCheckConstraint("CK_farm_jobs_manifest_complete", "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR (\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
                         });

@@ -256,10 +256,19 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             {
                 table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_manifest_complete",
+                    "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR " +
+                    "(\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => x.AccountId)
+                .HasDatabaseName("UX_farm_jobs_account_active")
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('Queued', 'Running', 'Verifying')");
             entity.HasIndex(x => x.NodeId);
+            entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);
             entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
             entity.Property(x => x.VerificationPolicy).HasMaxLength(120);
@@ -267,6 +276,9 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.ExpectedDigest).HasMaxLength(64);
             entity.Property(x => x.ResultDigest).HasMaxLength(64);
+            entity.Property(x => x.ManifestVersion).HasMaxLength(80);
+            entity.Property(x => x.ManifestDigest).HasMaxLength(64);
+            entity.Property(x => x.ManifestSignature).HasMaxLength(64);
             entity.Property(x => x.FailureReason).HasMaxLength(500);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
@@ -326,6 +338,13 @@ public sealed class FarmJobRecord
     public string Status { get; set; } = "Queued";
     public string? ExpectedDigest { get; set; }
     public string? ResultDigest { get; set; }
+    public Guid? AttemptId { get; set; }
+    public string? ManifestVersion { get; set; }
+    public string? ManifestPayload { get; set; }
+    public string? ManifestDigest { get; set; }
+    public string? ManifestSignature { get; set; }
+    public DateTimeOffset? ManifestIssuedAtUtc { get; set; }
+    public DateTimeOffset? ManifestExpiresAtUtc { get; set; }
     public long ComputeUnitsMilli { get; set; }
     public long? DurationMilliseconds { get; set; }
     public string? FailureReason { get; set; }

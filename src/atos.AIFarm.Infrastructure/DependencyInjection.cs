@@ -78,10 +78,13 @@ public static class DependencyInjection
         this IServiceCollection services,
         string connectionString,
         AIFarmIdentity? identity = null,
-        NeonObjectStorageOptions? objectStorage = null)
+        NeonObjectStorageOptions? objectStorage = null,
+        FarmManifestSigningOptions? farmManifestSigning = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton(
+            farmManifestSigning ?? FarmManifestSigningOptions.Development);
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)

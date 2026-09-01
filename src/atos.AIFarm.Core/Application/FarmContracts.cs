@@ -20,6 +20,21 @@ public sealed record FarmJobEventSnapshot(
     DateTimeOffset OccurredAtUtc,
     string Detail);
 
+public sealed record FarmJobManifestSnapshot(
+    string Version,
+    Guid AttemptId,
+    string Digest,
+    string Signature,
+    bool IsSignatureValid,
+    DateTimeOffset IssuedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    int TimeoutSeconds,
+    int Iterations,
+    int MaxLogicalProcessors,
+    long MaxMemoryBytes,
+    string NetworkPolicy,
+    string DataClassification);
+
 public sealed record FarmJobSnapshot(
     Guid Id,
     Guid NodeId,
@@ -31,6 +46,7 @@ public sealed record FarmJobSnapshot(
     string? ResultDigest,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? FinishedAtUtc,
+    FarmJobManifestSnapshot? Manifest,
     IReadOnlyList<FarmJobEventSnapshot> Events);
 
 public sealed record FarmDashboard(

@@ -152,7 +152,24 @@ else if (objectStorageValues.Any(x => !string.IsNullOrWhiteSpace(x)))
     throw new InvalidOperationException(
         "Neon Object Storage requires AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3 and AWS_REGION together.");
 }
-builder.Services.AddAIFarmPostgres(postgresConnection, objectStorage: objectStorage);
+var manifestSigningKey =
+    builder.Configuration["AIFarm:Farm:ManifestSigningKey"];
+FarmManifestSigningOptions farmManifestSigning;
+if (string.IsNullOrWhiteSpace(manifestSigningKey))
+{
+    if (!builder.Environment.IsDevelopment())
+        throw new InvalidOperationException(
+            "AIFarm:Farm:ManifestSigningKey is required outside Development.");
+    farmManifestSigning = FarmManifestSigningOptions.Development;
+}
+else
+{
+    farmManifestSigning = new FarmManifestSigningOptions(manifestSigningKey);
+}
+builder.Services.AddAIFarmPostgres(
+    postgresConnection,
+    objectStorage: objectStorage,
+    farmManifestSigning: farmManifestSigning);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;

@@ -93,6 +93,33 @@ else
                         <div><dt>CU</dt><dd>@FormatCu(job.ComputeUnitsMilli)</dd></div>
                         <div><dt>DIGEST</dt><dd>@(job.ResultDigest is null ? "---" : job.ResultDigest[..12])</dd></div>
                     </dl>
+                    @if (job.Manifest is null)
+                    {
+                        <p class="farm-manifest-legacy">MANIFESTO // JOB LEGADO SEM ASSINATURA</p>
+                    }
+                    else
+                    {
+                        <details class="farm-manifest">
+                            <summary>
+                                [ MANIFESTO @job.Manifest.Version //
+                                <span class="@(job.Manifest.IsSignatureValid ? "green" : "error-text")">
+                                    @(job.Manifest.IsSignatureValid ? "ASSINATURA VÁLIDA" : "ASSINATURA INVÁLIDA")
+                                </span> ]
+                            </summary>
+                            <dl>
+                                <div><dt>ATTEMPT</dt><dd>@ShortId(job.Manifest.AttemptId)</dd></div>
+                                <div><dt>VALIDADE</dt><dd>@job.Manifest.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</dd></div>
+                                <div><dt>TIMEOUT</dt><dd>@job.Manifest.TimeoutSeconds S</dd></div>
+                                <div><dt>ITERATIONS</dt><dd>@job.Manifest.Iterations.ToString("N0")</dd></div>
+                                <div><dt>CPU MÁX.</dt><dd>@job.Manifest.MaxLogicalProcessors</dd></div>
+                                <div><dt>MEMÓRIA MÁX.</dt><dd>@FormatBytes(job.Manifest.MaxMemoryBytes)</dd></div>
+                                <div><dt>REDE</dt><dd>@job.Manifest.NetworkPolicy</dd></div>
+                                <div><dt>DADOS</dt><dd>@job.Manifest.DataClassification</dd></div>
+                                <div><dt>MANIFEST DIGEST</dt><dd title="@job.Manifest.Digest">@ShortHash(job.Manifest.Digest)</dd></div>
+                                <div><dt>HMAC-SHA256</dt><dd title="@job.Manifest.Signature">@ShortHash(job.Manifest.Signature)</dd></div>
+                            </dl>
+                        </details>
+                    }
                     <ol class="farm-job-events">
                         @foreach (var entry in job.Events)
                         {
@@ -178,6 +205,8 @@ else
 
     private static string FormatCu(long milli) => $"{milli / 1000d:0.000} CU";
     private static string ShortId(Guid id) => id.ToString("N")[..8];
+    private static string ShortHash(string value) =>
+        value.Length <= 16 ? value : $"{value[..12]}...{value[^4..]}";
     private static string FormatBytes(long bytes) =>
         bytes <= 0 ? "---" : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";
 }

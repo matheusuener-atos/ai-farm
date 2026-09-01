@@ -53,6 +53,11 @@ neon checkout development --project-id crimson-shadow-20267299
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3` e
   `AWS_REGION`: credencial branch-scoped do bucket privado `chat-attachments`.
 
+Jobs do Compute Lab são assinados com
+`AIFarm__Farm__ManifestSigningKey`. Development usa uma chave local
+explicitamente não produtiva quando a variável é omitida. No Render, configure
+um segredo aleatório em Base64 com pelo menos 32 bytes antes do deploy.
+
 O arquivo versionado `neon.ts` declara o bucket privado. Para conferir e
 aplicar a infraestrutura somente na branch selecionada:
 
@@ -78,6 +83,19 @@ informe no Dashboard do Render as variáveis secretas da branch Neon
 
 - `DATABASE_URL`: URL pooled de `production`;
 - `DATABASE_URL_UNPOOLED`: URL direta de `production`, usada nas migrations.
+- `AIFarm__Farm__ManifestSigningKey`: segredo Base64 de 256 bits usado para
+  assinar manifests do Compute Lab.
+
+Gere o segredo localmente e copie somente o resultado para o Environment do
+Render:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+```
+
+Não troque a chave sem um procedimento de rotação: Jobs históricos assinados
+pela chave anterior continuarão registrados, mas não poderão ser revalidados
+com a nova chave.
 
 Anexos exigem também as quatro variáveis `AWS_*` declaradas em `render.yaml`.
 Antes de preenchê-las, o bucket deve ser criado explicitamente na branch Neon
@@ -189,6 +207,13 @@ atos-sha256-chain-v1.
 
 O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
 manifest no verificador e só registra 1,000 CU quando os digests coincidem.
+Cada novo Job congela um manifesto canônico assinado por HMAC-SHA256 com
+`attempt_id`, validade, timeout, limites de CPU/memória, classificação
+`STANDARD` e rede `DENY_ALL`. A assinatura e a allowlist são verificadas antes
+do runtime; Jobs históricos anteriores permanecem visíveis como legados.
+O PostgreSQL também impede mais de um Job ativo por conta, inclusive entre
+abas ou instâncias concorrentes, e cancelamentos terminalizam a tentativa sem
+emitir CU ou AIC.
 Cada transição é persistida de forma ordenada:
 
     QUEUED → RUNNING → VERIFYING → COMPLETED
