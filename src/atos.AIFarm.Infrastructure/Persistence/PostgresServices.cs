@@ -526,6 +526,30 @@ public sealed class PostgresChatStore(
         return true;
     }
 
+    public async Task<bool> RenameConversationAsync(
+        Guid conversationId,
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedTitle = ConversationTitle.Normalize(title);
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 (x.Status == "Active" || x.Status == "Archived"),
+            cancellationToken);
+        if (conversation is null)
+        {
+            return false;
+        }
+
+        conversation.Title = normalizedTitle;
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     public async Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {

@@ -47,6 +47,12 @@ public sealed class PostgresAccountIsolationTests
             var additionalFirstConversation = await firstStore.CreateConversationAsync();
             var crossAccountLookup = await secondStore.GetConversationAsync(
                 additionalFirstConversation.Id);
+            var crossAccountRename = await secondStore.RenameConversationAsync(
+                firstConversation.Id,
+                "tentativa externa");
+            var renamed = await firstStore.RenameConversationAsync(
+                firstConversation.Id,
+                "  Projeto   confidencial  ");
             var crossAccountArchive = await secondStore.ArchiveConversationAsync(
                 firstConversation.Id);
             var archived = await firstStore.ArchiveConversationAsync(firstConversation.Id);
@@ -80,6 +86,8 @@ public sealed class PostgresAccountIsolationTests
             Assert.Empty(secondConversation.Messages);
             Assert.NotEqual(firstConversation.Id, secondConversation.Id);
             Assert.Null(crossAccountLookup);
+            Assert.False(crossAccountRename);
+            Assert.True(renamed);
             Assert.False(crossAccountArchive);
             Assert.True(archived);
             Assert.Null(archivedLookup);
@@ -89,14 +97,14 @@ public sealed class PostgresAccountIsolationTests
             Assert.Single(secondSummaries);
             Assert.Equal(firstConversation.Id, Assert.Single(firstArchivedSummaries).Id);
             Assert.Equal(
-                "mensagem exclusiva da primeira conta",
+                "Projeto confidencial",
                 Assert.Single(firstArchivedSummaries).Title);
             Assert.Empty(secondArchivedSummaries);
             Assert.False(crossAccountRestore);
             Assert.True(restored);
             Assert.Equal(2, restoredConversation?.Messages.Count);
             Assert.Equal(
-                "mensagem exclusiva da primeira conta",
+                "Projeto confidencial",
                 activeAfterRestore.Single(
                     x => x.Id == firstConversation.Id).Title);
             Assert.Equal("Active", archivedRecord.Status);

@@ -135,6 +135,25 @@ public sealed class InMemoryChatStore : IChatStore
         }
     }
 
+    public Task<bool> RenameConversationAsync(
+        Guid conversationId,
+        string title,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedTitle = ConversationTitle.Normalize(title);
+        lock (_sync)
+        {
+            if (!_conversations.TryGetValue(conversationId, out var conversation))
+            {
+                return Task.FromResult(false);
+            }
+
+            conversation.Title = normalizedTitle;
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default)
     {

@@ -26,4 +26,18 @@ public sealed class ConversationTitleTests
     {
         Assert.Throws<ArgumentException>(() => ConversationTitle.FromPrompt("   "));
     }
+
+    [Fact]
+    public void NormalizesManualTitle()
+    {
+        var title = ConversationTitle.Normalize("  Planejamento   estratégico  ");
+
+        Assert.Equal("Planejamento estratégico", title);
+    }
+
+    [Fact]
+    public void RejectsEmptyManualTitle()
+    {
+        Assert.Throws<ArgumentException>(() => ConversationTitle.Normalize("\t"));
+    }
 }

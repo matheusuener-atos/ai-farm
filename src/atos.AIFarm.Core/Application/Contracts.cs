@@ -74,9 +74,24 @@ public static class ConversationTitle
             throw new ArgumentException("A mensagem não pode estar vazia.", nameof(prompt));
         }
 
+        return NormalizeCore(prompt);
+    }
+
+    public static string Normalize(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            throw new ArgumentException("O título não pode estar vazio.", nameof(title));
+        }
+
+        return NormalizeCore(title);
+    }
+
+    private static string NormalizeCore(string value)
+    {
         var normalized = string.Join(
             ' ',
-            prompt.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         return normalized.Length <= MaximumLength
             ? normalized
             : $"{normalized[..(MaximumLength - 1)]}…";
@@ -123,6 +138,10 @@ public interface IChatStore
         CancellationToken cancellationToken = default);
     Task<bool> RestoreConversationAsync(
         Guid conversationId,
+        CancellationToken cancellationToken = default);
+    Task<bool> RenameConversationAsync(
+        Guid conversationId,
+        string title,
         CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(
         CancellationToken cancellationToken = default);

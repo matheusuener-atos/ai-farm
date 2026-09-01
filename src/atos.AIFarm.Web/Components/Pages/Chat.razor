@@ -66,9 +66,35 @@
 
     <section class="terminal chat-terminal" aria-label="Conversa com IA">
     <div class="terminal-title">
-        <span>[ SESSÃO_@SessionCode ]</span>
+        @if (_renaming)
+        {
+            <div class="title-editor">
+                <input aria-label="Título da conversa"
+                       maxlength="@ConversationTitle.MaximumLength"
+                       @bind="_titleDraft" />
+                <button type="button" @onclick="SaveTitleAsync" disabled="@_working">
+                    [ SALVAR ]
+                </button>
+                <button type="button" class="button-secondary" @onclick="CancelRename" disabled="@_working">
+                    [ CANCELAR ]
+                </button>
+            </div>
+        }
+        else
+        {
+            <span>[ @CurrentConversationLabel ]</span>
+        }
         <div class="terminal-actions">
             <span class="status">● ONLINE</span>
+            @if (!_renaming)
+            {
+                <button type="button"
+                        class="rename-button"
+                        @onclick="StartRename"
+                        disabled="@(_working || _conversationId == Guid.Empty)">
+                    [ RENOMEAR ]
+                </button>
+            }
             <button type="button"
                     class="archive-button"
                     @onclick="ArchiveCurrentConversationAsync"
@@ -169,15 +195,29 @@
     private readonly List<ConversationSummary> _archivedConversations = [];
     private Guid _conversationId;
     private string _prompt = string.Empty;
+    private string _titleDraft = string.Empty;
     private string? _error;
     private bool _working;
     private bool _showArchived;
+    private bool _renaming;
     private WalletSnapshot? _snapshot;
     private ChatExecutionPlan? _pendingPlan;
 
     private string SessionCode => _conversationId == Guid.Empty
         ? "----"
         : _conversationId.ToString("N")[..4].ToUpperInvariant();
+
+    private string CurrentConversationLabel
+    {
+        get
+        {
+            var conversation = _conversations.FirstOrDefault(
+                x => x.Id == _conversationId);
+            return conversation is null
+                ? $"SESSÃO_{SessionCode}"
+                : ConversationLabel(conversation);
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -300,6 +340,7 @@
         }
 
         _conversationId = conversation.Id;
+        _renaming = false;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);
         await RefreshConversationsAsync();
@@ -371,6 +412,7 @@
         }
 
         _working = true;
+        _renaming = false;
         _error = null;
         _pendingPlan = null;
         try
@@ -416,6 +458,64 @@
         catch (Exception)
         {
             _error = "Não foi possível restaurar esta conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void StartRename()
+    {
+        if (_working || _conversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        var conversation = _conversations.FirstOrDefault(
+            x => x.Id == _conversationId);
+        _titleDraft = conversation?.Title ?? string.Empty;
+        _renaming = true;
+        _error = null;
+    }
+
+    private void CancelRename()
+    {
+        _renaming = false;
+        _titleDraft = string.Empty;
+        _error = null;
+    }
+
+    private async Task SaveTitleAsync()
+    {
+        if (_working || !_renaming)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.RenameConversationAsync(
+                    _conversationId,
+                    _titleDraft))
+            {
+                _error = "Não foi possível renomear esta conversa.";
+                return;
+            }
+
+            await RefreshConversationsAsync();
+            _renaming = false;
+            _titleDraft = string.Empty;
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível renomear esta conversa.";
         }
         finally
         {
