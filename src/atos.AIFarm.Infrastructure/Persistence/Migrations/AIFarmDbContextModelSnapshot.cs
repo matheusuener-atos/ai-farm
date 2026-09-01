@@ -593,6 +593,171 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobEventRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Detail")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("farm_job_events", "aifarm");
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ComputeUnitsMilli")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("DurationMilliseconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ExpectedDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("NodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ResultDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("VerificationPolicy")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Workload")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("WorkloadVersion")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NodeId");
+
+                    b.HasIndex("AccountId", "CreatedAtUtc");
+
+                    b.ToTable("farm_jobs", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
+
+                            t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmNodeRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("LogicalProcessors")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("MemoryBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Runtime")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("VerificationLevel")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId")
+                        .IsUnique();
+
+                    b.ToTable("farm_nodes", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused')");
+
+                            t.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
+                        });
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.LedgerEntryRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -910,6 +1075,39 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ParentConversationId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobEventRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmJobRecord", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmNodeRecord", null)
+                        .WithMany()
+                        .HasForeignKey("NodeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmNodeRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.LedgerEntryRecord", b =>

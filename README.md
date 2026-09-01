@@ -15,7 +15,7 @@ Base inicial do produto atos AI Farm em .NET 10 e Blazor. O incremento atual dem
 
 - `atos.AIFarm.Core`: domínio, Ledger e contratos de aplicação sem dependência de UI ou EF Core.
 - `atos.AIFarm.Infrastructure`: adapters de desenvolvimento, Fake Provider e esquema EF Core/PostgreSQL.
-- `atos.AIFarm.Web`: Blazor Web App interativo com Início, Chat, Wallet, Operações e placeholder explícito da Farm.
+- `atos.AIFarm.Web`: Blazor Web App interativo com Início, Chat, Wallet, Operações e Compute Lab controlado.
 - `atos.AIFarm.UnitTests`: invariantes e operações do Ledger.
 - `atos.AIFarm.IntegrationTests`: ciclo completo de aplicação usando os adapters em memória.
 
@@ -180,6 +180,26 @@ Blazor; não existe dependência de Neon Auth ou de outro provedor externo.
 As páginas de produto exigem autenticação. Health checks permanecem anônimos
 para que o Render possa monitorar o serviço.
 
+## Compute Lab — início da Fase 3
+
+A rota autenticada /farm agora materializa a primeira prova fechada de
+compute controlado. Ela registra um node de laboratório por conta, permite
+pausar e retomar sua disponibilidade e executa somente o workload versionado
+atos-sha256-chain-v1.
+
+O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
+manifest no verificador e só registra 1,000 CU quando os digests coincidem.
+Cada transição é persistida de forma ordenada:
+
+    QUEUED → RUNNING → VERIFYING → COMPLETED
+                                    ↘ FAILED
+
+Este CU é uma medição técnica experimental e específica dessa política; ainda
+não existe conversão CU → AIC. O laboratório não concede reward, não aceita
+shell, imagem de container, egress ou Jobs enviados pelo usuário. O hardware
+exibido pertence ao host onde a aplicação está executando — localmente, a
+máquina de desenvolvimento; no Render, o container do serviço — e ainda não
+representa um Compute Agent instalado no computador do usuário.
 ## Estado do Marco 1
 
 Implementado:
@@ -233,6 +253,7 @@ Implementado:
 - feedback persistente e atualizável por resposta, isolado por conta;
 - satisfação agregada por execução no painel operacional;
 - exportação autenticada e portável de conversas em Markdown e JSON.
+- Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

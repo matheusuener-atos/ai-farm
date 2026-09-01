@@ -19,6 +19,9 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<ChatAttachmentRecord> ChatAttachments => Set<ChatAttachmentRecord>();
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
+    public DbSet<FarmNodeRecord> FarmNodes => Set<FarmNodeRecord>();
+    public DbSet<FarmJobRecord> FarmJobs => Set<FarmJobRecord>();
+    public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -231,6 +234,54 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<MessageRecord>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<FarmNodeRecord>(entity =>
+        {
+            entity.ToTable("farm_nodes", table =>
+            {
+                table.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused')");
+                table.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(160);
+            entity.Property(x => x.Status).HasMaxLength(24);
+            entity.Property(x => x.VerificationLevel).HasMaxLength(24);
+            entity.Property(x => x.Runtime).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmJobRecord>(entity =>
+        {
+            entity.ToTable("farm_jobs", table =>
+            {
+                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
+                table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => x.NodeId);
+            entity.Property(x => x.Workload).HasMaxLength(80);
+            entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
+            entity.Property(x => x.VerificationPolicy).HasMaxLength(120);
+            entity.Property(x => x.Nonce).HasMaxLength(64);
+            entity.Property(x => x.Status).HasMaxLength(24);
+            entity.Property(x => x.ExpectedDigest).HasMaxLength(64);
+            entity.Property(x => x.ResultDigest).HasMaxLength(64);
+            entity.Property(x => x.FailureReason).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmJobEventRecord>(entity =>
+        {
+            entity.ToTable("farm_job_events");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.JobId, x.Sequence }).IsUnique();
+            entity.Property(x => x.Status).HasMaxLength(24);
+            entity.Property(x => x.Detail).HasMaxLength(300);
+            entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MessageFeedbackRecord>(entity =>
         {
             entity.ToTable("message_feedback", table =>
@@ -248,7 +299,50 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         });
     }
 }
-public sealed class AccountRecord
+
+public sealed class FarmNodeRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Status { get; set; } = "Online";
+    public string VerificationLevel { get; set; } = "Detected";
+    public string Runtime { get; set; } = string.Empty;
+    public int LogicalProcessors { get; set; }
+    public long MemoryBytes { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset LastSeenAtUtc { get; set; }
+}
+
+public sealed class FarmJobRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid NodeId { get; set; }
+    public string Workload { get; set; } = string.Empty;
+    public string WorkloadVersion { get; set; } = string.Empty;
+    public string VerificationPolicy { get; set; } = string.Empty;
+    public string Nonce { get; set; } = string.Empty;
+    public string Status { get; set; } = "Queued";
+    public string? ExpectedDigest { get; set; }
+    public string? ResultDigest { get; set; }
+    public long ComputeUnitsMilli { get; set; }
+    public long? DurationMilliseconds { get; set; }
+    public string? FailureReason { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? StartedAtUtc { get; set; }
+    public DateTimeOffset? FinishedAtUtc { get; set; }
+}
+
+public sealed class FarmJobEventRecord
+{
+    public Guid Id { get; set; }
+    public Guid JobId { get; set; }
+    public int Sequence { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
+    public DateTimeOffset OccurredAtUtc { get; set; }
+}public sealed class AccountRecord
 {
     public Guid Id { get; set; }
     public string DisplayName { get; set; } = string.Empty;

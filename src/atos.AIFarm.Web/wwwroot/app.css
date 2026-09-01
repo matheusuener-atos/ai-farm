@@ -285,3 +285,37 @@ code { color: var(--white); }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.farm-node-panel { border: 1px solid var(--amber); background: var(--amber-deep); margin-bottom: 1rem; }
+.farm-node-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid #4b3600; }
+.farm-node-header > div { display: grid; gap: .35rem; }
+.farm-node-header strong { color: var(--amber-bright); overflow-wrap: anywhere; }
+.farm-metrics { display: grid; grid-template-columns: repeat(4, 1fr); }
+.farm-metrics article { display: grid; gap: .55rem; padding: 1rem; border-right: 1px solid #4b3600; }
+.farm-metrics article:last-child { border-right: 0; }
+.farm-metrics span, .farm-runtime { color: var(--muted); font-size: .68rem; }
+.farm-metrics strong { color: var(--white); }
+.farm-runtime { margin: 0; padding: .8rem 1rem; border-top: 1px solid #4b3600; overflow-wrap: anywhere; }
+.farm-controls { display: flex; flex-wrap: wrap; gap: .6rem; padding: 1rem; border-top: 1px solid #4b3600; }
+.farm-node-panel > .classification-note { margin: 0; padding: 0 1rem 1rem; }
+.farm-jobs { padding: 0; }
+.farm-jobs > .muted { padding: 1rem; }
+.farm-job { padding: 1rem; border-top: 1px solid #292927; }
+.farm-job header { display: flex; justify-content: space-between; gap: 1rem; }
+.farm-job dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: 1rem 0; }
+.farm-job dl > div { min-width: 0; }
+.farm-job dt { color: var(--muted); font-size: .65rem; }
+.farm-job dd { margin: .3rem 0 0; overflow-wrap: anywhere; }
+.farm-job-events { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.farm-job-events li { display: grid; grid-template-columns: 5rem 7rem 1fr; gap: .6rem; color: var(--muted); font-size: .68rem; }
+.farm-job-events strong { color: var(--white); }
+.error-text { color: #ff6767; }
+
+@media (max-width: 760px) {
+    .farm-node-header, .farm-job header { align-items: flex-start; flex-direction: column; }
+    .farm-metrics, .farm-job dl { grid-template-columns: repeat(2, 1fr); }
+    .farm-metrics article:nth-child(2) { border-right: 0; }
+    .farm-metrics article { border-bottom: 1px solid #4b3600; }
+    .farm-job-events li { grid-template-columns: 4.5rem 1fr; }
+    .farm-job-events li span { grid-column: 1 / -1; }
+}
