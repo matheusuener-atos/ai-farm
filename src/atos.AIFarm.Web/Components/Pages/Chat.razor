@@ -1,7 +1,17 @@
 @page "/chat"
+@page "/chat/{ConversationId:guid}"
+@using atos.AIFarm.Infrastructure.Development
+@rendermode InteractiveServer
+@attribute [Authorize]
 @inject ChatWorkflow Workflow
 @inject IChatStore ChatStore
 @inject IWalletService Wallet
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ChatContextLimits ContextLimits
+@inject IAiModelCatalog ModelCatalog
+@inject IChatAttachmentService AttachmentService
+@implements IDisposable
 
 <PageTitle>Chat // atos AI Farm</PageTitle>
 
@@ -11,8 +21,260 @@
     <p>ROTA // MELHOR DISPONÍVEL</p>
 </div>
 
-<section class="terminal chat-terminal" aria-label="Conversa com IA">
-    <div class="terminal-title">[ SESSÃO_@SessionCode ] <span class="status">● ONLINE</span></div>
+<div class="chat-workspace">
+    <aside class="conversation-panel" aria-label="Histórico de conversas">
+        <div class="conversation-panel-header">
+            <span>CONVERSAS</span>
+            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">[ NOVA ]</button>
+        </div>
+        <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
+            <input aria-label="Buscar no histórico"
+                   maxlength="120"
+                   placeholder="BUSCAR TÍTULO OU MENSAGEM"
+                   @bind="_conversationSearchDraft" />
+            <button type="submit" disabled="@_working">[ BUSCAR ]</button>
+            @if (!string.IsNullOrWhiteSpace(_conversationSearch))
+            {
+                <button type="button"
+                        class="button-secondary"
+                        @onclick="ClearConversationSearchAsync"
+                        disabled="@_working">
+                    [ LIMPAR ]
+                </button>
+            }
+        </form>
+        <div class="conversation-list">
+            @if (_conversations.Count == 0)
+            {
+                <p class="muted">NENHUMA CONVERSA ENCONTRADA</p>
+            }
+            @foreach (var conversation in _conversations)
+            {
+                <button type="button"
+                        class="@ConversationClass(conversation.Id)"
+                        @onclick="() => SelectConversation(conversation.Id)"
+                        disabled="@_working">
+                    <strong>@ConversationLabel(conversation)</strong>
+                    <span>@ConversationPreview(conversation)</span>
+                    <small>@(conversation.ParentConversationId.HasValue ? "RAMO // " : null)@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm") // @conversation.MessageCount MSG</small>
+                </button>
+            }
+        </div>
+        @if (_conversationPage is not null)
+        {
+            <div class="conversation-pagination" aria-label="Paginação das conversas">
+                <button type="button"
+                        @onclick="PreviousConversationPageAsync"
+                        disabled="@(_working || !_conversationPage.HasPreviousPage)">
+                    [ &lt; ]
+                </button>
+                <span>PÁG @_conversationPage.Page / @_conversationPage.TotalPages // @_conversationPage.TotalCount</span>
+                <button type="button"
+                        @onclick="NextConversationPageAsync"
+                        disabled="@(_working || !_conversationPage.HasNextPage)">
+                    [ &gt; ]
+                </button>
+            </div>
+        }
+        <button type="button"
+                class="archive-toggle"
+                @onclick="ToggleArchivedAsync"
+                disabled="@_working">
+            @(_showArchived ? "[ OCULTAR ARQUIVADAS ]" : "[ VER ARQUIVADAS ]")
+        </button>
+        @if (_showArchived)
+        {
+            <div class="archived-list" aria-label="Conversas arquivadas">
+                @if (_archivedConversations.Count == 0)
+                {
+                    <p class="muted">NENHUMA CONVERSA ARQUIVADA</p>
+                }
+                @foreach (var conversation in _archivedConversations)
+                {
+                    <article class="archived-item">
+                        <strong>@ConversationLabel(conversation)</strong>
+                        <span>@ConversationPreview(conversation)</span>
+                        <small>@conversation.MessageCount MSG</small>
+                        <button type="button"
+                                @onclick="() => RestoreConversationAsync(conversation.Id)"
+                                disabled="@_working">
+                            [ RESTAURAR ]
+                        </button>
+                        <button type="button"
+                                class="danger-button"
+                                @onclick="() => RequestDeleteConversation(conversation.Id)"
+                                disabled="@_working">
+                            [ EXCLUIR ]
+                        </button>
+                    </article>
+                }
+            </div>
+        }
+        @if (_deleteCandidateId is Guid deleteCandidateId)
+        {
+            <section class="delete-confirmation" role="alert">
+                <strong>[ CONFIRMAR EXCLUSÃO ]</strong>
+                <p>@DeleteCandidateLabel(deleteCandidateId)</p>
+                <small>O histórico sairá da interface, mas a auditoria financeira será preservada.</small>
+                <div>
+                    <button type="button"
+                            class="danger-button"
+                            @onclick="ConfirmDeleteConversationAsync"
+                            disabled="@_working">
+                        [ SIM, EXCLUIR ]
+                    </button>
+                    <button type="button"
+                            class="button-secondary"
+                            @onclick="CancelDeleteConversation"
+                            disabled="@_working">
+                        [ CANCELAR ]
+                    </button>
+                </div>
+            </section>
+        }
+    </aside>
+
+    <section class="terminal chat-terminal" aria-label="Conversa com IA">
+    <div class="terminal-title">
+        @if (_renaming)
+        {
+            <div class="title-editor">
+                <input aria-label="Título da conversa"
+                       maxlength="@ConversationTitle.MaximumLength"
+                       @bind="_titleDraft" />
+                <button type="button" @onclick="SaveTitleAsync" disabled="@_working">
+                    [ SALVAR ]
+                </button>
+                <button type="button" class="button-secondary" @onclick="CancelRename" disabled="@_working">
+                    [ CANCELAR ]
+                </button>
+            </div>
+        }
+        else
+        {
+            <span>[ @CurrentConversationLabel ] @(_currentConversationParentId.HasValue ? "// RAMO" : null)</span>
+        }
+        <div class="terminal-actions">
+            <span class="@(_streaming ? "status streaming-status" : "status")">
+                ● @(_streaming ? _executionStatus : "ONLINE")
+            </span>
+            @if (!_renaming)
+            {
+                <button type="button"
+                        class="rename-button"
+                        @onclick="StartRename"
+                        disabled="@(_working || _conversationId == Guid.Empty)">
+                    [ RENOMEAR ]
+                </button>
+            }
+            <button type="button"
+                    class="configuration-button"
+                    @onclick="ToggleConfiguration"
+                    disabled="@(_working || _conversationId == Guid.Empty)">
+                @(_showConfiguration ? "[ FECHAR CONFIG ]" : "[ CONFIGURAR ]")
+            </button>
+            <button type="button"
+                    class="archive-button"
+                    @onclick="ArchiveCurrentConversationAsync"
+                    disabled="@(_working || _conversationId == Guid.Empty)">
+                [ ARQUIVAR ]
+            </button>
+            <button type="button"
+                    class="danger-button"
+                    @onclick="() => RequestDeleteConversation(_conversationId)"
+                    disabled="@(_working || _conversationId == Guid.Empty)">
+                [ EXCLUIR ]
+            </button>
+            @if (_conversationId != Guid.Empty)
+            {
+                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">[ EXPORTAR MD ]</a>
+                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">[ EXPORTAR JSON ]</a>
+            }
+        </div>
+    </div>
+
+    @if (_showConfiguration)
+    {
+        <section class="chat-configuration" aria-label="Configuração desta conversa">
+            <div class="configuration-heading">
+                <div>
+                    <strong>[ PERFIL DE EXECUÇÃO DESTA CONVERSA ]</strong>
+                    <small>Alterações afetam apenas as próximas execuções. Ramos herdam este perfil.</small>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_configurationNotice))
+                {
+                    <span class="configuration-notice">@_configurationNotice</span>
+                }
+            </div>
+            <div class="configuration-grid">
+                <label>
+                    MODELO
+                    <select @bind="_modelPreference" disabled="@_working">
+                        @foreach (var option in ModelOptions)
+                        {
+                            <option value="@option.Value">@option.Label</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    CRIATIVIDADE // @_temperature.ToString("0.00")
+                    <input type="range" min="0" max="2" step="0.1" @bind="_temperature" disabled="@_working" />
+                </label>
+                <label>
+                    LIMITE DE RESPOSTA // TOKENS
+                    <input type="number"
+                           min="@ConversationAiSettings.MinimumOutputTokens"
+                           max="@SelectedModelMaximumOutputTokens"
+                           step="64"
+                           @bind="_maximumOutputTokens"
+                           disabled="@_working" />
+                </label>
+                <label class="system-instruction-field">
+                    INSTRUÇÃO DO SISTEMA
+                    <textarea rows="4"
+                              maxlength="@ConversationAiSettings.MaximumInstructionLength"
+                              placeholder="Ex.: Responda em português, com objetividade e exemplos práticos."
+                              @bind="_systemInstruction"
+                              disabled="@_working"></textarea>
+                    <small>@((_systemInstruction?.Length ?? 0).ToString("N0")) / @ConversationAiSettings.MaximumInstructionLength.ToString("N0") CARACTERES</small>
+                </label>
+            </div>
+            <div class="configuration-actions">
+                <button type="button" @onclick="SaveConversationSettingsAsync" disabled="@_working">
+                    [ SALVAR NESTA CONVERSA ]
+                </button>
+                <button type="button" class="button-secondary" @onclick="ResetSettingsDraft" disabled="@_working">
+                    [ RESTAURAR SALVO ]
+                </button>
+            </div>
+            <div class="preset-panel">
+                <div class="preset-create">
+                    <label>
+                        SALVAR CONFIGURAÇÃO COMO PRESET
+                        <input maxlength="80" placeholder="NOME DO PRESET" @bind="_presetName" disabled="@_working" />
+                    </label>
+                    <button type="button" @onclick="SavePresetAsync" disabled="@_working">[ SALVAR PRESET ]</button>
+                </div>
+                <div class="preset-list">
+                    @if (_presets.Count == 0)
+                    {
+                        <span class="muted">NENHUM PRESET SALVO</span>
+                    }
+                    @foreach (var preset in _presets)
+                    {
+                        <article>
+                            <div>
+                                <strong>@preset.Name</strong>
+                                <small>@PresetDescription(preset)</small>
+                            </div>
+                            <button type="button" @onclick="() => ApplyPresetAsync(preset)" disabled="@_working">[ APLICAR ]</button>
+                            <button type="button" class="danger-button" @onclick="() => DeletePresetAsync(preset.Id)" disabled="@_working">[ REMOVER ]</button>
+                        </article>
+                    }
+                </div>
+            </div>
+        </section>
+    }
 
     @if (_messages.Count == 0)
     {
@@ -28,10 +290,113 @@
         <article class="message">
             <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@RoleLabel(message.Role)&gt;</span>
             <p>@message.Content</p>
+            @if (message.Attachments is { Count: > 0 })
+            {
+                <div class="message-attachments">
+                    @foreach (var attachment in message.Attachments)
+                    {
+                        @if (IsImageAttachment(attachment))
+                        {
+                            <a class="attachment-preview"
+                               href="@AttachmentUrl(attachment.Id)"
+                               download="@attachment.FileName"
+                               aria-label="Baixar @attachment.FileName">
+                                <img src="@AttachmentUrl(attachment.Id, preview: true)"
+                                     alt="@attachment.FileName"
+                                     loading="lazy" />
+                                <span>[ BAIXAR // @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]</span>
+                            </a>
+                        }
+                        else
+                        {
+                            <a href="@AttachmentUrl(attachment.Id)" download="@attachment.FileName">
+                                [ BAIXAR // @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]
+                            </a>
+                        }
+                    }
+                </div>
+            }
             @if (MessageMeta(message) is string meta)
             {
                 <small>@meta</small>
             }
+            @if (message.Feedback is not null)
+            {
+                <small class="feedback-state">
+                    FEEDBACK // @(message.Feedback.Rating == ChatFeedbackRating.Positive ? "ÚTIL" : "NÃO ÚTIL")
+                    @if (!string.IsNullOrWhiteSpace(message.Feedback.Reason))
+                    {
+                        <span> // @message.Feedback.Reason</span>
+                    }
+                </small>
+            }
+            <div class="message-actions">
+                <button type="button"
+                        class="message-action"
+                        @onclick="() => CopyMessageAsync(message)"
+                        disabled="@_working">
+                    @(_copiedMessageId == message.Id ? "[ COPIADO ]" : "[ COPIAR ]")
+                </button>
+                @if (message.Role == ChatMessageRole.User)
+                {
+                    <button type="button"
+                            class="message-action"
+                            @onclick="() => StartEditBranch(message)"
+                            disabled="@_working">
+                        [ EDITAR / RAMIFICAR ]
+                    </button>
+                }
+                @if (CanRegenerate(message))
+                {
+                <button type="button"
+                        class="message-action"
+                        @onclick="() => PrepareRegenerationAsync(message.OperationId)"
+                        disabled="@_working">
+                    [ GERAR OUTRA RESPOSTA ]
+                </button>
+                }
+                @if (message.Role == ChatMessageRole.Assistant)
+                {
+                    <button type="button"
+                            class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Positive ? "active-feedback" : null)"
+                            @onclick="() => SetPositiveFeedbackAsync(message)"
+                            disabled="@_working">
+                        [ ÚTIL ]
+                    </button>
+                    <button type="button"
+                            class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Negative ? "active-feedback" : null)"
+                            @onclick="() => StartNegativeFeedback(message)"
+                            disabled="@_working">
+                        [ NÃO ÚTIL ]
+                    </button>
+                }
+            </div>
+            @if (_feedbackMessageId == message.Id)
+            {
+                <section class="feedback-editor" aria-label="Motivo do feedback">
+                    <label>
+                        O QUE PODERIA MELHORAR? // OPCIONAL
+                        <textarea rows="2" maxlength="500" @bind="_feedbackReason" disabled="@_working"></textarea>
+                    </label>
+                    <div>
+                        <button type="button" @onclick="() => SaveNegativeFeedbackAsync(message.Id)" disabled="@_working">[ SALVAR FEEDBACK ]</button>
+                        @if (message.Feedback is not null)
+                        {
+                            <button type="button" class="button-secondary" @onclick="() => ClearFeedbackAsync(message.Id)" disabled="@_working">[ REMOVER ]</button>
+                        }
+                        <button type="button" class="button-secondary" @onclick="CancelFeedback" disabled="@_working">[ CANCELAR ]</button>
+                    </div>
+                </section>
+            }
+        </article>
+    }
+
+    @if (_streaming)
+    {
+        <article class="message streaming-message" aria-live="polite" aria-label="Resposta em geração">
+            <span class="purple">atos_AI&gt;</span>
+            <p>@(_streamingResponse.Length == 0 ? "AGUARDANDO PRIMEIRO TOKEN" : _streamingResponse.ToString())<span class="stream-cursor" aria-hidden="true"></span></p>
+            <small>@_executionStatus // @_pendingPlan?.Route.Provider // @_pendingPlan?.Route.Model</small>
         </article>
     }
 
@@ -40,76 +405,912 @@
         <p class="error" role="alert">[ ERRO ] @_error</p>
     }
 
+    @if (_lastFailure is not null)
+    {
+        <section class="recovery-panel" role="alert" aria-label="Recuperação da execução">
+            <div>
+                <strong>[ EXECUÇÃO NÃO CONCLUÍDA ]</strong>
+                <p>@_lastFailure.Message</p>
+                <small>
+                    CÓDIGO // @_lastFailure.Code
+                    @if (!string.IsNullOrWhiteSpace(_lastFailure.DiagnosticId))
+                    {
+                        <span> // DIAGNÓSTICO @_lastFailure.DiagnosticId</span>
+                    }
+                </small>
+            </div>
+            <div class="recovery-actions">
+                @if (_lastFailure.IsRetryable)
+                {
+                    <button type="button"
+                            @onclick="RetryAsync"
+                            disabled="@(_working || !CanAffordPendingPlan)">
+                        [ TENTAR NOVAMENTE ]
+                    </button>
+                }
+                <button type="button"
+                        class="button-secondary"
+                        @onclick="CancelPlan"
+                        disabled="@_working">
+                    [ ALTERAR MENSAGEM ]
+                </button>
+            </div>
+        </section>
+    }
+
     <div class="composer">
-        <label for="prompt">MENSAGEM</label>
-        <textarea id="prompt" @bind="_prompt" disabled="@_sending" placeholder="Digite sua tarefa..." rows="3"></textarea>
+        <div class="composer-heading">
+            <label for="prompt">MENSAGEM</label>
+            <label class="context-selector" for="context-message-limit">
+                CONTEXTO
+                <select id="context-message-limit"
+                        @bind="_contextMessageLimit"
+                        disabled="@(_working || _pendingPlan is not null)">
+                    @foreach (var option in ContextMessageOptions)
+                    {
+                        <option value="@option">@(option == 0 ? "SÓ ESTA MENSAGEM" : $"ÚLTIMAS {option} MSG")</option>
+                    }
+                </select>
+            </label>
+        </div>
+        @if (_editingBranch || _regenerating)
+        {
+            <section class="branch-draft" aria-live="polite">
+                <div>
+                    <strong>@(_regenerating ? "[ NOVA RESPOSTA EM UM RAMO ]" : "[ EDIÇÃO EM UM RAMO ]")</strong>
+                    <small>A conversa original será preservada integralmente.</small>
+                </div>
+                @if (_pendingPlan is null)
+                {
+                    <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
+                        [ CANCELAR RAMO ]
+                    </button>
+                }
+            </section>
+        }
+        <div class="attachment-composer">
+            <label>
+                CLASSIFICAÇÃO DOS DADOS
+                <select @bind="_dataClassification" disabled="@(_working || _pendingPlan is not null)">
+                    <option value="@AiDataClassification.Standard">PADRÃO</option>
+                    <option value="@AiDataClassification.Trusted">CONFIÁVEL</option>
+                    <option value="@AiDataClassification.Private">PRIVADO</option>
+                </select>
+            </label>
+            @if (AttachmentService.IsAvailable)
+            {
+                <label class="attachment-picker">
+                    ANEXOS // MÁX. @AttachmentService.Limits.MaximumCount ARQUIVOS, @FormatBytes(AttachmentService.Limits.MaximumFileBytes) CADA
+                    <InputFile OnChange="UploadAttachmentsAsync"
+                               multiple
+                               accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.csv,.json,.log,.cs,.js,.ts,.py,.sql,.xml,.html,.css"
+                               disabled="@(_working || _pendingPlan is not null)" />
+                </label>
+            }
+            else
+            {
+                <small class="muted">ANEXOS INDISPONÍVEIS // OBJECT STORAGE NÃO CONFIGURADO</small>
+            }
+        </div>
+        <small class="classification-note">
+            PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida no preflight. PADRÃO é indicado para conteúdo não sensível.
+        </small>
+        @if (_attachments.Count > 0)
+        {
+            <div class="attachment-drafts" aria-label="Anexos desta execução">
+                @foreach (var attachment in _attachments)
+                {
+                    <span>
+                        @attachment.FileName // @FormatBytes(attachment.SizeBytes)
+                        <button type="button" class="message-action" @onclick="() => DeleteAttachmentAsync(attachment.Id)" disabled="@(_working || _pendingPlan is not null)">[ REMOVER ]</button>
+                    </span>
+                }
+            </div>
+        }
+        <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Digite sua tarefa..." rows="3"></textarea>
+
+        @if (_pendingPlan is not null)
+        {
+            <section class="execution-plan" aria-live="polite" aria-label="Confirmação da execução">
+                <div class="execution-plan-header">
+                    <span class="amber">@(_regenerating ? "[ PRÉVIA DA REGENERAÇÃO ]" : "[ PRÉVIA DA EXECUÇÃO ]")</span>
+                    <span>CATÁLOGO // @_pendingPlan.Route.PriceCatalogVersion</span>
+                </div>
+                <dl>
+                    <div>
+                        <dt>ROTA</dt>
+                        <dd>@_pendingPlan.Route.Provider / @_pendingPlan.Route.Model</dd>
+                    </div>
+                    <div>
+                        <dt>LIMITE DESTA TAREFA</dt>
+                        <dd>@Aic.Format(_pendingPlan.MaximumCostMinor)</dd>
+                    </div>
+                    <div>
+                        <dt>SALDO APÓS RESERVA</dt>
+                        <dd>@ProjectedBalance</dd>
+                    </div>
+                    <div>
+                        <dt>CLASSIFICAÇÃO</dt>
+                        <dd>@ClassificationLabel(_pendingPlan.DataClassification)</dd>
+                    </div>
+                    @if (_pendingPlan.Attachments is { Count: > 0 } plannedAttachments)
+                    {
+                        <div>
+                            <dt>ANEXOS CONGELADOS</dt>
+                            <dd>@plannedAttachments.Count ARQ // @FormatBytes(plannedAttachments.Sum(x => x.SizeBytes))</dd>
+                        </div>
+                    }
+                    @if (_pendingPlan.Context is { } context)
+                    {
+                        <div>
+                            <dt>CONTEXTO ESTIMADO</dt>
+                            <dd>@context.EstimatedInputTokens.ToString("N0") / @context.MaximumInputTokens.ToString("N0") TOKENS</dd>
+                        </div>
+                    }
+                    @if (_pendingPlan.Settings is { } settings)
+                    {
+                        <div>
+                            <dt>CRIATIVIDADE</dt>
+                            <dd>@settings.Temperature.ToString("0.00")</dd>
+                        </div>
+                        <div>
+                            <dt>LIMITE DE RESPOSTA</dt>
+                            <dd>@settings.MaximumOutputTokens.ToString("N0") TOKENS</dd>
+                        </div>
+                    }
+                </dl>
+                @if (_pendingPlan.Settings?.SystemInstruction is { Length: > 0 } instruction)
+                {
+                    <details class="context-details">
+                        <summary>[ VER INSTRUÇÃO DO SISTEMA ]</summary>
+                        <article>
+                            <strong>INSTRUÇÃO</strong>
+                            <pre>@instruction</pre>
+                        </article>
+                    </details>
+                }
+                @if (_pendingPlan.Context is { } plannedContext)
+                {
+                    <details class="context-details">
+                        <summary>[ VER CONTEXTO EFETIVAMENTE ENVIADO ]</summary>
+                        <p>
+                            @plannedContext.IncludedMessageCount MSG INTEGRAIS //
+                            @plannedContext.OmittedMessageCount MSG RESUMIDAS
+                        </p>
+                        @foreach (var contextMessage in plannedContext.Messages)
+                        {
+                            <article>
+                                <strong>@ContextRoleLabel(contextMessage)</strong>
+                                <pre>@contextMessage.Content</pre>
+                            </article>
+                        }
+                        <article>
+                            <strong>MENSAGEM ATUAL</strong>
+                            <pre>@_pendingPlan.Prompt</pre>
+                        </article>
+                    </details>
+                    @if (plannedContext.UsesSummary)
+                    {
+                        <p class="context-note">[ RESUMO AUTOMÁTICO ] Mensagens antigas foram compactadas de forma extrativa.</p>
+                    }
+                }
+                @if (!CanAffordPendingPlan)
+                {
+                    <p class="plan-warning">[ SALDO INSUFICIENTE ] A execução não pode ser confirmada.</p>
+                }
+                else if (_regenerating)
+                {
+                    <p class="plan-warning">A regeneração cria uma nova execução e será cobrada somente se for concluída.</p>
+                }
+            </section>
+        }
+
         <div class="composer-footer">
             <span>DISPONÍVEL // @(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</span>
-            <button @onclick="SendAsync" disabled="@_sending">
-                @(_sending ? "[ EXECUTANDO... ]" : "[ ENVIAR ]")
-            </button>
+            <div class="composer-actions">
+                @if (_streaming)
+                {
+                    <button type="button"
+                            class="cancel-generation"
+                            @onclick="CancelExecution"
+                            disabled="@(_executionCancellation?.IsCancellationRequested ?? true)">
+                        @((_executionCancellation?.IsCancellationRequested ?? false)
+                            ? "[ INTERROMPENDO... ]"
+                            : "[ INTERROMPER ]")
+                    </button>
+                }
+                else if (_lastFailure is not null)
+                {
+                    <span class="muted">ESCOLHA UMA AÇÃO ACIMA</span>
+                }
+                else if (_pendingPlan is null)
+                {
+                    <button type="button" @onclick="PrepareAsync" disabled="@_working">
+                        @(_working ? "[ CALCULANDO... ]" : "[ CALCULAR CUSTO ]")
+                    </button>
+                }
+                else
+                {
+                    <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
+                        [ ALTERAR ]
+                    </button>
+                    <button type="button" @onclick="ConfirmAsync" disabled="@(_working || !CanAffordPendingPlan)">
+                        @(_working
+                            ? "[ EXECUTANDO... ]"
+                            : _regenerating
+                                ? $"[ CONFIRMAR REGENERAÇÃO {Aic.Format(_pendingPlan.MaximumCostMinor)} ]"
+                                : $"[ CONFIRMAR {Aic.Format(_pendingPlan.MaximumCostMinor)} ]")
+                    </button>
+                }
+            </div>
         </div>
     </div>
-</section>
+    </section>
+</div>
 
 @code {
+    [Parameter]
+    public Guid? ConversationId { get; set; }
+
     private readonly List<ChatMessageSnapshot> _messages = [];
+    private readonly List<ConversationSummary> _conversations = [];
+    private readonly List<ConversationSummary> _archivedConversations = [];
+    private readonly List<ChatPresetSnapshot> _presets = [];
+    private readonly List<ChatAttachmentSnapshot> _attachments = [];
+    private const int ConversationPageSize = 8;
     private Guid _conversationId;
     private string _prompt = string.Empty;
+    private string _titleDraft = string.Empty;
+    private string _conversationSearchDraft = string.Empty;
+    private string? _conversationSearch;
+    private string? _currentConversationTitle;
     private string? _error;
-    private bool _sending;
+    private bool _working;
+    private bool _showArchived;
+    private bool _renaming;
+    private bool _streaming;
+    private bool _regenerating;
+    private bool _editingBranch;
+    private string _executionStatus = "CONECTANDO";
+    private readonly System.Text.StringBuilder _streamingResponse = new();
+    private CancellationTokenSource? _executionCancellation;
+    private string? _attemptIdempotencyKey;
+    private ExecutionFailureState? _lastFailure;
+    private ConversationPage? _conversationPage;
+    private int _conversationPageNumber = 1;
+    private Guid? _deleteCandidateId;
+    private Guid? _copiedMessageId;
+    private Guid? _branchSourceConversationId;
+    private Guid? _branchMessageId;
+    private Guid? _branchConversationId;
+    private Guid? _currentConversationParentId;
     private WalletSnapshot? _snapshot;
+    private ChatExecutionPlan? _pendingPlan;
+    private int _contextMessageLimit;
+    private bool _contextMessageLimitInitialized;
+    private bool _showConfiguration;
+    private string _modelPreference = ConversationAiSettings.AutomaticModel;
+    private string? _systemInstruction;
+    private decimal _temperature = ConversationAiSettings.Default.Temperature;
+    private int _maximumOutputTokens = ConversationAiSettings.Default.MaximumOutputTokens;
+    private string _presetName = string.Empty;
+    private string? _configurationNotice;
+    private Guid? _feedbackMessageId;
+    private string _feedbackReason = string.Empty;
+    private ConversationAiSettings _savedAiSettings = ConversationAiSettings.Default;
+    private AiDataClassification _dataClassification = AiDataClassification.Standard;
+
+    private IReadOnlyList<AiModelOption> ModelOptions => ModelCatalog.GetOptions();
+    private int SelectedModelMaximumOutputTokens =>
+        ModelOptions.FirstOrDefault(x => x.Value == _modelPreference)?.MaximumOutputTokens
+        ?? ModelOptions.First().MaximumOutputTokens;
+
+    private IEnumerable<int> ContextMessageOptions =>
+        new[] { 0, 4, 8, 16, 24, 32, ContextLimits.MaximumMessageCount }
+            .Where(x => x <= ContextLimits.MaximumMessageCount)
+            .Distinct()
+            .Order();
 
     private string SessionCode => _conversationId == Guid.Empty
         ? "----"
         : _conversationId.ToString("N")[..4].ToUpperInvariant();
 
-    protected override async Task OnInitializedAsync()
+    private string CurrentConversationLabel
     {
+        get
+        {
+            var conversation = _conversations.FirstOrDefault(
+                x => x.Id == _conversationId);
+            return conversation is not null
+                ? ConversationLabel(conversation)
+                : string.IsNullOrWhiteSpace(_currentConversationTitle)
+                    ? $"SESSÃO_{SessionCode}"
+                    : _currentConversationTitle;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_contextMessageLimitInitialized)
+        {
+            _contextMessageLimit = ContextLimits.DefaultMessageCount;
+            _contextMessageLimitInitialized = true;
+        }
+        if (ConversationId is Guid requestedId &&
+            requestedId != _conversationId)
+        {
+            ClearExecutionDraft();
+        }
         await RefreshConversationAsync();
         await RefreshWalletAsync();
     }
 
-    private async Task SendAsync()
+    private bool CanAffordPendingPlan =>
+        _pendingPlan is not null &&
+        _snapshot is not null &&
+        _snapshot.Balance.AvailableMinor >= _pendingPlan.MaximumCostMinor;
+
+    private string ProjectedBalance => _pendingPlan is null || _snapshot is null
+        ? "---"
+        : Aic.Format(Math.Max(
+            0,
+            _snapshot.Balance.AvailableMinor - _pendingPlan.MaximumCostMinor));
+
+    private void ToggleConfiguration()
     {
-        if (string.IsNullOrWhiteSpace(_prompt) || _sending)
+        _showConfiguration = !_showConfiguration;
+        _configurationNotice = null;
+        if (_showConfiguration)
+        {
+            ResetSettingsDraft();
+        }
+    }
+
+    private ConversationAiSettings SettingsDraft() => new ConversationAiSettings(
+        _modelPreference,
+        _systemInstruction,
+        _temperature,
+        _maximumOutputTokens).Normalize();
+
+    private void LoadSettings(ConversationAiSettings settings)
+    {
+        _savedAiSettings = settings.Normalize();
+        ResetSettingsDraft();
+    }
+
+    private void ResetSettingsDraft()
+    {
+        _modelPreference = _savedAiSettings.ModelPreference;
+        _systemInstruction = _savedAiSettings.SystemInstruction;
+        _temperature = _savedAiSettings.Temperature;
+        _maximumOutputTokens = _savedAiSettings.MaximumOutputTokens;
+        _configurationNotice = null;
+    }
+
+    private void ValidateAvailableSettings(ConversationAiSettings settings)
+    {
+        var option = ModelOptions.FirstOrDefault(x => x.Value == settings.ModelPreference)
+            ?? throw new InvalidOperationException("O modelo escolhido não está disponível neste ambiente.");
+        if (settings.MaximumOutputTokens > option.MaximumOutputTokens)
+        {
+            throw new InvalidOperationException(
+                $"Este modelo aceita no máximo {option.MaximumOutputTokens:N0} tokens nesta instalação.");
+        }
+    }
+
+    private async Task SaveConversationSettingsAsync()
+    {
+        if (_working || _conversationId == Guid.Empty)
         {
             return;
         }
 
-        _sending = true;
+        _working = true;
         _error = null;
-        var prompt = _prompt.Trim();
-        _prompt = string.Empty;
+        try
+        {
+            var settings = SettingsDraft();
+            ValidateAvailableSettings(settings);
+            if (!await ChatStore.UpdateConversationAiSettingsAsync(_conversationId, settings))
+            {
+                throw new InvalidOperationException("A conversa não está disponível para configuração.");
+            }
+            _savedAiSettings = settings;
+            _pendingPlan = null;
+            _configurationNotice = "[ CONFIGURAÇÃO SALVA ]";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task SavePresetAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var settings = SettingsDraft();
+            ValidateAvailableSettings(settings);
+            await ChatStore.SaveChatPresetAsync(_presetName, settings);
+            _presetName = string.Empty;
+            await RefreshPresetsAsync();
+            _configurationNotice = "[ PRESET SALVO ]";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ApplyPresetAsync(ChatPresetSnapshot preset)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var settings = preset.Settings.Normalize();
+            ValidateAvailableSettings(settings);
+            if (!await ChatStore.UpdateConversationAiSettingsAsync(_conversationId, settings))
+            {
+                throw new InvalidOperationException("A conversa não está disponível para configuração.");
+            }
+            LoadSettings(settings);
+            _pendingPlan = null;
+            _configurationNotice = $"[ PRESET {preset.Name} APLICADO ]";
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task DeletePresetAsync(Guid presetId)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.DeleteChatPresetAsync(presetId))
+            {
+                throw new InvalidOperationException("O preset não foi encontrado.");
+            }
+            await RefreshPresetsAsync();
+            _configurationNotice = "[ PRESET REMOVIDO ]";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task RefreshPresetsAsync()
+    {
+        _presets.Clear();
+        _presets.AddRange(await ChatStore.ListChatPresetsAsync());
+    }
+
+    private static string PresetDescription(ChatPresetSnapshot preset) =>
+        $"{preset.Settings.ModelPreference} // T {preset.Settings.Temperature:0.00} // {preset.Settings.MaximumOutputTokens:N0} TOKENS";
+
+    private async Task PrepareAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt) || _working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+
+        try
+        {
+            await RefreshWalletAsync();
+            _pendingPlan = await Workflow.PrepareAsync(
+                _conversationId,
+                _prompt,
+                _contextMessageLimit,
+                _branchMessageId,
+                _attachments.Select(x => x.Id).ToArray(),
+                _dataClassification);
+            _prompt = _pendingPlan.Prompt;
+            _attemptIdempotencyKey = Guid.NewGuid().ToString("N");
+            _lastFailure = null;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
+        {
+            _pendingPlan = null;
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _pendingPlan = null;
+            _error = "Não foi possível calcular rota e custo. Tente novamente.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_pendingPlan is not { } plan || _working || !CanAffordPendingPlan)
+        {
+            return;
+        }
+
+        _working = true;
+        var executionConversationId = _conversationId;
+        if (_branchSourceConversationId is Guid sourceConversationId &&
+            _branchMessageId is Guid branchMessageId)
+        {
+            try
+            {
+                if (_branchConversationId is null)
+                {
+                    var branch = await ChatStore.BranchConversationAsync(
+                        sourceConversationId,
+                        branchMessageId);
+                    _branchConversationId = branch.Id;
+                }
+
+                executionConversationId = _branchConversationId!.Value;
+            }
+            catch (Exception)
+            {
+                _error = "Não foi possível criar a ramificação da conversa.";
+                _working = false;
+                return;
+            }
+        }
+
+        _streaming = true;
+        _executionStatus = "CONECTANDO";
+        _streamingResponse.Clear();
+        var executionCancellation = new CancellationTokenSource();
+        _executionCancellation = executionCancellation;
+        var idempotencyKey = _attemptIdempotencyKey ??= Guid.NewGuid().ToString("N");
+        _error = null;
         _messages.Add(new ChatMessageSnapshot(
             Guid.NewGuid(),
             ChatMessageRole.User,
-            prompt,
+            plan.Prompt,
             ChatMessageStatus.Completed,
             Guid.Empty,
             DateTimeOffset.UtcNow));
 
         try
         {
-            await Workflow.SendAsync(
-                _conversationId,
-                prompt,
-                Guid.NewGuid().ToString("N"));
-            await RefreshConversationAsync();
+            await Workflow.SendStreamingAsync(
+                executionConversationId,
+                plan,
+                idempotencyKey,
+                AppendDeltaAsync,
+                executionCancellation.Token);
+            if (executionConversationId == _conversationId)
+            {
+                await RefreshConversationAsync();
+            }
+            _prompt = string.Empty;
+            _pendingPlan = null;
+            _attemptIdempotencyKey = null;
+            _lastFailure = null;
+            _regenerating = false;
+            _editingBranch = false;
+            _branchSourceConversationId = null;
+            _branchMessageId = null;
+            _branchConversationId = null;
+            if (executionConversationId != _conversationId)
+            {
+                Navigation.NavigateTo($"/chat/{executionConversationId}");
+            }
         }
         catch (InsufficientBalanceException exception)
         {
-            _error = exception.Message;
+            _lastFailure = new ExecutionFailureState(
+                "InsufficientBalance",
+                exception.Message,
+                false,
+                null);
+            await RefreshConversationAsync();
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (
+            executionCancellation.IsCancellationRequested)
         {
-            _error = "A execução falhou. A reserva foi liberada e nenhum custo foi capturado.";
+            _lastFailure = new ExecutionFailureState(
+                "Cancelled",
+                "Geração interrompida. A reserva foi liberada e nenhum custo foi capturado.",
+                true,
+                null);
+            await RefreshConversationAsync();
+        }
+        catch (Exception exception)
+        {
+            _lastFailure = FailureState(exception);
+            await RefreshConversationAsync();
         }
         finally
         {
             await RefreshWalletAsync();
-            _sending = false;
+            executionCancellation.Dispose();
+            _executionCancellation = null;
+            _streaming = false;
+            _streamingResponse.Clear();
+            _executionStatus = "CONECTANDO";
+            _working = false;
         }
+    }
+
+    private async ValueTask AppendDeltaAsync(
+        string delta,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _streamingResponse.Append(delta);
+        _executionStatus = "GERANDO";
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CancelExecution()
+    {
+        if (!_streaming || _executionCancellation is null)
+        {
+            return;
+        }
+
+        _executionStatus = "INTERROMPENDO";
+        _executionCancellation.Cancel();
+    }
+
+    private async Task RetryAsync()
+    {
+        if (_working ||
+            _lastFailure?.IsRetryable != true ||
+            _pendingPlan is null)
+        {
+            return;
+        }
+
+        _attemptIdempotencyKey = Guid.NewGuid().ToString("N");
+        _lastFailure = null;
+        await ConfirmAsync();
+    }
+
+    private async Task PrepareRegenerationAsync(Guid operationId)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        var source = _messages.LastOrDefault(
+            message => message.OperationId == operationId &&
+                       message.Role == ChatMessageRole.User);
+        if (source is null)
+        {
+            _error = "Não foi possível localizar a mensagem original.";
+            return;
+        }
+
+        _prompt = source.Content;
+        _regenerating = true;
+        _editingBranch = false;
+        _branchSourceConversationId = _conversationId;
+        _branchMessageId = source.Id;
+        _branchConversationId = null;
+        _lastFailure = null;
+        _attemptIdempotencyKey = null;
+        await PrepareAsync();
+        if (_pendingPlan is null)
+        {
+            ClearBranchDraft();
+        }
+    }
+
+    private void StartEditBranch(ChatMessageSnapshot message)
+    {
+        if (_working || message.Role != ChatMessageRole.User)
+        {
+            return;
+        }
+
+        ClearExecutionDraft();
+        _prompt = message.Content;
+        _editingBranch = true;
+        _branchSourceConversationId = _conversationId;
+        _branchMessageId = message.Id;
+    }
+
+    private async Task CopyMessageAsync(ChatMessageSnapshot message)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("atosChat.copyText", message.Content);
+            _copiedMessageId = message.Id;
+            _error = null;
+        }
+        catch (JSException)
+        {
+            _error = "O navegador não permitiu copiar esta mensagem.";
+        }
+    }
+
+    private async Task SetPositiveFeedbackAsync(ChatMessageSnapshot message)
+    {
+        var rating = message.Feedback?.Rating == ChatFeedbackRating.Positive
+            ? (ChatFeedbackRating?)null
+            : ChatFeedbackRating.Positive;
+        await SaveFeedbackAsync(message.Id, rating, null);
+    }
+
+    private void StartNegativeFeedback(ChatMessageSnapshot message)
+    {
+        _feedbackMessageId = message.Id;
+        _feedbackReason = message.Feedback?.Rating == ChatFeedbackRating.Negative
+            ? message.Feedback.Reason ?? string.Empty
+            : string.Empty;
+        _error = null;
+    }
+
+    private Task SaveNegativeFeedbackAsync(Guid messageId) =>
+        SaveFeedbackAsync(messageId, ChatFeedbackRating.Negative, _feedbackReason);
+
+    private Task ClearFeedbackAsync(Guid messageId) =>
+        SaveFeedbackAsync(messageId, null, null);
+
+    private async Task SaveFeedbackAsync(Guid messageId, ChatFeedbackRating? rating, string? reason)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.SetMessageFeedbackAsync(messageId, rating, reason))
+                throw new InvalidOperationException("A resposta não está disponível para avaliação.");
+            _feedbackMessageId = null;
+            _feedbackReason = string.Empty;
+            await RefreshConversationAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void CancelFeedback()
+    {
+        _feedbackMessageId = null;
+        _feedbackReason = string.Empty;
+    }
+
+    private async Task UploadAttachmentsAsync(InputFileChangeEventArgs change)
+    {
+        if (_working || _pendingPlan is not null || !AttachmentService.IsAvailable)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            var remaining = AttachmentService.Limits.MaximumCount - _attachments.Count;
+            if (remaining <= 0)
+            {
+                throw new InvalidOperationException("Remova um anexo antes de adicionar outro.");
+            }
+            foreach (var file in change.GetMultipleFiles(remaining))
+            {
+                await using var stream = file.OpenReadStream(AttachmentService.Limits.MaximumFileBytes);
+                var uploaded = await AttachmentService.UploadDraftAsync(
+                    _conversationId,
+                    file.Name,
+                    file.ContentType,
+                    stream,
+                    file.Size);
+                _attachments.Add(uploaded);
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task DeleteAttachmentAsync(Guid attachmentId)
+    {
+        if (_working || _pendingPlan is not null)
+        {
+            return;
+        }
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await AttachmentService.DeleteDraftAsync(attachmentId))
+            {
+                throw new InvalidOperationException("O anexo não está mais disponível para remoção.");
+            }
+            _attachments.RemoveAll(x => x.Id == attachmentId);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
+        ? $"{bytes / 1024d / 1024d:0.##} MB"
+        : $"{Math.Max(1, bytes / 1024d):0.##} KB";
+
+    private static bool IsImageAttachment(ChatAttachmentSnapshot attachment) =>
+        attachment.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+
+    private static string AttachmentUrl(Guid attachmentId, bool preview = false) =>
+        $"/api/chat/attachments/{attachmentId}{(preview ? "?preview=true" : string.Empty)}";
+
+    private static string ClassificationLabel(AiDataClassification classification) => classification switch
+    {
+        AiDataClassification.Standard => "PADRÃO",
+        AiDataClassification.Trusted => "CONFIÁVEL",
+        AiDataClassification.Private => "PRIVADO",
+        _ => classification.ToString().ToUpperInvariant()
+    };
+
+    private void CancelPlan()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        ClearExecutionDraft();
     }
 
     private async Task RefreshWalletAsync() =>
@@ -117,14 +1318,462 @@
 
     private async Task RefreshConversationAsync()
     {
-        var conversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+        ConversationSnapshot? conversation;
+        if (ConversationId is Guid requestedId)
+        {
+            conversation = await ChatStore.GetConversationAsync(requestedId);
+            if (conversation is null)
+            {
+                _error = "A conversa solicitada não foi encontrada.";
+                Navigation.NavigateTo("/chat", replace: true);
+                return;
+            }
+        }
+        else
+        {
+            conversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+        }
+
         _conversationId = conversation.Id;
+        _currentConversationTitle = conversation.Title;
+        _currentConversationParentId = conversation.ParentConversationId;
+        LoadSettings(conversation.AiSettings ?? ConversationAiSettings.Default);
+        await RefreshPresetsAsync();
+        _renaming = false;
         _messages.Clear();
         _messages.AddRange(conversation.Messages);
+        _attachments.Clear();
+        if (AttachmentService.IsAvailable)
+        {
+            _attachments.AddRange(await AttachmentService.ListDraftsAsync(conversation.Id));
+        }
+        await RefreshConversationsAsync();
+
+        if (ConversationId is null)
+        {
+            Navigation.NavigateTo($"/chat/{conversation.Id}", replace: true);
+        }
+    }
+
+    private async Task RefreshConversationsAsync()
+    {
+        var page = await ChatStore.SearchConversationsAsync(new ConversationQuery(
+            _conversationSearch,
+            _conversationPageNumber,
+            ConversationPageSize));
+        if (_conversationPageNumber > page.TotalPages)
+        {
+            _conversationPageNumber = page.TotalPages;
+            page = await ChatStore.SearchConversationsAsync(new ConversationQuery(
+                _conversationSearch,
+                _conversationPageNumber,
+                ConversationPageSize));
+        }
+
+        _conversationPage = page;
+        _conversations.Clear();
+        _conversations.AddRange(page.Items);
+        if (_showArchived)
+        {
+            _archivedConversations.Clear();
+            var archived = await ChatStore.SearchConversationsAsync(
+                new ConversationQuery(_conversationSearch, 1, 50, true));
+            _archivedConversations.AddRange(archived.Items);
+        }
+    }
+
+    private async Task ApplyConversationSearchAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            _conversationSearch = string.IsNullOrWhiteSpace(_conversationSearchDraft)
+                ? null
+                : _conversationSearchDraft.Trim();
+            _conversationPageNumber = 1;
+            await RefreshConversationsAsync();
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível buscar no histórico.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ClearConversationSearchAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        try
+        {
+            _conversationSearchDraft = string.Empty;
+            _conversationSearch = null;
+            _conversationPageNumber = 1;
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível limpar a busca.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task PreviousConversationPageAsync()
+    {
+        if (_working || _conversationPage?.HasPreviousPage != true)
+        {
+            return;
+        }
+
+        _working = true;
+        try
+        {
+            _conversationPageNumber--;
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _conversationPageNumber++;
+            _error = "Não foi possível carregar a página anterior.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task NextConversationPageAsync()
+    {
+        if (_working || _conversationPage?.HasNextPage != true)
+        {
+            return;
+        }
+
+        _working = true;
+        try
+        {
+            _conversationPageNumber++;
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _conversationPageNumber--;
+            _error = "Não foi possível carregar a próxima página.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ToggleArchivedAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _showArchived = !_showArchived;
+        _archivedConversations.Clear();
+        if (_showArchived)
+        {
+            var archived = await ChatStore.SearchConversationsAsync(
+                new ConversationQuery(_conversationSearch, 1, 50, true));
+            _archivedConversations.AddRange(archived.Items);
+        }
+    }
+
+    private async Task CreateConversationAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        ClearExecutionDraft();
+        _deleteCandidateId = null;
+        _conversationSearchDraft = string.Empty;
+        _conversationSearch = null;
+        _conversationPageNumber = 1;
+        try
+        {
+            var conversation = await ChatStore.CreateConversationAsync();
+            Navigation.NavigateTo($"/chat/{conversation.Id}");
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível criar uma nova conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ArchiveCurrentConversationAsync()
+    {
+        if (_working || _conversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        _working = true;
+        _renaming = false;
+        ClearExecutionDraft();
+        _deleteCandidateId = null;
+        try
+        {
+            if (!await ChatStore.ArchiveConversationAsync(_conversationId))
+            {
+                _error = "Não foi possível arquivar esta conversa.";
+                return;
+            }
+
+            var nextConversation = await ChatStore.GetOrCreateCurrentConversationAsync();
+            Navigation.NavigateTo($"/chat/{nextConversation.Id}", replace: true);
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível arquivar esta conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task RestoreConversationAsync(Guid conversationId)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.RestoreConversationAsync(conversationId))
+            {
+                _error = "Não foi possível restaurar esta conversa.";
+                return;
+            }
+
+            ClearExecutionDraft();
+            _deleteCandidateId = null;
+            Navigation.NavigateTo($"/chat/{conversationId}");
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível restaurar esta conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void StartRename()
+    {
+        if (_working || _conversationId == Guid.Empty)
+        {
+            return;
+        }
+
+        var conversation = _conversations.FirstOrDefault(
+            x => x.Id == _conversationId);
+        _titleDraft = conversation?.Title ?? string.Empty;
+        _renaming = true;
+        _error = null;
+    }
+
+    private void CancelRename()
+    {
+        _renaming = false;
+        _titleDraft = string.Empty;
+        _error = null;
+    }
+
+    private async Task SaveTitleAsync()
+    {
+        if (_working || !_renaming)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.RenameConversationAsync(
+                    _conversationId,
+                    _titleDraft))
+            {
+                _error = "Não foi possível renomear esta conversa.";
+                return;
+            }
+
+            await RefreshConversationsAsync();
+            _currentConversationTitle = ConversationTitle.Normalize(_titleDraft);
+            _renaming = false;
+            _titleDraft = string.Empty;
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível renomear esta conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void SelectConversation(Guid conversationId)
+    {
+        if (!_working && conversationId != _conversationId)
+        {
+            ClearExecutionDraft();
+            _deleteCandidateId = null;
+            Navigation.NavigateTo($"/chat/{conversationId}");
+        }
+    }
+
+    private void RequestDeleteConversation(Guid conversationId)
+    {
+        if (!_working && conversationId != Guid.Empty)
+        {
+            _deleteCandidateId = conversationId;
+            _error = null;
+        }
+    }
+
+    private void CancelDeleteConversation() => _deleteCandidateId = null;
+
+    private async Task ConfirmDeleteConversationAsync()
+    {
+        if (_working || _deleteCandidateId is not Guid conversationId)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.DeleteConversationAsync(conversationId))
+            {
+                _error = "Não foi possível excluir esta conversa.";
+                return;
+            }
+
+            _deleteCandidateId = null;
+            if (conversationId == _conversationId)
+            {
+                ClearExecutionDraft();
+                var next = await ChatStore.GetOrCreateCurrentConversationAsync();
+                Navigation.NavigateTo($"/chat/{next.Id}", replace: true);
+                return;
+            }
+
+            await RefreshConversationsAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível excluir esta conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private void ClearExecutionDraft()
+    {
+        _pendingPlan = null;
+        _attemptIdempotencyKey = null;
+        _lastFailure = null;
+        _regenerating = false;
+        ClearBranchDraft();
+        _error = null;
+    }
+
+    private void ClearBranchDraft()
+    {
+        _regenerating = false;
+        _editingBranch = false;
+        _branchSourceConversationId = null;
+        _branchMessageId = null;
+        _branchConversationId = null;
+    }
+
+    private string ConversationClass(Guid conversationId) =>
+        conversationId == _conversationId ? "conversation-item active" : "conversation-item";
+
+    private static string ConversationLabel(ConversationSummary conversation) =>
+        string.IsNullOrWhiteSpace(conversation.Title)
+            ? $"SESSÃO_{conversation.Id.ToString("N")[..4].ToUpperInvariant()}"
+            : conversation.Title;
+
+    private static string ConversationPreview(ConversationSummary conversation)
+    {
+        const int maximumLength = 54;
+        var preview = string.IsNullOrWhiteSpace(conversation.Preview)
+            ? "Nova conversa"
+            : conversation.Preview.Trim();
+        return preview.Length <= maximumLength
+            ? preview
+            : $"{preview[..maximumLength]}…";
+    }
+
+    private string DeleteCandidateLabel(Guid conversationId)
+    {
+        var conversation = _conversations
+            .Concat(_archivedConversations)
+            .FirstOrDefault(x => x.Id == conversationId);
+        if (conversation is not null)
+        {
+            return ConversationLabel(conversation);
+        }
+
+        return conversationId == _conversationId
+            ? CurrentConversationLabel
+            : $"SESSÃO_{conversationId.ToString("N")[..4].ToUpperInvariant()}";
     }
 
     private static string RoleLabel(ChatMessageRole role) =>
         role == ChatMessageRole.User ? "VOCÊ" : "atos_AI";
+
+    private static string ContextRoleLabel(AiContextMessage message) =>
+        message.IsSummary
+            ? "RESUMO AUTOMÁTICO"
+            : message.Role == ChatMessageRole.User
+                ? "VOCÊ"
+                : "atos_AI";
 
     private static string? MessageMeta(ChatMessageSnapshot message) =>
         message.Route is null ||
@@ -132,4 +1781,46 @@
         message.ActualCostMinor is null
             ? null
             : $"{message.Route.Provider} // {message.Route.Model} // RESERVADO {Aic.Format(message.EstimatedCostMinor.Value)} // LIQUIDADO {Aic.Format(message.ActualCostMinor.Value)}";
+
+    private bool CanRegenerate(ChatMessageSnapshot message) =>
+        !_working &&
+        message.Role == ChatMessageRole.Assistant &&
+        _messages.LastOrDefault(x => x.Role == ChatMessageRole.Assistant)?.Id == message.Id;
+
+    private static ExecutionFailureState FailureState(Exception exception) =>
+        exception switch
+        {
+            IAiFailureDetails details => new ExecutionFailureState(
+                details.FailureCode,
+                $"{details.UserMessage} A reserva foi liberada e nenhum custo foi capturado.",
+                details.IsRetryable,
+                details.DiagnosticId),
+            TimeoutException => new ExecutionFailureState(
+                "Timeout",
+                "O provider excedeu o tempo limite. A reserva foi liberada e nenhum custo foi capturado.",
+                true,
+                null),
+            AiProviderUnavailableException => new ExecutionFailureState(
+                "CircuitOpen",
+                "O provider está temporariamente protegido após falhas consecutivas. Aguarde alguns segundos.",
+                true,
+                null),
+            _ => new ExecutionFailureState(
+                "ProviderFailure",
+                "A execução falhou. A reserva foi liberada e nenhum custo foi capturado.",
+                true,
+                null)
+        };
+
+    private sealed record ExecutionFailureState(
+        string Code,
+        string Message,
+        bool IsRetryable,
+        string? DiagnosticId);
+
+    public void Dispose()
+    {
+        _executionCancellation?.Cancel();
+        _executionCancellation?.Dispose();
+    }
 }

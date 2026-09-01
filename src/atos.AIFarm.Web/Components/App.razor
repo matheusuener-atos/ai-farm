@@ -10,12 +10,13 @@
     <link rel="stylesheet" href="@Assets["atos.AIFarm.Web.styles.css"]" />
     <meta name="theme-color" content="#000000" />
     <ImportMap />
-    <HeadOutlet @rendermode="InteractiveServer" />
+    <HeadOutlet />
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServer" />
+    <Routes />
     <ReconnectModal />
+    <script src="@Assets["chat.js"]"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 

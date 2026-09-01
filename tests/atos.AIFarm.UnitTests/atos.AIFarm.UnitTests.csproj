@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\atos.AIFarm.Core\atos.AIFarm.Core.csproj" />
+    <ProjectReference Include="..\..\src\atos.AIFarm.Infrastructure\atos.AIFarm.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
