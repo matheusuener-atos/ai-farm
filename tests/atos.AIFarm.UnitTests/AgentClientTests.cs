@@ -47,6 +47,11 @@ public sealed class AgentClientTests
             },
             Convert.ToBase64String(key),
             DateTimeOffset.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => RemoteJobVerifier.Verify(
+            SignedOffer(nodeId, key, new string('0', 64)),
+            configuration,
+            Convert.ToBase64String(key),
+            DateTimeOffset.UtcNow));
     }
 
     [Theory]
@@ -89,7 +94,7 @@ public sealed class AgentClientTests
         Assert.Equal(FarmNodeStatus.Online, result.Status);
         Assert.Equal("Bearer", captured!.Headers.Authorization!.Scheme);
         Assert.Equal("secret-value", captured.Headers.Authorization.Parameter);
-        Assert.Contains("\"agentVersion\":\"atos-agent/0.1.0\"", body);
+        Assert.Contains("\"agentVersion\":\"atos-agent/0.2.0\"", body);
         Assert.Contains("\"acceptJobs\":true", body);
         Assert.Contains("\"maxLogicalProcessors\":1", body);
         Assert.Contains("\"maxMemoryBytes\":268435456", body);
@@ -146,11 +151,14 @@ public sealed class AgentClientTests
         Content = new StringContent(content, Encoding.UTF8, "application/json")
     };
 
-    private static FarmRemoteJobOffer SignedOffer(Guid nodeId, byte[] key)
+    private static FarmRemoteJobOffer SignedOffer(
+        Guid nodeId,
+        byte[] key,
+        string? nodeProfileHash = null)
     {
         var now = DateTimeOffset.UtcNow;
         var manifest = new RemoteJobManifest(
-            "atos-farm-manifest-v2-agent",
+            "atos-farm-manifest-v3-agent-profile",
             Guid.NewGuid(),
             Guid.NewGuid(),
             nodeId,
@@ -165,7 +173,12 @@ public sealed class AgentClientTests
             "DENY_ALL",
             "STANDARD",
             now,
-            now.AddMinutes(5));
+            now.AddMinutes(5),
+            nodeProfileHash ?? FarmNodeProfileFingerprint.Compute(
+                AgentInventory.Heartbeat().Runtime,
+                AgentInventory.Heartbeat().LogicalProcessors,
+                AgentInventory.Heartbeat().MemoryBytes,
+                AgentInventory.Version));
         var payload = JsonSerializer.Serialize(manifest, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower

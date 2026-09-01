@@ -66,7 +66,8 @@ internal sealed record FarmJobManifest(
     string NetworkPolicy,
     string DataClassification,
     DateTimeOffset IssuedAtUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    string? NodeProfileHash = null);
 
 internal sealed record SignedFarmJobManifest(
     FarmJobManifest Manifest,

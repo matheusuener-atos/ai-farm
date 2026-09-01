@@ -64,7 +64,8 @@ internal sealed record RemoteJobManifest(
     string NetworkPolicy,
     string DataClassification,
     DateTimeOffset IssuedAtUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    string? NodeProfileHash = null);
 
 internal static class RemoteJobVerifier
 {
@@ -104,7 +105,12 @@ internal static class RemoteJobVerifier
         var manifest = JsonSerializer.Deserialize<RemoteJobManifest>(offer.ManifestPayload, JsonOptions)
             ?? throw new InvalidOperationException("Manifesto remoto vazio.");
         var local = AgentInventory.Heartbeat(configuration.EffectivePolicy);
-        if (manifest.Version != "atos-farm-manifest-v2-agent" ||
+        var localProfileHash = FarmNodeProfileFingerprint.Compute(
+            local.Runtime,
+            local.LogicalProcessors,
+            local.MemoryBytes,
+            local.AgentVersion);
+        if (manifest.Version != "atos-farm-manifest-v3-agent-profile" ||
             manifest.JobId != offer.JobId ||
             manifest.AttemptId != offer.AttemptId ||
             manifest.NodeId != configuration.NodeId ||
@@ -120,6 +126,7 @@ internal static class RemoteJobVerifier
             manifest.MaxLogicalProcessors > local.MaxLogicalProcessors ||
             manifest.MaxMemoryBytes is <= 0 or > 256L * 1024 * 1024 ||
             manifest.MaxMemoryBytes > local.MaxMemoryBytes ||
+            !string.Equals(manifest.NodeProfileHash, localProfileHash, StringComparison.Ordinal) ||
             manifest.ExpiresAtUtc <= now)
             throw new InvalidOperationException("O manifesto remoto viola a allowlist ou os limites locais.");
         return manifest;
@@ -156,7 +163,7 @@ internal static class AgentDeterministicBenchmark
 
 internal static class AgentInventory
 {
-    public const string Version = "atos-agent/0.1.0";
+    public const string Version = FarmAgentProtocol.CurrentAgentVersion;
     public static int LogicalProcessors => Math.Max(1, Environment.ProcessorCount);
     public static long MemoryBytes => Memory();
 

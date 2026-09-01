@@ -248,6 +248,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint(
                     "CK_farm_nodes_agent_memory_limit",
                     "\"AgentMaxMemoryBytes\" IS NULL OR (\"AgentMaxMemoryBytes\" >= 1 AND \"AgentMaxMemoryBytes\" <= \"MemoryBytes\")");
+                table.HasCheckConstraint(
+                    "CK_farm_nodes_verified_profile",
+                    "(\"VerificationLevel\" = 'Detected' AND \"VerifiedProfileHash\" IS NULL AND \"ProfileVerifiedAtUtc\" IS NULL) OR " +
+                    "(\"VerificationLevel\" = 'Verified' AND \"VerifiedProfileHash\" IS NOT NULL AND length(\"VerifiedProfileHash\") = 64 AND \"ProfileVerifiedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.AccountId).IsUnique();
@@ -258,6 +262,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.ConnectionKind).HasMaxLength(24).HasDefaultValue("Embedded");
             entity.Property(x => x.AgentVersion).HasMaxLength(80);
             entity.Property(x => x.AgentCredentialHash).HasMaxLength(64);
+            entity.Property(x => x.VerifiedProfileHash).HasMaxLength(64);
             entity.Property(x => x.AgentAcceptJobs).HasDefaultValue(true);
             entity.Property(x => x.Runtime).HasMaxLength(500);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
@@ -349,6 +354,8 @@ public sealed class FarmNodeRecord
     public bool AgentAcceptJobs { get; set; } = true;
     public int? AgentMaxLogicalProcessors { get; set; }
     public long? AgentMaxMemoryBytes { get; set; }
+    public string? VerifiedProfileHash { get; set; }
+    public DateTimeOffset? ProfileVerifiedAtUtc { get; set; }
     public string Runtime { get; set; } = string.Empty;
     public int LogicalProcessors { get; set; }
     public long MemoryBytes { get; set; }

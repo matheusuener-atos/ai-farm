@@ -278,6 +278,15 @@ Node online, mas mostra a política local pausada e seus limites efetivos. Esses
 limites são uma política de admissão assinada; isolamento rígido de CPU/memória
 no sistema operacional ainda não faz parte deste runtime experimental.
 
+O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
+versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
+que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto
+remoto v3 congela e assina esse fingerprint. Depois que a evidência
+determinística é aprovada, o perfil recebe data de verificação; qualquer mudança
+em um de seus componentes revoga o selo e volta o Node para `DETECTADO` até um
+novo benchmark. Isso comprova somente a combinação observada que executou o
+workload — não é attestation criptográfica de fabricante, TPM ou GPU.
+
 Com o Agent online, `[ DESPACHAR BENCHMARK ]` cria uma oferta remota. O
 servidor assina o manifesto com uma chave HMAC derivada exclusivamente para o
 Node; o Agent fixa a identidade dessa chave no Windows Credential Manager,
@@ -360,6 +369,7 @@ Implementado:
 - despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
 - cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
 - política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
+- fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

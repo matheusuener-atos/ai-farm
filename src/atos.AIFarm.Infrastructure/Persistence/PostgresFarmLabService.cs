@@ -17,7 +17,8 @@ internal sealed class PostgresFarmLabService(
     private const int BenchmarkTimeoutSeconds = 30;
     private const long BenchmarkMemoryLimitBytes = 256L * 1024 * 1024;
     private const string ManifestVersion = "atos-farm-manifest-v1";
-    internal const string RemoteManifestVersion = "atos-farm-manifest-v2-agent";
+    private const string LegacyRemoteManifestVersion = "atos-farm-manifest-v2-agent";
+    internal const string RemoteManifestVersion = "atos-farm-manifest-v3-agent-profile";
     private const string Workload = "SHA256_CHAIN";
     private const string WorkloadVersion = "atos-sha256-chain-v1";
     private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
@@ -79,6 +80,9 @@ internal sealed class PostgresFarmLabService(
             throw new InvalidOperationException("O Compute Agent está offline; aguarde um heartbeat válido.");
         if (isAgent && !node.AgentAcceptJobs)
             throw new InvalidOperationException("A política local do Compute Agent está pausada.");
+        if (isAgent && node.AgentVersion != FarmAgentProtocol.CurrentAgentVersion)
+            throw new InvalidOperationException(
+                $"Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion} antes de despachar.");
 
         if (await db.FarmJobs.AnyAsync(
                 x => x.AccountId == identity.AccountId &&
@@ -112,7 +116,12 @@ internal sealed class PostgresFarmLabService(
                 NetworkPolicy,
                 DataClassification,
                 now,
-                now.AddMinutes(5)),
+                now.AddMinutes(5),
+                FarmNodeProfileFingerprint.Compute(
+                    node.Runtime,
+                    node.LogicalProcessors,
+                    node.MemoryBytes,
+                    node.AgentVersion)),
             manifestSigning);
         var job = new FarmJobRecord
         {
@@ -190,6 +199,12 @@ internal sealed class PostgresFarmLabService(
             job.ComputeUnitsMilli = 1_000;
             job.FinishedAtUtc = timeProvider.GetUtcNow();
             node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
+            node.VerifiedProfileHash = FarmNodeProfileFingerprint.Compute(
+                node.Runtime,
+                node.LogicalProcessors,
+                node.MemoryBytes,
+                node.AgentVersion);
+            node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
             node.LastSeenAtUtc = job.FinishedAtUtc.Value;
             AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, "1,000 CU verificado; nenhum AIC emitido.");
             await db.SaveChangesAsync(cancellationToken);
@@ -338,7 +353,7 @@ internal sealed class PostgresFarmLabService(
         FarmJobRecord job,
         out FarmJobManifest? manifest)
     {
-        var verification = job.ManifestVersion == RemoteManifestVersion
+        var verification = job.ManifestVersion is RemoteManifestVersion or LegacyRemoteManifestVersion
             ? signingOptions.DeriveForAgent(job.NodeId).Signing
             : signingOptions;
         if (!FarmManifestSecurity.TryVerify(
@@ -349,7 +364,7 @@ internal sealed class PostgresFarmLabService(
                 out manifest) ||
             manifest is null)
             return false;
-        return manifest.Version is ManifestVersion or RemoteManifestVersion &&
+        return manifest.Version is ManifestVersion or RemoteManifestVersion or LegacyRemoteManifestVersion &&
             manifest.JobId == job.Id &&
             manifest.AttemptId == job.AttemptId &&
             manifest.NodeId == job.NodeId &&
@@ -425,7 +440,9 @@ internal sealed class PostgresFarmLabService(
             heartbeatFresh,
             acceptJobs,
             node.AgentMaxLogicalProcessors ?? node.LogicalProcessors,
-            node.AgentMaxMemoryBytes ?? node.MemoryBytes);
+            node.AgentMaxMemoryBytes ?? node.MemoryBytes,
+            node.VerifiedProfileHash,
+            node.ProfileVerifiedAtUtc);
     }
 
     private FarmJobSnapshot ToSnapshot(
@@ -451,7 +468,8 @@ internal sealed class PostgresFarmLabService(
                 manifest.MaxLogicalProcessors,
                 manifest.MaxMemoryBytes,
                 manifest.NetworkPolicy,
-                manifest.DataClassification);
+                manifest.DataClassification,
+                manifest.NodeProfileHash);
         }
 
         return new FarmJobSnapshot(

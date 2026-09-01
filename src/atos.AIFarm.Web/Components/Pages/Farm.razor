@@ -71,7 +71,18 @@ else
             </article>
         </div>
 
-        <p class="farm-runtime">@_dashboard.Node.Runtime</p>
+        <p class="farm-runtime">
+            @_dashboard.Node.Runtime
+            @if (_dashboard.Node.ProfileVerifiedAtUtc is not null &&
+                 _dashboard.Node.VerifiedProfileHash is not null)
+            {
+                <text> // PERFIL @_dashboard.Node.VerifiedProfileHash[..12] // VERIFICADO @_dashboard.Node.ProfileVerifiedAtUtc.Value.ToLocalTime().ToString("dd/MM HH:mm")</text>
+            }
+            else
+            {
+                <text> // PERFIL AGUARDANDO BENCHMARK</text>
+            }
+        </p>
 
         <div class="farm-controls">
             @if (IsOnline && IsEmbedded)
@@ -179,6 +190,7 @@ else
                                 <div><dt>MEMÓRIA MÁX.</dt><dd>@FormatBytes(job.Manifest.MaxMemoryBytes)</dd></div>
                                 <div><dt>REDE</dt><dd>@job.Manifest.NetworkPolicy</dd></div>
                                 <div><dt>DADOS</dt><dd>@job.Manifest.DataClassification</dd></div>
+                                <div><dt>PERFIL DO NODE</dt><dd title="@job.Manifest.NodeProfileHash">@(job.Manifest.NodeProfileHash is null ? "---" : ShortHash(job.Manifest.NodeProfileHash))</dd></div>
                                 <div><dt>MANIFEST DIGEST</dt><dd title="@job.Manifest.Digest">@ShortHash(job.Manifest.Digest)</dd></div>
                                 <div><dt>HMAC-SHA256</dt><dd title="@job.Manifest.Signature">@ShortHash(job.Manifest.Signature)</dd></div>
                             </dl>

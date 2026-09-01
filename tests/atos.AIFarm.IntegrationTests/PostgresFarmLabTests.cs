@@ -42,6 +42,11 @@ public sealed class PostgresFarmLabTests
                 [FarmJobStatus.Queued, FarmJobStatus.Running, FarmJobStatus.Verifying, FarmJobStatus.Completed],
                 completed.Events.Select(x => x.Status).ToArray());
             Assert.Equal(FarmVerificationLevel.Verified, restored.Node.VerificationLevel);
+            Assert.NotNull(restored.Node.ProfileVerifiedAtUtc);
+            Assert.Equal(64, restored.Node.VerifiedProfileHash?.Length);
+            Assert.Equal(
+                restored.Node.VerifiedProfileHash,
+                completed.Manifest.NodeProfileHash);
             Assert.Equal(completed.Id, restored.RecentJobs[0].Id);
         }
         finally
@@ -128,7 +133,7 @@ public sealed class PostgresFarmLabTests
                 ".NET 10 // WINDOWS",
                 8,
                 16L * 1024 * 1024 * 1024,
-                "atos-agent/0.1.0");
+                FarmAgentProtocol.CurrentAgentVersion);
             var linked = await agents.EnrollAsync(enrollment.Token, request);
 
             Assert.NotNull(linked);
@@ -146,7 +151,7 @@ public sealed class PostgresFarmLabTests
             var online = await lab.GetDashboardAsync();
             Assert.Equal(FarmNodeConnectionKind.Agent, online.Node.ConnectionKind);
             Assert.Equal(FarmNodeStatus.Online, online.Node.Status);
-            Assert.Equal("atos-agent/0.1.0", online.Node.AgentVersion);
+            Assert.Equal(FarmAgentProtocol.CurrentAgentVersion, online.Node.AgentVersion);
             Assert.True(online.Node.AcceptJobs);
             Assert.Equal(1, online.Node.AuthorizedLogicalProcessors);
             Assert.Equal(256L * 1024 * 1024, online.Node.AuthorizedMemoryBytes);
@@ -183,6 +188,33 @@ public sealed class PostgresFarmLabTests
             Assert.NotNull(heartbeat);
             Assert.True(heartbeat.AcceptJobs);
 
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime,
+                    8,
+                    request.MemoryBytes,
+                    "atos-agent/0.1.0",
+                    AcceptJobs: true,
+                    MaxLogicalProcessors: 1,
+                    MaxMemoryBytes: 128L * 1024 * 1024));
+            Assert.NotNull(heartbeat);
+            var incompatible = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => lab.RunBenchmarkAsync());
+            Assert.Contains(FarmAgentProtocol.CurrentAgentVersion, incompatible.Message);
+
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime,
+                    8,
+                    request.MemoryBytes,
+                    request.AgentVersion,
+                    AcceptJobs: true,
+                    MaxLogicalProcessors: 1,
+                    MaxMemoryBytes: 128L * 1024 * 1024));
+            Assert.NotNull(heartbeat);
+
             var trust = await agents.GetTrustAsync(linked.Credential);
             Assert.NotNull(trust);
             Assert.Equal("HMAC-SHA256-NODE-V1", trust.Algorithm);
@@ -206,12 +238,34 @@ public sealed class PostgresFarmLabTests
             Assert.NotNull(acknowledgement);
             Assert.True(acknowledgement.Verified);
             Assert.Equal(FarmJobStatus.Completed, acknowledgement.Status);
-            var remote = (await lab.GetDashboardAsync()).RecentJobs.Single(x => x.Id == offered.Id);
+            var verifiedDashboard = await lab.GetDashboardAsync();
+            var remote = verifiedDashboard.RecentJobs.Single(x => x.Id == offered.Id);
+            Assert.Equal(FarmVerificationLevel.Verified, verifiedDashboard.Node.VerificationLevel);
+            Assert.NotNull(verifiedDashboard.Node.ProfileVerifiedAtUtc);
+            Assert.Equal(64, verifiedDashboard.Node.VerifiedProfileHash?.Length);
+            Assert.Equal(verifiedDashboard.Node.VerifiedProfileHash, remote.Manifest?.NodeProfileHash);
             Assert.Equal(
                 [FarmJobStatus.Queued, FarmJobStatus.Offered, FarmJobStatus.Accepted,
                  FarmJobStatus.Running, FarmJobStatus.Uploading, FarmJobStatus.Verifying,
                  FarmJobStatus.Completed],
                 remote.Events.Select(x => x.Status).ToArray());
+
+            heartbeat = await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime + " // UPDATED",
+                    8,
+                    request.MemoryBytes,
+                    request.AgentVersion,
+                    AcceptJobs: true,
+                    MaxLogicalProcessors: 1,
+                    MaxMemoryBytes: 128L * 1024 * 1024));
+            Assert.NotNull(heartbeat);
+            var changedProfile = await lab.GetDashboardAsync();
+            Assert.Equal(FarmVerificationLevel.Detected, changedProfile.Node.VerificationLevel);
+            Assert.Null(changedProfile.Node.VerifiedProfileHash);
+            Assert.Null(changedProfile.Node.ProfileVerifiedAtUtc);
+
             var repeated = await agents.SubmitResultAsync(
                 linked.Credential,
                 claimed.JobId,

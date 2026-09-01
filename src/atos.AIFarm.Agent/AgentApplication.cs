@@ -133,7 +133,7 @@ internal static class AgentApplication
         var interval = Math.Clamp(configuration.HeartbeatIntervalSeconds, 10, 300);
         Write(
             "START",
-            $"Node {configuration.NodeId} // {configuration.BaseUrl} // {PolicyLabel(configuration.EffectivePolicy)} // Ctrl+C para parar.");
+            $"Node {configuration.NodeId} // {configuration.BaseUrl} // {ProfileLabel()} // {PolicyLabel(configuration.EffectivePolicy)} // Ctrl+C para parar.");
         while (!cancellation.Source.IsCancellationRequested)
         {
             try
@@ -336,7 +336,7 @@ internal static class AgentApplication
         var policy = configuration.EffectivePolicy;
         Write(
             "STATUS",
-            $"NODE={configuration.NodeId} // SERVER={configuration.BaseUrl} // CREDENTIAL={(credential is null ? "AUSENTE" : "SEGURA")} // {PolicyLabel(policy)}");
+            $"NODE={configuration.NodeId} // SERVER={configuration.BaseUrl} // CREDENTIAL={(credential is null ? "AUSENTE" : "SEGURA")} // {ProfileLabel()} // {PolicyLabel(policy)}");
         return credential is null ? 1 : 0;
     }
 
@@ -443,6 +443,17 @@ internal static class AgentApplication
 
     private static string PolicyLabel(AgentLocalPolicy policy) =>
         $"ACCEPT_JOBS={policy.AcceptJobs} // CPU_MAX={policy.MaxLogicalProcessors} // MEMORY_MAX={policy.MaxMemoryBytes / 1024 / 1024}MB";
+
+    private static string ProfileLabel()
+    {
+        var inventory = AgentInventory.Heartbeat();
+        var fingerprint = FarmNodeProfileFingerprint.Compute(
+            inventory.Runtime,
+            inventory.LogicalProcessors,
+            inventory.MemoryBytes,
+            inventory.AgentVersion);
+        return $"PROFILE={fingerprint[..12]}";
+    }
 
     private static CancellationRegistration CreateCancellation() => new();
 

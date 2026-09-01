@@ -826,6 +826,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<DateTimeOffset?>("ProfileVerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Runtime")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -840,6 +843,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(24)
                         .HasColumnType("character varying(24)");
+
+                    b.Property<string>("VerifiedProfileHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.HasKey("Id");
 
@@ -860,6 +867,8 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");
 
                             t.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
+
+                            t.HasCheckConstraint("CK_farm_nodes_verified_profile", "(\"VerificationLevel\" = 'Detected' AND \"VerifiedProfileHash\" IS NULL AND \"ProfileVerifiedAtUtc\" IS NULL) OR (\"VerificationLevel\" = 'Verified' AND \"VerifiedProfileHash\" IS NOT NULL AND length(\"VerifiedProfileHash\") = 64 AND \"ProfileVerifiedAtUtc\" IS NOT NULL)");
                         });
                 });
 

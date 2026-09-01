@@ -100,6 +100,8 @@ internal sealed class PostgresFarmAgentService(
         node.ConnectionKind = FarmNodeConnectionKind.Agent.ToString();
         node.Status = FarmNodeStatus.Online.ToString();
         node.VerificationLevel = FarmVerificationLevel.Detected.ToString();
+        node.VerifiedProfileHash = null;
+        node.ProfileVerifiedAtUtc = null;
         node.LastSeenAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -122,6 +124,20 @@ internal sealed class PostgresFarmAgentService(
         if (node is null) return null;
 
         var now = timeProvider.GetUtcNow();
+        var observedProfileHash = FarmNodeProfileFingerprint.Compute(
+            normalized.Runtime,
+            normalized.LogicalProcessors,
+            normalized.MemoryBytes,
+            normalized.AgentVersion);
+        if (!string.Equals(
+                node.VerifiedProfileHash,
+                observedProfileHash,
+                StringComparison.Ordinal))
+        {
+            node.VerificationLevel = FarmVerificationLevel.Detected.ToString();
+            node.VerifiedProfileHash = null;
+            node.ProfileVerifiedAtUtc = null;
+        }
         node.Runtime = normalized.Runtime;
         node.LogicalProcessors = normalized.LogicalProcessors;
         node.MemoryBytes = normalized.MemoryBytes;
@@ -373,6 +389,20 @@ internal sealed class PostgresFarmAgentService(
                 "A evidência excedeu o timeout assinado do Job.",
                 cancellationToken);
         }
+        var observedProfileHash = FarmNodeProfileFingerprint.Compute(
+            node.Runtime,
+            node.LogicalProcessors,
+            node.MemoryBytes,
+            node.AgentVersion);
+        if (!string.Equals(manifest.NodeProfileHash, observedProfileHash, StringComparison.Ordinal))
+        {
+            return await TerminateAndAcknowledgeAsync(
+                db,
+                existing.Id,
+                FarmJobStatus.Rejected,
+                "O perfil observado do Node não corresponde ao perfil assinado no manifesto.",
+                cancellationToken);
+        }
 
         var claimed = await db.FarmJobs
             .Where(x => x.Id == jobId && x.NodeId == node.Id &&
@@ -431,6 +461,8 @@ internal sealed class PostgresFarmAgentService(
             job.Status = FarmJobStatus.Completed.ToString();
             job.ComputeUnitsMilli = 1_000;
             node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
+            node.VerifiedProfileHash = manifest.NodeProfileHash;
+            node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
             await AddJobEventAsync(
                 db,
                 job,
@@ -508,7 +540,8 @@ internal sealed class PostgresFarmAgentService(
             manifest.Iterations == 100_000 &&
             manifest.TimeoutSeconds == 30 &&
             manifest.MaxLogicalProcessors == 1 &&
-            manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024;
+            manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024 &&
+            manifest.NodeProfileHash is { Length: 64 };
     }
 
     private async Task AddJobEventAsync(

@@ -94,6 +94,7 @@ public sealed class PostgresWalletConcurrencyTests
             {
                 await firstProvider.InitializeAIFarmAsync();
                 var wallet = firstProvider.GetRequiredService<IWalletService>();
+                clock.Advance(TimeSpan.FromTicks(1));
                 reservation = await wallet.ReservePromotionalAsync(
                     Guid.NewGuid(),
                     Aic.FromAic(800),

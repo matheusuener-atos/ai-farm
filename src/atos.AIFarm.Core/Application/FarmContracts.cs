@@ -19,6 +19,11 @@ public enum FarmJobStatus
 public enum FarmNodeConnectionKind { Embedded, Agent }
 public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
+public static class FarmAgentProtocol
+{
+    public const string CurrentAgentVersion = "atos-agent/0.2.0";
+}
+
 public sealed record FarmNodeSnapshot(
     Guid Id,
     string Name,
@@ -33,7 +38,9 @@ public sealed record FarmNodeSnapshot(
     bool IsHeartbeatFresh,
     bool AcceptJobs,
     int AuthorizedLogicalProcessors,
-    long AuthorizedMemoryBytes);
+    long AuthorizedMemoryBytes,
+    string? VerifiedProfileHash,
+    DateTimeOffset? ProfileVerifiedAtUtc);
 
 public sealed record FarmAgentEnrollment(
     Guid Id,
@@ -114,7 +121,8 @@ public sealed record FarmJobManifestSnapshot(
     int MaxLogicalProcessors,
     long MaxMemoryBytes,
     string NetworkPolicy,
-    string DataClassification);
+    string DataClassification,
+    string? NodeProfileHash);
 
 public sealed record FarmJobSnapshot(
     Guid Id,
