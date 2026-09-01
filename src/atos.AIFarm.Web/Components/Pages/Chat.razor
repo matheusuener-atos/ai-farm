@@ -34,6 +34,34 @@
                 </button>
             }
         </div>
+        <button type="button"
+                class="archive-toggle"
+                @onclick="ToggleArchivedAsync"
+                disabled="@_working">
+            @(_showArchived ? "[ OCULTAR ARQUIVADAS ]" : "[ VER ARQUIVADAS ]")
+        </button>
+        @if (_showArchived)
+        {
+            <div class="archived-list" aria-label="Conversas arquivadas">
+                @if (_archivedConversations.Count == 0)
+                {
+                    <p class="muted">NENHUMA CONVERSA ARQUIVADA</p>
+                }
+                @foreach (var conversation in _archivedConversations)
+                {
+                    <article class="archived-item">
+                        <strong>@ConversationLabel(conversation)</strong>
+                        <span>@ConversationPreview(conversation)</span>
+                        <small>@conversation.MessageCount MSG</small>
+                        <button type="button"
+                                @onclick="() => RestoreConversationAsync(conversation.Id)"
+                                disabled="@_working">
+                            [ RESTAURAR ]
+                        </button>
+                    </article>
+                }
+            </div>
+        }
     </aside>
 
     <section class="terminal chat-terminal" aria-label="Conversa com IA">
@@ -138,10 +166,12 @@
 
     private readonly List<ChatMessageSnapshot> _messages = [];
     private readonly List<ConversationSummary> _conversations = [];
+    private readonly List<ConversationSummary> _archivedConversations = [];
     private Guid _conversationId;
     private string _prompt = string.Empty;
     private string? _error;
     private bool _working;
+    private bool _showArchived;
     private WalletSnapshot? _snapshot;
     private ChatExecutionPlan? _pendingPlan;
 
@@ -284,6 +314,28 @@
     {
         _conversations.Clear();
         _conversations.AddRange(await ChatStore.ListConversationsAsync());
+        if (_showArchived)
+        {
+            _archivedConversations.Clear();
+            _archivedConversations.AddRange(
+                await ChatStore.ListArchivedConversationsAsync());
+        }
+    }
+
+    private async Task ToggleArchivedAsync()
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _showArchived = !_showArchived;
+        _archivedConversations.Clear();
+        if (_showArchived)
+        {
+            _archivedConversations.AddRange(
+                await ChatStore.ListArchivedConversationsAsync());
+        }
     }
 
     private async Task CreateConversationAsync()
@@ -335,6 +387,35 @@
         catch (Exception)
         {
             _error = "Não foi possível arquivar esta conversa.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task RestoreConversationAsync(Guid conversationId)
+    {
+        if (_working)
+        {
+            return;
+        }
+
+        _working = true;
+        _error = null;
+        try
+        {
+            if (!await ChatStore.RestoreConversationAsync(conversationId))
+            {
+                _error = "Não foi possível restaurar esta conversa.";
+                return;
+            }
+
+            Navigation.NavigateTo($"/chat/{conversationId}");
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível restaurar esta conversa.";
         }
         finally
         {

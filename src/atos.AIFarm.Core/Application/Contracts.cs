@@ -90,12 +90,17 @@ public interface IChatStore
 {
     Task<IReadOnlyList<ConversationSummary>> ListConversationsAsync(
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ConversationSummary>> ListArchivedConversationsAsync(
+        CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> CreateConversationAsync(
         CancellationToken cancellationToken = default);
     Task<ConversationSnapshot?> GetConversationAsync(
         Guid conversationId,
         CancellationToken cancellationToken = default);
     Task<bool> ArchiveConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
+    Task<bool> RestoreConversationAsync(
         Guid conversationId,
         CancellationToken cancellationToken = default);
     Task<ConversationSnapshot> GetOrCreateCurrentConversationAsync(

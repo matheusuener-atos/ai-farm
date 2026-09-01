@@ -189,6 +189,16 @@ public sealed class ChatWorkflowTests
         Assert.False(await chat.ArchiveConversationAsync(first.Id));
         Assert.Null(await chat.GetConversationAsync(first.Id));
         Assert.Equal(second.Id, Assert.Single(await chat.ListConversationsAsync()).Id);
+        var archivedSummary = Assert.Single(
+            await chat.ListArchivedConversationsAsync());
+        Assert.Equal(first.Id, archivedSummary.Id);
+        Assert.Equal(2, archivedSummary.MessageCount);
+
+        Assert.True(await chat.RestoreConversationAsync(first.Id));
+        Assert.False(await chat.RestoreConversationAsync(first.Id));
+        Assert.Empty(await chat.ListArchivedConversationsAsync());
+        Assert.Equal(2, (await chat.GetConversationAsync(first.Id))?.Messages.Count);
+        Assert.Equal(2, (await chat.ListConversationsAsync()).Count);
     }
 
     [Fact]

@@ -53,12 +53,26 @@ public sealed class PostgresAccountIsolationTests
             var archivedLookup = await firstStore.GetConversationAsync(firstConversation.Id);
             var firstSummaries = await firstStore.ListConversationsAsync();
             var secondSummaries = await secondStore.ListConversationsAsync();
+            var firstArchivedSummaries =
+                await firstStore.ListArchivedConversationsAsync();
+            var secondArchivedSummaries =
+                await secondStore.ListArchivedConversationsAsync();
             var firstFactory = first.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
             await using var verificationDb = await firstFactory.CreateDbContextAsync();
             var archivedRecord = await verificationDb.Conversations
                 .SingleAsync(x => x.Id == firstConversation.Id);
+            var archivedStatus = archivedRecord.Status;
             var preservedMessageCount = await verificationDb.Messages
                 .CountAsync(x => x.ConversationId == firstConversation.Id);
+            var crossAccountRestore = await secondStore.RestoreConversationAsync(
+                firstConversation.Id);
+            var restored = await firstStore.RestoreConversationAsync(firstConversation.Id);
+            var restoredConversation = await firstStore.GetConversationAsync(
+                firstConversation.Id);
+            var activeAfterRestore = await firstStore.ListConversationsAsync();
+            var archivedAfterRestore =
+                await firstStore.ListArchivedConversationsAsync();
+            await verificationDb.Entry(archivedRecord).ReloadAsync();
 
             Assert.Equal(Aic.FromAic(988), firstWallet.Balance.AvailableMinor);
             Assert.Equal(Aic.FromAic(1_000), secondWallet.Balance.AvailableMinor);
@@ -69,10 +83,18 @@ public sealed class PostgresAccountIsolationTests
             Assert.False(crossAccountArchive);
             Assert.True(archived);
             Assert.Null(archivedLookup);
-            Assert.Equal("Archived", archivedRecord.Status);
+            Assert.Equal("Archived", archivedStatus);
             Assert.Equal(2, preservedMessageCount);
             Assert.Equal(additionalFirstConversation.Id, Assert.Single(firstSummaries).Id);
             Assert.Single(secondSummaries);
+            Assert.Equal(firstConversation.Id, Assert.Single(firstArchivedSummaries).Id);
+            Assert.Empty(secondArchivedSummaries);
+            Assert.False(crossAccountRestore);
+            Assert.True(restored);
+            Assert.Equal(2, restoredConversation?.Messages.Count);
+            Assert.Equal("Active", archivedRecord.Status);
+            Assert.Equal(2, activeAfterRestore.Count);
+            Assert.Empty(archivedAfterRestore);
             Assert.DoesNotContain(
                 secondSummaries,
                 conversation => conversation.Id == additionalFirstConversation.Id);

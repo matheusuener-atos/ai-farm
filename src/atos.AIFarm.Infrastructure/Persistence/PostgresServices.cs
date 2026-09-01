@@ -424,6 +424,27 @@ public sealed class PostgresChatStore(
             .ToArrayAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<ConversationSummary>> ListArchivedConversationsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        return await db.Conversations
+            .Where(x => x.AccountId == identity.AccountId && x.Status == "Archived")
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => new ConversationSummary(
+                x.Id,
+                x.CreatedAtUtc,
+                x.UpdatedAtUtc,
+                db.Messages.Count(message => message.ConversationId == x.Id),
+                db.Messages
+                    .Where(message => message.ConversationId == x.Id)
+                    .OrderByDescending(message => message.CreatedAtUtc)
+                    .Select(message => message.Content)
+                    .FirstOrDefault()))
+            .ToArrayAsync(cancellationToken);
+    }
+
     public async Task<ConversationSnapshot> CreateConversationAsync(
         CancellationToken cancellationToken = default)
     {
@@ -476,6 +497,28 @@ public sealed class PostgresChatStore(
         }
 
         conversation.Status = "Archived";
+        conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> RestoreConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var conversation = await db.Conversations.SingleOrDefaultAsync(
+            x => x.Id == conversationId &&
+                 x.AccountId == identity.AccountId &&
+                 x.Status == "Archived",
+            cancellationToken);
+        if (conversation is null)
+        {
+            return false;
+        }
+
+        conversation.Status = "Active";
         conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         return true;

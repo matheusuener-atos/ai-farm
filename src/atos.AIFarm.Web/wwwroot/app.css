@@ -66,6 +66,15 @@ h1 span { color: var(--purple); }
 .conversation-item strong { color: var(--purple-bright); font-size: .76rem; }
 .conversation-item span { min-width: 0; overflow: hidden; color: var(--white); font-size: .72rem; line-height: 1.4; }
 .conversation-item small { color: var(--muted); font-size: .62rem; }
+.archive-toggle { width: 100%; border: 0; border-top: 1px solid #494946; color: var(--amber-bright); background: var(--amber-deep); font-size: .68rem; }
+.archive-toggle:hover { color: var(--black); background: var(--amber); }
+.archived-list { display: grid; border-top: 1px solid #494946; }
+.archived-list > .muted { margin: 0; padding: 1rem; text-align: center; }
+.archived-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem .7rem; padding: .9rem; border-bottom: 1px solid #292927; }
+.archived-item strong { color: var(--amber-bright); font-size: .72rem; }
+.archived-item span { grid-column: 1 / -1; overflow: hidden; color: var(--white); font-size: .68rem; }
+.archived-item small { color: var(--muted); font-size: .62rem; }
+.archived-item button { grid-column: 2; grid-row: 1; padding: .3rem .45rem; font-size: .62rem; }
 .chat-terminal { min-height: 560px; display: flex; flex-direction: column; }
 .empty-state { margin: auto; padding: 3rem 1rem; text-align: center; max-width: 700px; line-height: 1.7; }
 .message { padding: 1.3rem; border-bottom: 1px solid #292927; display: grid; grid-template-columns: 100px 1fr; gap: .8rem; }

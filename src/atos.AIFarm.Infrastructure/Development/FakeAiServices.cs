@@ -52,6 +52,25 @@ public sealed class InMemoryChatStore : IChatStore
         }
     }
 
+    public Task<IReadOnlyList<ConversationSummary>> ListArchivedConversationsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            IReadOnlyList<ConversationSummary> summaries = _conversations.Values
+                .Where(x => x.IsArchived)
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => new ConversationSummary(
+                    x.Id,
+                    x.CreatedAtUtc,
+                    x.UpdatedAtUtc,
+                    x.Messages.Count,
+                    x.Messages.LastOrDefault()?.Content))
+                .ToArray();
+            return Task.FromResult(summaries);
+        }
+    }
+
     public Task<ConversationSnapshot> CreateConversationAsync(
         CancellationToken cancellationToken = default)
     {
@@ -91,6 +110,24 @@ public sealed class InMemoryChatStore : IChatStore
             }
 
             conversation.IsArchived = true;
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> RestoreConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_conversations.TryGetValue(conversationId, out var conversation)
+                || !conversation.IsArchived)
+            {
+                return Task.FromResult(false);
+            }
+
+            conversation.IsArchived = false;
             conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
             return Task.FromResult(true);
         }
