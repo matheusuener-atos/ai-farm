@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.5.0";
+    public const string CurrentAgentVersion = "atos-agent/0.6.0";
 }
 
 public static class FarmWorkerEnforcement
@@ -194,6 +194,9 @@ public interface IFarmLabService
     Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default);
     Task<FarmDashboard> SetNodeStatusAsync(FarmNodeStatus status, CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
+    Task<FarmJobSnapshot> RunWorkloadAsync(
+        string workloadId,
+        CancellationToken cancellationToken = default);
     Task<FarmDashboard> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
         Guid jobId,

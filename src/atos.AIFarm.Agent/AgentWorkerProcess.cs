@@ -1,12 +1,14 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
+using atos.AIFarm.Core.Application;
 
 namespace atos.AIFarm.Agent;
 
 internal sealed record AgentWorkerRequest(
     string Protocol,
     string Workload,
+    string WorkloadVersion,
     string Nonce,
     int Iterations);
 
@@ -22,7 +24,7 @@ internal sealed record AgentWorkerLaunch(string FileName, IReadOnlyList<string> 
 
 internal static class AgentWorkerProtocol
 {
-    public const string Version = "atos-worker-ipc-v1";
+    public const string Version = "atos-worker-ipc-v2";
     public const string Workload = "SHA256_CHAIN";
     public const int Iterations = 100_000;
     public const int MaximumMessageCharacters = 4_096;
@@ -45,9 +47,10 @@ internal static class AgentWorkerHost
                 payload,
                 AgentWorkerProtocol.JsonOptions) ?? throw new InvalidOperationException(
                 "A solicitação do worker está vazia.");
-            Validate(request);
+            var definition = Validate(request);
             var stopwatch = Stopwatch.StartNew();
-            var digest = AgentDeterministicBenchmark.Compute(
+            var digest = FarmDeterministicWorkloads.Compute(
+                definition.Workload,
                 request.Nonce,
                 request.Iterations,
                 cancellationToken);
@@ -92,11 +95,12 @@ internal static class AgentWorkerHost
         return new string(buffer, 0, length);
     }
 
-    private static void Validate(AgentWorkerRequest request)
+    private static FarmWorkloadDefinition Validate(AgentWorkerRequest request)
     {
+        var definition = FarmWorkloadCatalog.Find(request.Workload, request.WorkloadVersion);
         if (request.Protocol != AgentWorkerProtocol.Version ||
-            request.Workload != AgentWorkerProtocol.Workload ||
-            request.Iterations != AgentWorkerProtocol.Iterations)
+            definition is null ||
+            request.Iterations != definition.Iterations)
             throw new InvalidOperationException("A solicitação viola a allowlist do worker.");
         byte[] nonce;
         try { nonce = Convert.FromHexString(request.Nonce); }
@@ -106,6 +110,7 @@ internal static class AgentWorkerHost
         }
         if (nonce.Length != 16)
             throw new InvalidOperationException("O nonce do worker deve possuir 128 bits.");
+        return definition;
     }
 }
 
@@ -117,8 +122,8 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
         RemoteJobManifest manifest,
         CancellationToken cancellationToken)
     {
-        if (manifest.Workload != AgentWorkerProtocol.Workload ||
-            manifest.Iterations != AgentWorkerProtocol.Iterations)
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
+        if (definition is null || manifest.Iterations != definition.Iterations)
             throw new InvalidOperationException("O manifesto não pertence à allowlist do worker.");
 
         using var process = new Process
@@ -140,6 +145,7 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
             var request = new AgentWorkerRequest(
                 AgentWorkerProtocol.Version,
                 manifest.Workload,
+                manifest.WorkloadVersion,
                 manifest.Nonce,
                 manifest.Iterations);
             var payload = JsonSerializer.Serialize(

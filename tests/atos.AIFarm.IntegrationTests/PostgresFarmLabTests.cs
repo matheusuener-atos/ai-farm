@@ -55,6 +55,15 @@ public sealed class PostgresFarmLabTests
                 restored.Node.VerifiedProfileHash,
                 completed.Manifest.NodeProfileHash);
             Assert.Equal(completed.Id, restored.RecentJobs[0].Id);
+
+            var merkle = await lab.RunWorkloadAsync("merkle-root-sha256-v1");
+            Assert.Equal(FarmJobStatus.Completed, merkle.Status);
+            Assert.Equal("MERKLE_ROOT_SHA256", merkle.Workload);
+            Assert.Equal("atos-merkle-root-sha256-v1", merkle.WorkloadVersion);
+            Assert.Equal(4_096, merkle.Manifest?.Iterations);
+            Assert.Equal(1_000, merkle.ComputeUnitsMilli);
+            Assert.Equal(64, merkle.ResultDigest?.Length);
+            Assert.True(merkle.Evidence?.IsValid);
         }
         finally
         {
@@ -266,6 +275,30 @@ public sealed class PostgresFarmLabTests
                  FarmJobStatus.Running, FarmJobStatus.Uploading, FarmJobStatus.Verifying,
                  FarmJobStatus.Completed],
                 remote.Events.Select(x => x.Status).ToArray());
+
+            var merkleOffer = await lab.RunWorkloadAsync("merkle-root-sha256-v1");
+            var merkleClaim = Assert.IsType<FarmRemoteJobOffer>(
+                await agents.ClaimJobAsync(linked.Credential));
+            Assert.True(FarmManifestSecurity.TryVerify(
+                merkleClaim.ManifestPayload,
+                merkleClaim.ManifestDigest,
+                merkleClaim.ManifestSignature,
+                new FarmManifestSigningOptions(trust.VerificationKey),
+                out var merkleManifest));
+            Assert.NotNull(merkleManifest);
+            Assert.Equal("MERKLE_ROOT_SHA256", merkleManifest.Workload);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, merkleClaim.JobId));
+            var merkleDigest = FarmDeterministicWorkloads.Compute(
+                merkleManifest.Workload,
+                merkleManifest.Nonce,
+                merkleManifest.Iterations);
+            var merkleAcknowledgement = await agents.SubmitResultAsync(
+                linked.Credential,
+                merkleClaim.JobId,
+                RemoteResult(merkleDigest, 10));
+            Assert.Equal(merkleOffer.Id, merkleAcknowledgement?.JobId);
+            Assert.True(merkleAcknowledgement?.Verified);
+            Assert.Equal(1_000, merkleAcknowledgement?.ComputeUnitsMilli);
 
             heartbeat = await agents.HeartbeatAsync(
                 linked.Credential,

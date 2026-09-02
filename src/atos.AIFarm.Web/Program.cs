@@ -465,6 +465,12 @@ personalApi.MapGet("/farm/analytics", async (
     }
 }).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
+personalApi.MapGet("/farm/workloads", () => Results.Ok(new
+{
+    catalogVersion = FarmWorkloadCatalog.Version,
+    workloads = FarmWorkloadCatalog.Definitions
+})).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
 personalApi.MapGet("/incidents", async (
     string? search,
     string? severity,

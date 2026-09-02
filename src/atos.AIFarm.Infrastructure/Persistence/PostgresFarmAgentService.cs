@@ -17,9 +17,6 @@ internal sealed class PostgresFarmAgentService(
     internal static readonly TimeSpan AgentLeaseLifetime = TimeSpan.FromSeconds(10);
     internal static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
     private const string SignatureAlgorithm = "HMAC-SHA256-NODE-V1";
-    private const string Workload = "SHA256_CHAIN";
-    private const string WorkloadVersion = "atos-sha256-chain-v1";
-    private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
 
     public async Task<FarmAgentEnrollment> CreateEnrollmentAsync(
         CancellationToken cancellationToken = default)
@@ -495,8 +492,11 @@ internal sealed class PostgresFarmAgentService(
             cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion)
+            ?? throw new InvalidOperationException("O workload remoto não pertence ao catálogo autorizado.");
         var expected = await Task.Run(
-            () => DeterministicBenchmark.Compute(
+            () => FarmDeterministicWorkloads.Compute(
+                manifest.Workload,
                 manifest.Nonce,
                 manifest.Iterations,
                 cancellationToken),
@@ -520,7 +520,7 @@ internal sealed class PostgresFarmAgentService(
         else
         {
             job.Status = FarmJobStatus.Completed.ToString();
-            job.ComputeUnitsMilli = 1_000;
+            job.ComputeUnitsMilli = definition.ProcessingPointsMilli;
             node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
             node.VerifiedProfileHash = manifest.NodeProfileHash;
             node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
@@ -528,7 +528,7 @@ internal sealed class PostgresFarmAgentService(
                 db,
                 job,
                 FarmJobStatus.Completed,
-                "1,000 CP remoto verificado; nenhum AIC emitido.",
+                $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; nenhum AIC emitido.",
                 cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
@@ -591,22 +591,24 @@ internal sealed class PostgresFarmAgentService(
                 key.Signing,
                 out manifest) || manifest is null)
             return false;
-        return manifest.Version == PostgresFarmLabService.RemoteManifestVersion &&
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
+        return definition is not null &&
+            manifest.Version == PostgresFarmLabService.RemoteManifestVersion &&
             manifest.JobId == job.Id &&
             manifest.AttemptId == job.AttemptId &&
             manifest.NodeId == job.NodeId &&
-            manifest.Workload == Workload &&
-            manifest.WorkloadVersion == WorkloadVersion &&
-            manifest.VerificationPolicy == VerificationPolicy &&
+            manifest.Workload == job.Workload &&
+            manifest.WorkloadVersion == job.WorkloadVersion &&
+            manifest.VerificationPolicy == definition.VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
             SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
             SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc) &&
-            manifest.NetworkPolicy == "DENY_ALL" &&
-            manifest.DataClassification == "STANDARD" &&
-            manifest.Iterations == 100_000 &&
-            manifest.TimeoutSeconds == 30 &&
-            manifest.MaxLogicalProcessors == 1 &&
-            manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024 &&
+            manifest.NetworkPolicy == definition.NetworkPolicy &&
+            manifest.DataClassification == definition.DataClassification &&
+            manifest.Iterations == definition.Iterations &&
+            manifest.TimeoutSeconds == definition.TimeoutSeconds &&
+            manifest.MaxLogicalProcessors == definition.MaxLogicalProcessors &&
+            manifest.MaxMemoryBytes > 0 && manifest.MaxMemoryBytes <= definition.MaxMemoryBytes &&
             manifest.NodeProfileHash is { Length: 64 };
     }
 

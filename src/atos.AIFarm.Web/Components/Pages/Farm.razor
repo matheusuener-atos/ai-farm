@@ -10,7 +10,7 @@
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/COMPUTE_LAB</p>
     <h1>COMPUTE CONTROLADO</h1>
-    <p>Benchmark determinístico em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
+    <p>Workloads determinísticos em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
     <a class="farm-economics-link" href="/farm/economy">[ SIMULAR ECONOMIA → ]</a>
     <a class="farm-economics-link" href="/saldo-farm">[ VER SALDO DA FARM → ]</a>
 </div>
@@ -28,6 +28,25 @@
 }
 else
 {
+    <section class="terminal farm-workload-catalog">
+        <div class="terminal-title">CATÁLOGO DE WORKLOADS // @FarmWorkloadCatalog.Version</div>
+        <div class="farm-workload-grid">
+            @foreach (var workload in FarmWorkloadCatalog.Definitions)
+            {
+                <label class="farm-workload-card @(workload.Id == _selectedWorkloadId ? "selected" : null)">
+                    <input type="radio" name="farm-workload" value="@workload.Id"
+                           checked="@(workload.Id == _selectedWorkloadId)"
+                           @onchange="() => _selectedWorkloadId = workload.Id"
+                           disabled="@_working" />
+                    <span>@workload.DisplayName</span>
+                    <strong>@workload.Version</strong>
+                    <small>@workload.Description</small>
+                    <small>@workload.Iterations.ToString("N0") UNIDADES // @FormatCp(workload.ProcessingPointsMilli) // @workload.NetworkPolicy</small>
+                </label>
+            }
+        </div>
+    </section>
+
     <section class="farm-node-panel">
         <header class="farm-node-header">
             <div>
@@ -83,7 +102,7 @@ else
             }
             else
             {
-                <text> // PERFIL AGUARDANDO BENCHMARK</text>
+                <text> // PERFIL AGUARDANDO EXECUÇÃO VERIFICADA</text>
             }
         </p>
 
@@ -91,15 +110,15 @@ else
             @if (IsOnline && IsEmbedded)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR NODE ]</button>
-                <button type="button" @onclick="RunBenchmarkAsync" disabled="@_working">
-                    @(_working ? "[ EXECUTANDO... ]" : "[ EXECUTAR BENCHMARK ]")
+                <button type="button" @onclick="RunWorkloadAsync" disabled="@_working">
+                    @(_working ? "[ EXECUTANDO... ]" : $"[ EXECUTAR {SelectedWorkload.DisplayName} ]")
                 </button>
             }
             else if (IsOnline)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
-                <button type="button" @onclick="RunBenchmarkAsync" disabled="@(_working || !CanAcceptJobs)">
-                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : "[ DESPACHAR BENCHMARK ]")
+                <button type="button" @onclick="RunWorkloadAsync" disabled="@(_working || !CanAcceptJobs)">
+                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : $"[ DESPACHAR {SelectedWorkload.DisplayName} ]")
                 </button>
             }
             else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
@@ -111,7 +130,7 @@ else
                 <button type="button" disabled>[ AGUARDANDO HEARTBEAT ]</button>
             }
         </div>
-        <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // LIMITES LOCAIS // SEM SHELL // SEM REDE // SEM AIC</small>
+        <small class="classification-note">ALLOWLIST // @SelectedWorkload.Workload // @SelectedWorkload.VerificationPolicy // SEM SHELL // SEM REDE // SEM AIC</small>
     </section>
 
     <section class="terminal farm-agent-panel">
@@ -119,7 +138,7 @@ else
         <p>
             @if (IsEmbedded)
             {
-                <text>Modo EMBEDDED: o benchmark roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
+                <text>Modo EMBEDDED: o workload roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
             }
             else
             {
@@ -264,11 +283,13 @@ else
     private bool _working;
     private string? _error;
     private FarmAgentEnrollment? _enrollment;
+    private string _selectedWorkloadId = FarmWorkloadCatalog.DefaultId;
     private readonly CancellationTokenSource _pollCancellation = new();
     private Task? _pollTask;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
     private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
     private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
+    private FarmWorkloadDefinition SelectedWorkload => FarmWorkloadCatalog.GetRequired(_selectedWorkloadId);
 
     protected override async Task OnInitializedAsync()
     {
@@ -293,14 +314,14 @@ else
         finally { _working = false; }
     }
 
-    private async Task RunBenchmarkAsync()
+    private async Task RunWorkloadAsync()
     {
         if (_working || !IsOnline) return;
         _working = true;
         _error = null;
         try
         {
-            await FarmLab.RunBenchmarkAsync();
+            await FarmLab.RunWorkloadAsync(_selectedWorkloadId);
             _dashboard = await FarmLab.GetDashboardAsync();
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)

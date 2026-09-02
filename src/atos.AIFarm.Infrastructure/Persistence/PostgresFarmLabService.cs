@@ -13,17 +13,9 @@ internal sealed class PostgresFarmLabService(
     TimeProvider timeProvider,
     FarmManifestSigningOptions signingOptions) : IFarmLabService
 {
-    private const int BenchmarkIterations = 100_000;
-    private const int BenchmarkTimeoutSeconds = 30;
-    private const long BenchmarkMemoryLimitBytes = 256L * 1024 * 1024;
     private const string ManifestVersion = "atos-farm-manifest-v1";
     private const string LegacyRemoteManifestVersion = "atos-farm-manifest-v2-agent";
     internal const string RemoteManifestVersion = "atos-farm-manifest-v3-agent-profile";
-    private const string Workload = "SHA256_CHAIN";
-    private const string WorkloadVersion = "atos-sha256-chain-v1";
-    private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
-    private const string NetworkPolicy = "DENY_ALL";
-    private const string DataClassification = "STANDARD";
     private static readonly TimeSpan AgentHeartbeatTolerance = TimeSpan.FromSeconds(90);
 
     public async Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)
@@ -62,8 +54,14 @@ internal sealed class PostgresFarmLabService(
         return await BuildDashboardAsync(db, node, cancellationToken);
     }
 
-    public async Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default)
+    public Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default) =>
+        RunWorkloadAsync(FarmWorkloadCatalog.DefaultId, cancellationToken);
+
+    public async Task<FarmJobSnapshot> RunWorkloadAsync(
+        string workloadId,
+        CancellationToken cancellationToken = default)
     {
+        var definition = FarmWorkloadCatalog.GetRequired(workloadId);
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
@@ -75,7 +73,7 @@ internal sealed class PostgresFarmLabService(
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
         if (!Enum.TryParse<FarmNodeStatus>(node.Status, out var nodeStatus) ||
             nodeStatus != FarmNodeStatus.Online)
-            throw new InvalidOperationException("Retome o node antes de executar um benchmark.");
+            throw new InvalidOperationException("Retome o node antes de executar um workload.");
         if (isAgent && timeProvider.GetUtcNow() - node.LastSeenAtUtc > AgentHeartbeatTolerance)
             throw new InvalidOperationException("O Compute Agent está offline; aguarde um heartbeat válido.");
         if (isAgent && !node.AgentAcceptJobs)
@@ -103,18 +101,18 @@ internal sealed class PostgresFarmLabService(
                 jobId,
                 attemptId,
                 node.Id,
-                Workload,
-                WorkloadVersion,
-                VerificationPolicy,
+                definition.Workload,
+                definition.Version,
+                definition.VerificationPolicy,
                 Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant(),
-                BenchmarkIterations,
-                BenchmarkTimeoutSeconds,
-                1,
+                definition.Iterations,
+                definition.TimeoutSeconds,
+                definition.MaxLogicalProcessors,
                 Math.Min(
-                    Math.Min(node.MemoryBytes, BenchmarkMemoryLimitBytes),
+                    Math.Min(node.MemoryBytes, definition.MaxMemoryBytes),
                     node.AgentMaxMemoryBytes ?? node.MemoryBytes),
-                NetworkPolicy,
-                DataClassification,
+                definition.NetworkPolicy,
+                definition.DataClassification,
                 now,
                 now.AddMinutes(5),
                 FarmNodeProfileFingerprint.Compute(
@@ -128,9 +126,9 @@ internal sealed class PostgresFarmLabService(
             Id = jobId,
             AccountId = identity.AccountId,
             NodeId = node.Id,
-            Workload = Workload,
-            WorkloadVersion = WorkloadVersion,
-            VerificationPolicy = VerificationPolicy,
+            Workload = definition.Workload,
+            WorkloadVersion = definition.Version,
+            VerificationPolicy = definition.VerificationPolicy,
             Nonce = signedManifest.Manifest.Nonce,
             AttemptId = attemptId,
             ManifestVersion = signedManifest.Manifest.Version,
@@ -143,7 +141,7 @@ internal sealed class PostgresFarmLabService(
             CreatedAtUtc = now
         };
         db.FarmJobs.Add(job);
-        AddEvent(db, job, FarmJobStatus.Queued, now, "Manifest fixo criado pelo scheduler do laboratório.");
+        AddEvent(db, job, FarmJobStatus.Queued, now, $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler.");
         if (isAgent)
         {
             job.Status = FarmJobStatus.Offered.ToString();
@@ -171,7 +169,8 @@ internal sealed class PostgresFarmLabService(
             timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
             var stopwatch = Stopwatch.StartNew();
             var resultDigest = await Task.Run(
-                () => DeterministicBenchmark.Compute(
+                () => FarmDeterministicWorkloads.Compute(
+                    manifest.Workload,
                     manifest.Nonce,
                     manifest.Iterations,
                     timeout.Token),
@@ -184,7 +183,8 @@ internal sealed class PostgresFarmLabService(
             await db.SaveChangesAsync(cancellationToken);
 
             var expectedDigest = await Task.Run(
-                () => DeterministicBenchmark.Compute(
+                () => FarmDeterministicWorkloads.Compute(
+                    manifest.Workload,
                     manifest.Nonce,
                     manifest.Iterations,
                     timeout.Token),
@@ -193,10 +193,10 @@ internal sealed class PostgresFarmLabService(
             if (!CryptographicOperations.FixedTimeEquals(
                     Convert.FromHexString(resultDigest),
                     Convert.FromHexString(expectedDigest)))
-                throw new InvalidOperationException("O resultado do benchmark não passou na verificação.");
+                throw new InvalidOperationException("O resultado do workload não passou na verificação.");
 
             job.Status = FarmJobStatus.Completed.ToString();
-            job.ComputeUnitsMilli = 1_000;
+            job.ComputeUnitsMilli = definition.ProcessingPointsMilli;
             job.FinishedAtUtc = timeProvider.GetUtcNow();
             node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
             node.VerifiedProfileHash = FarmNodeProfileFingerprint.Compute(
@@ -206,7 +206,7 @@ internal sealed class PostgresFarmLabService(
                 node.AgentVersion);
             node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
             node.LastSeenAtUtc = job.FinishedAtUtc.Value;
-            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, "1,000 CP verificado; nenhum AIC emitido.");
+            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, $"{definition.ProcessingPointsMilli / 1_000m:N3} CP verificado; nenhum AIC emitido.");
             await db.SaveChangesAsync(cancellationToken);
             await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -217,7 +217,7 @@ internal sealed class PostgresFarmLabService(
                 db,
                 job,
                 FarmJobStatus.TimedOut,
-                "O benchmark excedeu o timeout do manifesto.");
+                "O workload excedeu o timeout do manifesto.");
         }
         catch (OperationCanceledException)
         {
@@ -225,7 +225,7 @@ internal sealed class PostgresFarmLabService(
                 db,
                 job,
                 FarmJobStatus.Cancelled,
-                "A execução do benchmark foi cancelada.");
+                "A execução do workload foi cancelada.");
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -390,13 +390,16 @@ internal sealed class PostgresFarmLabService(
             throw new InvalidOperationException("O manifesto do Job não possui assinatura válida.");
         if (manifest.ExpiresAtUtc <= now)
             throw new InvalidOperationException("O manifesto do Job expirou antes da execução.");
-        if (manifest.Iterations != BenchmarkIterations ||
-            manifest.TimeoutSeconds != BenchmarkTimeoutSeconds ||
-            manifest.MaxLogicalProcessors != 1 ||
-            manifest.MaxMemoryBytes < 0 ||
-            manifest.MaxMemoryBytes > BenchmarkMemoryLimitBytes ||
-            manifest.NetworkPolicy != NetworkPolicy ||
-            manifest.DataClassification != DataClassification)
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
+        if (definition is null ||
+            manifest.VerificationPolicy != definition.VerificationPolicy ||
+            manifest.Iterations != definition.Iterations ||
+            manifest.TimeoutSeconds != definition.TimeoutSeconds ||
+            manifest.MaxLogicalProcessors != definition.MaxLogicalProcessors ||
+            manifest.MaxMemoryBytes <= 0 ||
+            manifest.MaxMemoryBytes > definition.MaxMemoryBytes ||
+            manifest.NetworkPolicy != definition.NetworkPolicy ||
+            manifest.DataClassification != definition.DataClassification)
             throw new InvalidOperationException("O manifesto do Job viola a allowlist do laboratório.");
         return manifest;
     }
@@ -560,15 +563,9 @@ internal static class DeterministicBenchmark
         string nonce,
         int iterations,
         CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(nonce)) throw new ArgumentException("Nonce obrigatório.", nameof(nonce));
-        if (iterations <= 0) throw new ArgumentOutOfRangeException(nameof(iterations));
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(nonce));
-        for (var index = 0; index < iterations; index++)
-        {
-            if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
-            hash = SHA256.HashData(hash);
-        }
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+        => FarmDeterministicWorkloads.Compute(
+            FarmWorkloadCatalog.GetRequired(FarmWorkloadCatalog.DefaultId).Workload,
+            nonce,
+            iterations,
+            cancellationToken);
 }

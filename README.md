@@ -200,10 +200,17 @@ para que o Render possa monitorar o serviço.
 
 ## Compute Lab — início da Fase 3
 
-A rota autenticada /farm agora materializa a primeira prova fechada de
-compute controlado. Ela registra um node de laboratório por conta, permite
-pausar e retomar sua disponibilidade e executa somente o workload versionado
-atos-sha256-chain-v1.
+A rota autenticada /farm materializa uma prova fechada de compute controlado.
+Ela registra um node de laboratório por conta, permite pausar e retomar sua
+disponibilidade e executa somente workloads do catálogo versionado
+`atos-workload-catalog-v1`.
+
+O catálogo inicial contém `atos-sha256-chain-v1`, usado como benchmark, e
+`atos-merkle-root-sha256-v1`, que constrói uma árvore determinística de 4.096
+folhas. A seleção feita no painel é congelada no manifesto. Servidor, Agent e
+worker compartilham a mesma allowlist e recusam identificador, versão,
+iterações, política de verificação ou limites divergentes. Ambos usam
+`DENY_ALL`, uma CPU lógica, até 256 MiB e reexecução independente no servidor.
 
 O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
 manifest no verificador e só registra 1,000 CP quando os digests coincidem.
@@ -224,7 +231,7 @@ não existe conversão CP → AIC. O laboratório não concede reward, não acei
 shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
 `EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
 executando — localmente, a máquina de desenvolvimento; no Render, o container
-do serviço. No modo `AGENT`, o inventário e o benchmark pertencem ao computador
+do serviço. No modo `AGENT`, o inventário e o workload pertencem ao computador
 vinculado.
 
 ### Vínculo experimental do Compute Agent
@@ -303,21 +310,27 @@ completo de telemetria e o painel `/farm` o exibe em cada Job. Esses valores sã
 observações do Agent autenticado e entram na evidência operacional do Job; não
 constituem attestation independente do hardware.
 
+O Agent `0.6.0` substitui a regra fixa de um único benchmark pelo catálogo
+compartilhado. O IPC `atos-worker-ipc-v2` inclui workload e versão, e o worker
+continua sem aceitar comandos, caminhos, URLs ou código fornecido pelo usuário.
+Adicionar um workload exige uma definição versionada, implementação local
+determinística e verificação equivalente no servidor.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto
 remoto v3 congela e assina esse fingerprint. Depois que a evidência
 determinística é aprovada, o perfil recebe data de verificação; qualquer mudança
 em um de seus componentes revoga o selo e volta o Node para `DETECTADO` até um
-novo benchmark. Isso comprova somente a combinação observada que executou o
+novo workload verificado. Isso comprova somente a combinação observada que executou o
 workload — não é attestation criptográfica de fabricante, TPM ou GPU.
 
-Com o Agent online, `[ DESPACHAR BENCHMARK ]` cria uma oferta remota. O
+Com o Agent online, a ação de despachar o workload selecionado cria uma oferta remota. O
 servidor assina o manifesto com uma chave HMAC derivada exclusivamente para o
 Node; o Agent fixa a identidade dessa chave no Windows Credential Manager,
 confere assinatura, validade, vínculo, workload e limites da allowlist antes de
 executar. O Agent devolve somente o digest e a duração, e o servidor reexecuta o
-benchmark para aceitar ou rejeitar a evidência:
+workload para aceitar ou rejeitar a evidência:
 
     QUEUED → OFFERED → ACCEPTED → RUNNING → UPLOADING → VERIFYING → COMPLETED
        │         │          │          │          │          │
@@ -405,6 +418,7 @@ Implementado:
 - tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos mínimos, expiração, revogação, rate limit e endpoints REST `/api/v1` para consulta e execução idempotente.
 - Centro Analítico da Iris em `/iris/analytics`, com séries UTC, sucesso, latência, unidades, custos, economia de reserva, comparação entre períodos e breakdown por rota sem expor prompts ou respostas.
 - Centro Analítico da Farm em `/farm/analytics`, com CP verificado, vazão, sucesso, falhas, workloads, saúde do Node/Agent e pipeline econômico não liquidado.
+- catálogo compartilhado de workloads com seleção na Farm, benchmark SHA-256 e construção verificável de raiz Merkle no worker isolado.
 
 ### API pessoal da Iris
 
@@ -421,6 +435,7 @@ GET /api/v1/audit?page=1&pageSize=25
 GET /api/v1/conversations?page=1&pageSize=25
 GET /api/v1/conversations/{conversationId}
 GET /api/v1/farm/analytics?days=30
+GET /api/v1/farm/workloads
 POST /api/v1/iris/responses
 ```
 
@@ -485,7 +500,8 @@ Somente Jobs concluídos contribuem CP. O painel não executa workloads, não
 converte CP em AIC e não liquida propostas. Todas as consultas são filtradas
 pela conta autenticada. Tokens pessoais com o escopo `FarmRead` podem obter o
 mesmo contrato por `GET /api/v1/farm/analytics?days=30`; o parâmetro aceita de
-1 a 365 dias.
+1 a 365 dias. O mesmo escopo consulta o catálogo público da conta em
+`GET /api/v1/farm/workloads`; esse endpoint não executa Jobs.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

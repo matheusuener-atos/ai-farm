@@ -12,6 +12,7 @@ public sealed class AgentWorkerProcessTests
         var request = new AgentWorkerRequest(
             AgentWorkerProtocol.Version,
             AgentWorkerProtocol.Workload,
+            "atos-sha256-chain-v1",
             "00112233445566778899aabbccddeeff",
             AgentWorkerProtocol.Iterations);
         using var input = new StringReader(JsonSerializer.Serialize(
@@ -39,6 +40,7 @@ public sealed class AgentWorkerProcessTests
         var request = new AgentWorkerRequest(
             AgentWorkerProtocol.Version,
             "ARBITRARY_COMMAND",
+            "arbitrary-v1",
             "00112233445566778899aabbccddeeff",
             AgentWorkerProtocol.Iterations);
         using var input = new StringReader(JsonSerializer.Serialize(
@@ -52,6 +54,32 @@ public sealed class AgentWorkerProcessTests
         Assert.Equal(2, exitCode);
         Assert.Equal(string.Empty, output.ToString());
         Assert.Contains("allowlist", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WorkerHostExecutesMerkleRootFromCatalog()
+    {
+        var definition = FarmWorkloadCatalog.GetRequired("merkle-root-sha256-v1");
+        var request = new AgentWorkerRequest(
+            AgentWorkerProtocol.Version,
+            definition.Workload,
+            definition.Version,
+            "00112233445566778899aabbccddeeff",
+            definition.Iterations);
+        using var input = new StringReader(JsonSerializer.Serialize(request, AgentWorkerProtocol.JsonOptions));
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await AgentWorkerHost.RunAsync(input, output, error);
+        var result = JsonSerializer.Deserialize<AgentWorkerResult>(output.ToString(), AgentWorkerProtocol.JsonOptions);
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(result);
+        Assert.Equal(
+            FarmDeterministicWorkloads.Compute(
+                definition.Workload, request.Nonce, definition.Iterations),
+            result.Digest);
+        Assert.Equal(string.Empty, error.ToString());
     }
 
     [Fact]
