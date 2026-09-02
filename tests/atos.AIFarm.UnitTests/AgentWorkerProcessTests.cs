@@ -1,5 +1,6 @@
 using System.Text.Json;
 using atos.AIFarm.Agent;
+using atos.AIFarm.Core.Application;
 
 namespace atos.AIFarm.UnitTests;
 
@@ -68,6 +69,11 @@ public sealed class AgentWorkerProcessTests
                 CancellationToken.None),
             result.Digest);
         Assert.True(result.DurationMilliseconds > 0);
+        Assert.True(result.PeakMemoryBytes > 0);
+        Assert.True(result.ProcessorTimeMilliseconds > 0);
+        Assert.True(FarmWorkerEnforcement.IsSupported(result.Enforcement));
+        if (OperatingSystem.IsWindows())
+            Assert.StartsWith("WINDOWS_JOB_OBJECT", result.Enforcement, StringComparison.Ordinal);
     }
 
     [Fact]

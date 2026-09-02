@@ -287,8 +287,21 @@ shell, e envia por `stdin` somente um envelope IPC limitado a 4 KiB com
 `SHA256_CHAIN`, devolve apenas digest e duração por `stdout` e não recebe
 credenciais, URL do servidor ou chave de manifesto. Timeout, encerramento do
 Agent e cancelamento remoto matam toda a árvore do worker. Limites rígidos de
-CPU e memória no sistema operacional continuam reservados para o próximo
-incremento.
+CPU e memória no sistema operacional foram adicionados na versão seguinte.
+
+O Agent `0.5.0` aplica afinidade de CPU ao processo filho. No Windows, um Job
+Object impõe o teto de memória do manifesto e encerra o worker se ele o
+ultrapassar; o limite também é aplicado ao heap do .NET. Em plataformas onde o
+Job Object não existe, a afinidade é usada quando suportada e o coordenador
+monitora o working set, encerrando a árvore ao ultrapassar o teto. O modo efetivo
+fica explícito como `WINDOWS_JOB_OBJECT...` ou `PROCESS_MONITOR...`, sem fingir
+que o fallback é isolamento nativo equivalente.
+
+Ao concluir, o coordenador mede duração, tempo de CPU e pico de memória do
+processo. A API aceita apenas modos de contenção conhecidos, persiste o conjunto
+completo de telemetria e o painel `/farm` o exibe em cada Job. Esses valores são
+observações do Agent autenticado e entram na evidência operacional do Job; não
+constituem attestation independente do hardware.
 
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256

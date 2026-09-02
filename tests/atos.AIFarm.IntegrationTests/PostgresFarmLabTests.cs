@@ -231,10 +231,14 @@ public sealed class PostgresFarmLabTests
             Assert.NotNull(manifest);
             Assert.True(await agents.MarkJobStartedAsync(linked.Credential, claimed.JobId));
             var digest = DeterministicBenchmark.Compute(manifest.Nonce, manifest.Iterations);
+            await Assert.ThrowsAsync<ArgumentException>(() => agents.SubmitResultAsync(
+                linked.Credential,
+                claimed.JobId,
+                new FarmRemoteJobResult(digest, 10, 32L * 1024 * 1024, 8, "UNREPORTED")));
             var acknowledgement = await agents.SubmitResultAsync(
                 linked.Credential,
                 claimed.JobId,
-                new FarmRemoteJobResult(digest, 10));
+                RemoteResult(digest, 10));
             Assert.NotNull(acknowledgement);
             Assert.True(acknowledgement.Verified);
             Assert.Equal(FarmJobStatus.Completed, acknowledgement.Status);
@@ -244,6 +248,9 @@ public sealed class PostgresFarmLabTests
             Assert.NotNull(verifiedDashboard.Node.ProfileVerifiedAtUtc);
             Assert.Equal(64, verifiedDashboard.Node.VerifiedProfileHash?.Length);
             Assert.Equal(verifiedDashboard.Node.VerifiedProfileHash, remote.Manifest?.NodeProfileHash);
+            Assert.Equal(32L * 1024 * 1024, remote.WorkerPeakMemoryBytes);
+            Assert.Equal(8, remote.WorkerProcessorTimeMilliseconds);
+            Assert.Equal(FarmWorkerEnforcement.ProcessMonitorCpuAffinity, remote.WorkerEnforcement);
             Assert.Equal(
                 [FarmJobStatus.Queued, FarmJobStatus.Offered, FarmJobStatus.Accepted,
                  FarmJobStatus.Running, FarmJobStatus.Uploading, FarmJobStatus.Verifying,
@@ -269,14 +276,14 @@ public sealed class PostgresFarmLabTests
             var repeated = await agents.SubmitResultAsync(
                 linked.Credential,
                 claimed.JobId,
-                new FarmRemoteJobResult(digest, 10));
+                RemoteResult(digest, 10));
             Assert.NotNull(repeated);
             Assert.True(repeated.Verified);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 agents.SubmitResultAsync(
                     linked.Credential,
                     claimed.JobId,
-                    new FarmRemoteJobResult(digest, 11)));
+                    RemoteResult(digest, 11)));
             Assert.Null(await agents.GetTrustAsync("afc_invalid"));
             Assert.Null(await agents.ClaimJobAsync("afc_invalid"));
 
@@ -287,7 +294,7 @@ public sealed class PostgresFarmLabTests
             var rejected = await agents.SubmitResultAsync(
                 linked.Credential,
                 rejectedClaim.JobId,
-                new FarmRemoteJobResult(new string('0', 64), 10));
+                RemoteResult(new string('0', 64), 10));
             Assert.NotNull(rejected);
             Assert.False(rejected.Verified);
             Assert.Equal(FarmJobStatus.Failed, rejected.Status);
@@ -399,6 +406,14 @@ public sealed class PostgresFarmLabTests
         services.AddAIFarmPostgres(connectionString, identity);
         return services.BuildServiceProvider();
     }
+
+    private static FarmRemoteJobResult RemoteResult(string digest, long durationMilliseconds) =>
+        new(
+            digest,
+            durationMilliseconds,
+            32L * 1024 * 1024,
+            8,
+            FarmWorkerEnforcement.ProcessMonitorCpuAffinity);
 
     private static FarmJobRecord CreateQueuedJob(
         Guid accountId,

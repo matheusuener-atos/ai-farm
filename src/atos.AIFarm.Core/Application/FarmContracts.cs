@@ -21,7 +21,21 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.4.0";
+    public const string CurrentAgentVersion = "atos-agent/0.5.0";
+}
+
+public static class FarmWorkerEnforcement
+{
+    public const string WindowsJobObjectCpuAffinity = "WINDOWS_JOB_OBJECT+CPU_AFFINITY";
+    public const string WindowsJobObject = "WINDOWS_JOB_OBJECT";
+    public const string ProcessMonitorCpuAffinity = "PROCESS_MONITOR+CPU_AFFINITY";
+    public const string ProcessMonitor = "PROCESS_MONITOR";
+
+    public static bool IsSupported(string value) => value is
+        WindowsJobObjectCpuAffinity or
+        WindowsJobObject or
+        ProcessMonitorCpuAffinity or
+        ProcessMonitor;
 }
 
 public sealed record FarmNodeSnapshot(
@@ -95,7 +109,10 @@ public sealed record FarmRemoteJobOffer(
 
 public sealed record FarmRemoteJobResult(
     string ResultDigest,
-    long DurationMilliseconds);
+    long DurationMilliseconds,
+    long PeakMemoryBytes = 0,
+    long ProcessorTimeMilliseconds = 0,
+    string Enforcement = "UNREPORTED");
 
 public sealed record FarmRemoteJobRejection(
     string Reason,
@@ -137,11 +154,15 @@ public sealed record FarmJobSnapshot(
     string VerificationPolicy,
     FarmJobStatus Status,
     long ComputeUnitsMilli,
+    long? DurationMilliseconds,
     string? ResultDigest,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? FinishedAtUtc,
     DateTimeOffset? CancellationRequestedAtUtc,
     DateTimeOffset? AgentLeaseExpiresAtUtc,
+    long? WorkerPeakMemoryBytes,
+    long? WorkerProcessorTimeMilliseconds,
+    string? WorkerEnforcement,
     FarmJobManifestSnapshot? Manifest,
     IReadOnlyList<FarmJobEventSnapshot> Events);
 

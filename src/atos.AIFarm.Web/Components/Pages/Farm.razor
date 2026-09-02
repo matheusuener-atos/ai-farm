@@ -171,7 +171,11 @@ else
                         <div><dt>VERSÃO</dt><dd>@job.WorkloadVersion</dd></div>
                         <div><dt>VERIFICAÇÃO</dt><dd>@job.VerificationPolicy</dd></div>
                         <div><dt>CU</dt><dd>@FormatCu(job.ComputeUnitsMilli)</dd></div>
+                        <div><dt>DURAÇÃO</dt><dd>@(job.DurationMilliseconds is null ? "---" : $"{job.DurationMilliseconds} MS")</dd></div>
                         <div><dt>DIGEST</dt><dd>@(job.ResultDigest is null ? "---" : job.ResultDigest[..12])</dd></div>
+                        <div><dt>PICO DE MEMÓRIA</dt><dd>@(job.WorkerPeakMemoryBytes is null ? "---" : FormatBytes(job.WorkerPeakMemoryBytes.Value))</dd></div>
+                        <div><dt>CPU DO WORKER</dt><dd>@(job.WorkerProcessorTimeMilliseconds is null ? "---" : $"{job.WorkerProcessorTimeMilliseconds} MS")</dd></div>
+                        <div><dt>CONTENÇÃO</dt><dd>@(job.WorkerEnforcement ?? "---")</dd></div>
                     </dl>
                     @if (job.AgentLeaseExpiresAtUtc is not null && CanCancelStatus(job.Status))
                     {
@@ -377,5 +381,8 @@ else
     private static string ShortHash(string value) =>
         value.Length <= 16 ? value : $"{value[..12]}...{value[^4..]}";
     private static string FormatBytes(long bytes) =>
-        bytes <= 0 ? "---" : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";
+        bytes <= 0 ? "---" :
+        bytes < 1024L * 1024 * 1024
+            ? $"{bytes / 1024d / 1024d:0.0} MB"
+            : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";
 }

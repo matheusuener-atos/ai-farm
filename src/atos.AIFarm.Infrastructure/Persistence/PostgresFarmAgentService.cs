@@ -370,6 +370,14 @@ internal sealed class PostgresFarmAgentService(
     {
         if (result.DurationMilliseconds <= 0)
             throw new ArgumentOutOfRangeException(nameof(result.DurationMilliseconds));
+        if (result.PeakMemoryBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(result.PeakMemoryBytes));
+        if (result.ProcessorTimeMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(result.ProcessorTimeMilliseconds));
+        if (!FarmWorkerEnforcement.IsSupported(result.Enforcement))
+            throw new ArgumentException(
+                "O modo de contenção do worker não é reconhecido.",
+                nameof(result.Enforcement));
         byte[] suppliedDigest;
         try { suppliedDigest = Convert.FromHexString(result.ResultDigest); }
         catch (FormatException exception)
@@ -390,7 +398,10 @@ internal sealed class PostgresFarmAgentService(
         if (existing.Status == FarmJobStatus.Completed.ToString())
         {
             if (!string.Equals(existing.ResultDigest, result.ResultDigest, StringComparison.OrdinalIgnoreCase) ||
-                existing.DurationMilliseconds != result.DurationMilliseconds)
+                existing.DurationMilliseconds != result.DurationMilliseconds ||
+                existing.WorkerPeakMemoryBytes != result.PeakMemoryBytes ||
+                existing.WorkerProcessorTimeMilliseconds != result.ProcessorTimeMilliseconds ||
+                existing.WorkerEnforcement != result.Enforcement)
                 throw new InvalidOperationException("O Job já foi concluído com uma evidência diferente.");
             return new FarmRemoteJobAcknowledgement(
                 existing.Id,
@@ -457,7 +468,10 @@ internal sealed class PostgresFarmAgentService(
                 setters => setters
                     .SetProperty(x => x.Status, FarmJobStatus.Uploading.ToString())
                     .SetProperty(x => x.ResultDigest, result.ResultDigest.ToLowerInvariant())
-                    .SetProperty(x => x.DurationMilliseconds, result.DurationMilliseconds),
+                    .SetProperty(x => x.DurationMilliseconds, result.DurationMilliseconds)
+                    .SetProperty(x => x.WorkerPeakMemoryBytes, result.PeakMemoryBytes)
+                    .SetProperty(x => x.WorkerProcessorTimeMilliseconds, result.ProcessorTimeMilliseconds)
+                    .SetProperty(x => x.WorkerEnforcement, result.Enforcement),
                 cancellationToken);
         if (claimed != 1)
             throw new InvalidOperationException("O Job não aceita evidência neste estado.");

@@ -13,7 +13,10 @@ internal sealed record AgentWorkerRequest(
 internal sealed record AgentWorkerResult(
     string Protocol,
     string Digest,
-    long DurationMilliseconds);
+    long DurationMilliseconds,
+    long PeakMemoryBytes = 0,
+    long ProcessorTimeMilliseconds = 0,
+    string Enforcement = "UNREPORTED");
 
 internal sealed record AgentWorkerLaunch(string FileName, IReadOnlyList<string> Arguments);
 
@@ -120,11 +123,15 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
 
         using var process = new Process
         {
-            StartInfo = CreateStartInfo(launch),
+            StartInfo = CreateStartInfo(launch, manifest.MaxMemoryBytes),
             EnableRaisingEvents = true
         };
         if (!process.Start())
             throw new InvalidOperationException("Não foi possível iniciar o processo worker.");
+        using var resources = AgentWorkerResourceGuard.Attach(
+            process,
+            manifest.MaxLogicalProcessors,
+            manifest.MaxMemoryBytes);
 
         var standardOutput = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
         var standardError = process.StandardError.ReadToEndAsync(CancellationToken.None);
@@ -140,7 +147,13 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
                 AgentWorkerProtocol.JsonOptions);
             await process.StandardInput.WriteAsync(payload.AsMemory(), cancellationToken);
             process.StandardInput.Close();
-            await process.WaitForExitAsync(cancellationToken);
+            while (!process.HasExited)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                resources.Sample();
+                await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
+            }
+            await process.WaitForExitAsync(CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
@@ -167,10 +180,18 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
             AgentWorkerProtocol.JsonOptions) ?? throw new InvalidOperationException(
             "O worker retornou uma resposta vazia.");
         Validate(result);
-        return result;
+        var telemetry = resources.Complete();
+        return result with
+        {
+            PeakMemoryBytes = telemetry.PeakMemoryBytes,
+            ProcessorTimeMilliseconds = telemetry.ProcessorTimeMilliseconds,
+            Enforcement = telemetry.Enforcement
+        };
     }
 
-    private static ProcessStartInfo CreateStartInfo(AgentWorkerLaunch launch)
+    private static ProcessStartInfo CreateStartInfo(
+        AgentWorkerLaunch launch,
+        long maximumMemoryBytes)
     {
         var start = new ProcessStartInfo
         {
@@ -189,6 +210,8 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
             if (IsRequiredRuntimeVariable(variable.Key))
                 start.Environment[variable.Key] = variable.Value;
         }
+        start.Environment["DOTNET_GCHeapHardLimit"] = maximumMemoryBytes.ToString("X");
+        start.Environment["DOTNET_GCConserveMemory"] = "9";
         foreach (var argument in launch.Arguments) start.ArgumentList.Add(argument);
         start.ArgumentList.Add("__worker");
         return start;

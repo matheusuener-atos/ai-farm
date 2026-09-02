@@ -365,11 +365,14 @@ internal static class AgentApplication
                 offer.JobId,
                 new FarmRemoteJobResult(
                     workerResult.Digest,
-                    workerResult.DurationMilliseconds),
+                    workerResult.DurationMilliseconds,
+                    workerResult.PeakMemoryBytes,
+                    workerResult.ProcessorTimeMilliseconds,
+                    workerResult.Enforcement),
                 execution.Token);
             Write(
                 "JOB",
-                $"{acknowledgement.Status.ToString().ToUpperInvariant()} // VERIFIED={acknowledgement.Verified} // CU={acknowledgement.ComputeUnitsMilli / 1000d:0.000}");
+                $"{acknowledgement.Status.ToString().ToUpperInvariant()} // VERIFIED={acknowledgement.Verified} // CU={acknowledgement.ComputeUnitsMilli / 1000d:0.000} // PEAK={workerResult.PeakMemoryBytes / 1024d / 1024d:0.0}MB // CPU={workerResult.ProcessorTimeMilliseconds}ms // LIMIT={workerResult.Enforcement}");
         }
         catch (OperationCanceledException) when (!execution.IsCancellationRequested)
         {

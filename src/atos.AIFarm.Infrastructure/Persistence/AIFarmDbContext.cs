@@ -285,6 +285,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
                 table.HasCheckConstraint(
+                    "CK_farm_jobs_worker_telemetry",
+                    "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR " +
+                    "(\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
+                table.HasCheckConstraint(
                     "CK_farm_jobs_agent_lease",
                     "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR " +
                     "(\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
@@ -312,6 +316,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.ManifestDigest).HasMaxLength(64);
             entity.Property(x => x.ManifestSignature).HasMaxLength(64);
             entity.Property(x => x.FailureReason).HasMaxLength(500);
+            entity.Property(x => x.WorkerEnforcement).HasMaxLength(80);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -405,6 +410,9 @@ public sealed class FarmJobRecord
     public DateTimeOffset? CancellationRequestedAtUtc { get; set; }
     public DateTimeOffset? AgentLeaseRenewedAtUtc { get; set; }
     public DateTimeOffset? AgentLeaseExpiresAtUtc { get; set; }
+    public long? WorkerPeakMemoryBytes { get; set; }
+    public long? WorkerProcessorTimeMilliseconds { get; set; }
+    public string? WorkerEnforcement { get; set; }
 }
 
 public sealed class FarmJobEventRecord
