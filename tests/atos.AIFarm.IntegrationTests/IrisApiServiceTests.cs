@@ -43,6 +43,10 @@ public sealed class IrisApiServiceTests
         Assert.Equal(Aic.FromAic(988), walletSnapshot.Balance.AvailableMinor);
         Assert.Single(walletSnapshot.Transactions, x => x.Type == LedgerTransactionType.Capture);
         Assert.Equal(Aic.FromAic(12), (await budget.GetSnapshotAsync()).UsedTodayMinor);
+        var analytics = await chat.GetAnalyticsAsync(7);
+        Assert.Equal(1, analytics.Totals.ExecutionCount);
+        Assert.Equal(100m, analytics.SuccessRatePercent);
+        Assert.Equal("atos-fake-chat-v1", Assert.Single(analytics.Routes).Model);
     }
 
     [Fact]

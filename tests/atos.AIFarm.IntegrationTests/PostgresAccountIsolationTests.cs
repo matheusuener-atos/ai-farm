@@ -198,6 +198,12 @@ public sealed class PostgresAccountIsolationTests
             var secondUsage = await second
                 .GetRequiredService<IAiUsageQuery>()
                 .GetDashboardAsync();
+            var firstAnalytics = await first
+                .GetRequiredService<IAiUsageQuery>()
+                .GetAnalyticsAsync(7);
+            var secondAnalytics = await second
+                .GetRequiredService<IAiUsageQuery>()
+                .GetAnalyticsAsync(7);
             var firstFactory = first.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
             await using var verificationDb = await firstFactory.CreateDbContextAsync();
             var archivedRecord = await verificationDb.Conversations
@@ -266,6 +272,12 @@ public sealed class PostgresAccountIsolationTests
             Assert.Equal(Aic.FromAic(12), firstUsage.Totals.ActualCostMinor);
             Assert.Contains(firstUsage.RecentExecutions, x => x.Status == "Timeout");
             Assert.Empty(secondUsage.RecentExecutions);
+            Assert.Equal(2, firstAnalytics.Totals.ExecutionCount);
+            Assert.Equal(Aic.FromAic(12), firstAnalytics.Totals.ActualCostMinor);
+            Assert.Equal(50m, firstAnalytics.SuccessRatePercent);
+            Assert.Equal(2, firstAnalytics.Routes.Count);
+            Assert.Equal(0, secondAnalytics.Totals.ExecutionCount);
+            Assert.Empty(secondAnalytics.Routes);
             Assert.False(crossAccountRestore);
             Assert.True(restored);
             Assert.Equal(2, restoredConversation?.Messages.Count);

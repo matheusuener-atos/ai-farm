@@ -403,6 +403,7 @@ Implementado:
 - Centro de Incidentes que prioriza falhas de integridade, Iris, Farm e Node, com reconhecimento persistente e idempotente sem alterar a evidência original.
 - orçamento preventivo da Iris por conta, com teto por tarefa, dia e mês UTC, retenções concorrentes idempotentes e painel em `/iris/budget`.
 - tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos mínimos, expiração, revogação, rate limit e endpoints REST `/api/v1` para consulta e execução idempotente.
+- Centro Analítico da Iris em `/iris/analytics`, com séries UTC, sucesso, latência, unidades, custos, economia de reserva, comparação entre períodos e breakdown por rota sem expor prompts ou respostas.
 
 ### API pessoal da Iris
 
@@ -413,6 +414,7 @@ endpoints compatíveis com os escopos selecionados:
 ```text
 GET /api/v1/me
 GET /api/v1/usage
+GET /api/v1/usage/analytics?days=30
 GET /api/v1/incidents?openOnly=true
 GET /api/v1/audit?page=1&pageSize=25
 GET /api/v1/conversations?page=1&pageSize=25
@@ -454,6 +456,20 @@ liquida o custo na Wallet. `ConversationsRead` é um escopo separado e permite
 consultar o histórico sem conceder execução. As consultas têm limite de 120
 chamadas por minuto por token; a rota de execução usa o limite mais restritivo
 de 20 por minuto. Não registre tokens, prompts ou respostas em logs.
+
+### Centro Analítico da Iris
+
+A rota autenticada `/iris/analytics` consolida janelas móveis de 7, 30 ou 90
+dias em UTC. O painel exibe execuções, taxa de sucesso, custo estimado e real,
+AIC liberado, latência média, variação contra o período anterior, série diária,
+distribuição de resultados e desempenho por Provider/modelo. Os dados são
+calculados a partir de `AiRequest` e `AiExecution`, sempre filtrados pela conta;
+prompts e respostas não participam da projeção.
+
+Clientes com `UsageRead` obtêm o mesmo contrato por
+`GET /api/v1/usage/analytics?days=30`. O parâmetro aceita de 1 a 365 dias. A
+resposta preenche inclusive dias sem atividade, facilitando gráficos externos,
+e inclui o período anterior apenas como base agregada de comparação.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

@@ -434,6 +434,21 @@ personalApi.MapGet("/usage", async (
         budget = await budget.GetSnapshotAsync(cancellationToken)
     })).RequireAuthorization(AIFarmApiTokenDefaults.UsageReadPolicy);
 
+personalApi.MapGet("/usage/analytics", async (
+    int? days,
+    IAiUsageQuery usage,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await usage.GetAnalyticsAsync(days ?? 30, cancellationToken));
+    }
+    catch (ArgumentOutOfRangeException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.UsageReadPolicy);
+
 personalApi.MapGet("/incidents", async (
     string? search,
     string? severity,

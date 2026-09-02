@@ -1216,7 +1216,8 @@ public sealed class PostgresChatStore(
 
 public sealed class PostgresAiUsageQuery(
     IDbContextFactory<AIFarmDbContext> factory,
-    IAIFarmIdentityAccessor identityAccessor) : IAiUsageQuery
+    IAIFarmIdentityAccessor identityAccessor,
+    TimeProvider timeProvider) : IAiUsageQuery
 {
     public async Task<AiUsageDashboard> GetDashboardAsync(
         int recentLimit = 50,
@@ -1308,5 +1309,41 @@ public sealed class PostgresAiUsageQuery(
             .ToArrayAsync(cancellationToken);
 
         return new AiUsageDashboard(totals, recent);
+    }
+
+    public async Task<AiUsageAnalytics> GetAnalyticsAsync(
+        int days = 30,
+        CancellationToken cancellationToken = default)
+    {
+        if (days is < 1 or > 365)
+            throw new ArgumentOutOfRangeException(nameof(days), "O período deve ficar entre 1 e 365 dias.");
+
+        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var today = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
+        var earliest = today.AddDays(-(days * 2 - 1));
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var executions = await (
+            from request in db.AiRequests
+            join execution in db.AiExecutions on request.Id equals execution.AiRequestId
+            join conversation in db.Conversations on request.ConversationId equals conversation.Id
+            where request.AccountId == identity.AccountId && execution.StartedAtUtc >= earliest
+            select new AiExecutionSummary(
+                request.OperationId,
+                request.ConversationId,
+                conversation.Title,
+                execution.Provider,
+                execution.Model,
+                execution.PriceCatalogVersion,
+                execution.InputUnits,
+                execution.OutputUnits,
+                execution.EstimatedCostMinor,
+                execution.ActualCostMinor,
+                execution.Status,
+                execution.StartedAtUtc,
+                execution.FinishedAtUtc))
+            .ToArrayAsync(cancellationToken);
+
+        return AiUsageAnalyticsBuilder.Build(executions, days, now);
     }
 }
