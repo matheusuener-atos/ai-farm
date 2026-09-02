@@ -5,6 +5,7 @@ COPY ["atos.AIFarm.slnx", "./"]
 COPY ["src/atos.AIFarm.Core/atos.AIFarm.Core.csproj", "src/atos.AIFarm.Core/"]
 COPY ["src/atos.AIFarm.Infrastructure/atos.AIFarm.Infrastructure.csproj", "src/atos.AIFarm.Infrastructure/"]
 COPY ["src/atos.AIFarm.Web/atos.AIFarm.Web.csproj", "src/atos.AIFarm.Web/"]
+COPY ["src/atos.AIFarm.Agent/atos.AIFarm.Agent.csproj", "src/atos.AIFarm.Agent/"]
 COPY ["tests/atos.AIFarm.UnitTests/atos.AIFarm.UnitTests.csproj", "tests/atos.AIFarm.UnitTests/"]
 COPY ["tests/atos.AIFarm.IntegrationTests/atos.AIFarm.IntegrationTests.csproj", "tests/atos.AIFarm.IntegrationTests/"]
 RUN dotnet restore "atos.AIFarm.slnx"
