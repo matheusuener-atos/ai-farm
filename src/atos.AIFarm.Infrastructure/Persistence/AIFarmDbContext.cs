@@ -296,6 +296,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "CK_farm_jobs_manifest_complete",
                     "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR " +
                     "(\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_evidence_complete",
+                    "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR " +
+                    "(\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
@@ -317,6 +321,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.ManifestSignature).HasMaxLength(64);
             entity.Property(x => x.FailureReason).HasMaxLength(500);
             entity.Property(x => x.WorkerEnforcement).HasMaxLength(80);
+            entity.Property(x => x.EvidenceVersion).HasMaxLength(80);
+            entity.Property(x => x.EvidenceDigest).HasMaxLength(64);
+            entity.Property(x => x.EvidenceSignature).HasMaxLength(64);
+            entity.Property(x => x.EvidenceKeyId).HasMaxLength(32);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -413,6 +421,12 @@ public sealed class FarmJobRecord
     public long? WorkerPeakMemoryBytes { get; set; }
     public long? WorkerProcessorTimeMilliseconds { get; set; }
     public string? WorkerEnforcement { get; set; }
+    public string? EvidenceVersion { get; set; }
+    public string? EvidencePayload { get; set; }
+    public string? EvidenceDigest { get; set; }
+    public string? EvidenceSignature { get; set; }
+    public string? EvidenceKeyId { get; set; }
+    public DateTimeOffset? EvidenceCreatedAtUtc { get; set; }
 }
 
 public sealed class FarmJobEventRecord

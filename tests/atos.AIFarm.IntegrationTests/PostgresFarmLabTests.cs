@@ -35,6 +35,13 @@ public sealed class PostgresFarmLabTests
             Assert.Equal("atos-farm-manifest-v1", completed.Manifest.Version);
             Assert.Equal("DENY_ALL", completed.Manifest.NetworkPolicy);
             Assert.Equal("STANDARD", completed.Manifest.DataClassification);
+            Assert.NotNull(completed.Evidence);
+            Assert.True(completed.Evidence.IsValid);
+            Assert.Equal("atos-farm-evidence-v1", completed.Evidence.Version);
+            var evidence = await lab.DownloadEvidenceAsync(completed.Id);
+            Assert.NotNull(evidence);
+            Assert.EndsWith(".json", evidence.FileName, StringComparison.Ordinal);
+            Assert.Contains(completed.Id.ToString(), System.Text.Encoding.UTF8.GetString(evidence.Content));
             Assert.Equal(30, completed.Manifest.TimeoutSeconds);
             Assert.Equal(100_000, completed.Manifest.Iterations);
             Assert.Equal(1, completed.Manifest.MaxLogicalProcessors);
@@ -251,6 +258,9 @@ public sealed class PostgresFarmLabTests
             Assert.Equal(32L * 1024 * 1024, remote.WorkerPeakMemoryBytes);
             Assert.Equal(8, remote.WorkerProcessorTimeMilliseconds);
             Assert.Equal(FarmWorkerEnforcement.ProcessMonitorCpuAffinity, remote.WorkerEnforcement);
+            Assert.NotNull(remote.Evidence);
+            Assert.True(remote.Evidence.IsValid);
+            Assert.NotNull(await lab.DownloadEvidenceAsync(remote.Id));
             Assert.Equal(
                 [FarmJobStatus.Queued, FarmJobStatus.Offered, FarmJobStatus.Accepted,
                  FarmJobStatus.Running, FarmJobStatus.Uploading, FarmJobStatus.Verifying,

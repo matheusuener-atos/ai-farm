@@ -208,6 +208,8 @@ internal sealed class PostgresFarmLabService(
             node.LastSeenAtUtc = job.FinishedAtUtc.Value;
             AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, "1,000 CU verificado; nenhum AIC emitido.");
             await db.SaveChangesAsync(cancellationToken);
+            await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -297,6 +299,28 @@ internal sealed class PostgresFarmLabService(
         });
         await db.SaveChangesAsync(cancellationToken);
         return await BuildDashboardAsync(db, node, cancellationToken);
+    }
+
+    public async Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var job = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+            x => x.Id == jobId && x.AccountId == identity.AccountId,
+            cancellationToken);
+        if (job is null || job.EvidencePayload is null) return null;
+        if (!FarmEvidenceSecurity.TryVerify(job, signingOptions, out var evidence) || evidence is null)
+            throw new InvalidOperationException("A integridade do bundle de evidências não pôde ser validada.");
+        var content = FarmEvidenceSecurity.Export(
+            evidence,
+            job.EvidenceKeyId!,
+            job.EvidenceDigest!,
+            job.EvidenceSignature!);
+        return new FarmJobEvidenceDownload(
+            $"atos-farm-evidence-{job.Id:N}.json",
+            content);
     }
 
     private async Task<FarmNodeRecord> EnsureNodeAsync(
@@ -400,9 +424,12 @@ internal sealed class PostgresFarmLabService(
             manifest.WorkloadVersion == job.WorkloadVersion &&
             manifest.VerificationPolicy == job.VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
-            manifest.IssuedAtUtc == job.ManifestIssuedAtUtc &&
-            manifest.ExpiresAtUtc == job.ManifestExpiresAtUtc;
+            SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
+            SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
     }
+
+    private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
+        right is not null && Math.Abs((left - right.Value).Ticks) < 10;
 
     private async Task MarkTerminalAsync(
         AIFarmDbContext db,
@@ -518,6 +545,7 @@ internal sealed class PostgresFarmLabService(
             job.WorkerProcessorTimeMilliseconds,
             job.WorkerEnforcement,
             manifestSnapshot,
+            FarmEvidenceSecurity.ToSnapshot(job, signingOptions),
             events.Select(x => new FarmJobEventSnapshot(
                 x.Sequence,
                 Enum.Parse<FarmJobStatus>(x.Status),

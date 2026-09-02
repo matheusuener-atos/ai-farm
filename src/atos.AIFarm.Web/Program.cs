@@ -283,6 +283,27 @@ app.MapGet("/api/chat/conversations/{conversationId:guid}/export/{format}", asyn
         : Results.File(export.Content, export.ContentType, export.FileName);
 }).RequireAuthorization();
 
+app.MapGet("/api/farm/jobs/{jobId:guid}/evidence", async (
+    Guid jobId,
+    HttpResponse response,
+    IFarmLabService farmLab,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var evidence = await farmLab.DownloadEvidenceAsync(jobId, cancellationToken);
+        return evidence is null
+            ? Results.NotFound()
+            : Results.File(evidence.Content, "application/json; charset=utf-8", evidence.FileName);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,
     HttpResponse response,

@@ -310,6 +310,8 @@ code { color: var(--white); }
 .farm-job header { display: flex; justify-content: space-between; gap: 1rem; }
 .farm-job-actions { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
 .farm-job-actions button { padding: .35rem .6rem; font-size: .68rem; }
+.farm-evidence-download { border: 1px solid var(--green); color: var(--green); padding: .35rem .6rem; font-size: .68rem; text-decoration: none; }
+.farm-evidence-download:hover { color: var(--black); background: var(--green); }
 .farm-job dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: 1rem 0; }
 .farm-job dl > div { min-width: 0; }
 .farm-job dt { color: var(--muted); font-size: .65rem; }
@@ -317,6 +319,9 @@ code { color: var(--white); }
 .farm-manifest { margin: 0 0 1rem; border: 1px solid #4b3600; background: var(--amber-deep); }
 .farm-manifest summary { cursor: pointer; padding: .7rem; color: var(--amber-bright); }
 .farm-manifest dl { grid-template-columns: repeat(5, 1fr); margin: 0; padding: .8rem; border-top: 1px solid #4b3600; }
+.farm-evidence { margin: 0 0 1rem; border: 1px solid #235600; background: #061100; }
+.farm-evidence summary { cursor: pointer; padding: .7rem; color: var(--green); }
+.farm-evidence dl { grid-template-columns: repeat(5, 1fr); margin: 0; padding: .8rem; border-top: 1px solid #235600; }
 .farm-manifest-legacy { margin: 0 0 1rem; color: var(--muted); font-size: .68rem; }
 .farm-job-events { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
 .farm-job-events li { display: grid; grid-template-columns: 5rem 7rem 1fr; gap: .6rem; color: var(--muted); font-size: .68rem; }
@@ -326,7 +331,7 @@ code { color: var(--white); }
 @media (max-width: 760px) {
     .farm-node-header, .farm-job header { align-items: flex-start; flex-direction: column; }
     .farm-metrics, .farm-job dl { grid-template-columns: repeat(2, 1fr); }
-    .farm-manifest dl { grid-template-columns: repeat(2, 1fr); }
+    .farm-manifest dl, .farm-evidence dl { grid-template-columns: repeat(2, 1fr); }
     .farm-metrics article:nth-child(2) { border-right: 0; }
     .farm-metrics article { border-bottom: 1px solid #4b3600; }
     .farm-job-events li { grid-template-columns: 4.5rem 1fr; }

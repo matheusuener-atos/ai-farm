@@ -476,7 +476,8 @@ internal sealed class PostgresFarmAgentService(
         if (claimed != 1)
             throw new InvalidOperationException("O Job não aceita evidência neste estado.");
 
-        var job = await db.FarmJobs.SingleAsync(x => x.Id == jobId, cancellationToken);
+        await db.Entry(existing).ReloadAsync(cancellationToken);
+        var job = existing;
         await AddJobEventAsync(
             db,
             job,
@@ -531,6 +532,11 @@ internal sealed class PostgresFarmAgentService(
                 cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
+        if (verified)
+        {
+            await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
         return new FarmRemoteJobAcknowledgement(
             job.Id,
             Enum.Parse<FarmJobStatus>(job.Status),
@@ -593,8 +599,8 @@ internal sealed class PostgresFarmAgentService(
             manifest.WorkloadVersion == WorkloadVersion &&
             manifest.VerificationPolicy == VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
-            manifest.IssuedAtUtc == job.ManifestIssuedAtUtc &&
-            manifest.ExpiresAtUtc == job.ManifestExpiresAtUtc &&
+            SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
+            SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc) &&
             manifest.NetworkPolicy == "DENY_ALL" &&
             manifest.DataClassification == "STANDARD" &&
             manifest.Iterations == 100_000 &&
@@ -603,6 +609,9 @@ internal sealed class PostgresFarmAgentService(
             manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024 &&
             manifest.NodeProfileHash is { Length: 64 };
     }
+
+    private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
+        right is not null && Math.Abs((left - right.Value).Ticks) < 10;
 
     private async Task AddJobEventAsync(
         AIFarmDbContext db,

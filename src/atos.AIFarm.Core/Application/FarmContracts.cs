@@ -146,6 +146,19 @@ public sealed record FarmJobManifestSnapshot(
     string DataClassification,
     string? NodeProfileHash);
 
+public sealed record FarmJobEvidenceSnapshot(
+    string Version,
+    string Algorithm,
+    string KeyId,
+    string Digest,
+    string Signature,
+    DateTimeOffset CreatedAtUtc,
+    bool IsValid);
+
+public sealed record FarmJobEvidenceDownload(
+    string FileName,
+    byte[] Content);
+
 public sealed record FarmJobSnapshot(
     Guid Id,
     Guid NodeId,
@@ -164,6 +177,7 @@ public sealed record FarmJobSnapshot(
     long? WorkerProcessorTimeMilliseconds,
     string? WorkerEnforcement,
     FarmJobManifestSnapshot? Manifest,
+    FarmJobEvidenceSnapshot? Evidence,
     IReadOnlyList<FarmJobEventSnapshot> Events);
 
 public sealed record FarmDashboard(
@@ -181,6 +195,9 @@ public interface IFarmLabService
     Task<FarmDashboard> SetNodeStatusAsync(FarmNodeStatus status, CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
     Task<FarmDashboard> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IFarmAgentService

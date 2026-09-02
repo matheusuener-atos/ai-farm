@@ -56,6 +56,56 @@ public sealed class FarmManifestSecurityTests
         Assert.Throws<ArgumentException>(() => new FarmManifestSigningOptions("not-base64"));
     }
 
+    [Fact]
+    public void CompletedJobEvidenceIsBoundToJobAndDetectsTampering()
+    {
+        var now = DateTimeOffset.Parse("2026-09-02T01:00:00Z");
+        var job = new FarmJobRecord
+        {
+            Id = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+            AttemptId = Guid.Parse("55555555-5555-5555-5555-555555555555"),
+            NodeId = Guid.Parse("66666666-6666-6666-6666-666666666666"),
+            Workload = "SHA256_CHAIN",
+            WorkloadVersion = "atos-sha256-chain-v1",
+            VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
+            Status = "Completed",
+            ManifestVersion = "atos-farm-manifest-v3-agent-profile",
+            ManifestDigest = new string('a', 64),
+            ManifestSignature = new string('b', 64),
+            ManifestPayload = "{}",
+            ResultDigest = new string('c', 64),
+            ExpectedDigest = new string('c', 64),
+            ComputeUnitsMilli = 1_000,
+            DurationMilliseconds = 25,
+            WorkerPeakMemoryBytes = 32 * 1024 * 1024,
+            WorkerProcessorTimeMilliseconds = 8,
+            WorkerEnforcement = "PROCESS_MONITOR+CPU_AFFINITY",
+            CreatedAtUtc = now.AddSeconds(-2),
+            StartedAtUtc = now.AddSeconds(-1),
+            FinishedAtUtc = now
+        };
+        FarmJobEventRecord[] events =
+        [
+            new() { Sequence = 1, Status = "Queued", Detail = "Criado.", OccurredAtUtc = now.AddSeconds(-2) },
+            new() { Sequence = 2, Status = "Completed", Detail = "Verificado.", OccurredAtUtc = now }
+        ];
+        var key = Signing.DeriveForAgent(job.NodeId);
+        var signed = FarmEvidenceSecurity.Sign(job, events, key.Signing, key.KeyId);
+        job.EvidenceVersion = FarmEvidenceSecurity.Version;
+        job.EvidencePayload = signed.Payload;
+        job.EvidenceDigest = signed.Digest;
+        job.EvidenceSignature = signed.Signature;
+        job.EvidenceKeyId = key.KeyId;
+        job.EvidenceCreatedAtUtc = now;
+
+        Assert.True(FarmEvidenceSecurity.TryVerify(job, Signing, out var restored));
+        Assert.Equal(job.Id, restored?.JobId);
+        Assert.Equal(2, restored?.Events.Count);
+
+        job.ResultDigest = new string('d', 64);
+        Assert.False(FarmEvidenceSecurity.TryVerify(job, Signing, out _));
+    }
+
     private static FarmJobManifest CreateManifest() => new(
         "atos-farm-manifest-v1",
         Guid.Parse("11111111-1111-1111-1111-111111111111"),

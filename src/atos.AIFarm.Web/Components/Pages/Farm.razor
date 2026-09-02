@@ -152,6 +152,14 @@ else
                         <strong>@job.Workload // @ShortId(job.Id)</strong>
                         <div class="farm-job-actions">
                             <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
+                            @if (job.Evidence?.IsValid == true)
+                            {
+                                <a class="farm-evidence-download"
+                                   href="@EvidenceUrl(job.Id)"
+                                   download="@EvidenceFileName(job.Id)">
+                                    [ BAIXAR EVIDÊNCIA ]
+                                </a>
+                            }
                             @if (!IsEmbedded && CanCancel(job))
                             {
                                 <button type="button"
@@ -208,6 +216,28 @@ else
                                 <div><dt>PERFIL DO NODE</dt><dd title="@job.Manifest.NodeProfileHash">@(job.Manifest.NodeProfileHash is null ? "---" : ShortHash(job.Manifest.NodeProfileHash))</dd></div>
                                 <div><dt>MANIFEST DIGEST</dt><dd title="@job.Manifest.Digest">@ShortHash(job.Manifest.Digest)</dd></div>
                                 <div><dt>HMAC-SHA256</dt><dd title="@job.Manifest.Signature">@ShortHash(job.Manifest.Signature)</dd></div>
+                            </dl>
+                        </details>
+                    }
+                    @if (job.Status == FarmJobStatus.Completed && job.Evidence is null)
+                    {
+                        <p class="farm-manifest-legacy">EVIDÊNCIA // JOB LEGADO SEM BUNDLE</p>
+                    }
+                    else if (job.Evidence is not null)
+                    {
+                        <details class="farm-evidence">
+                            <summary>
+                                [ BUNDLE @job.Evidence.Version //
+                                <span class="@(job.Evidence.IsValid ? "green" : "error-text")">
+                                    @(job.Evidence.IsValid ? "INTEGRIDADE VÁLIDA" : "INTEGRIDADE INVÁLIDA")
+                                </span> ]
+                            </summary>
+                            <dl>
+                                <div><dt>ALGORITMO</dt><dd>@job.Evidence.Algorithm</dd></div>
+                                <div><dt>KEY ID</dt><dd>@job.Evidence.KeyId</dd></div>
+                                <div><dt>EMITIDO</dt><dd>@job.Evidence.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</dd></div>
+                                <div><dt>PAYLOAD DIGEST</dt><dd title="@job.Evidence.Digest">@ShortHash(job.Evidence.Digest)</dd></div>
+                                <div><dt>ASSINATURA</dt><dd title="@job.Evidence.Signature">@ShortHash(job.Evidence.Signature)</dd></div>
                             </dl>
                         </details>
                     }
@@ -378,6 +408,8 @@ else
 
     private static string FormatCu(long milli) => $"{milli / 1000d:0.000} CU";
     private static string ShortId(Guid id) => id.ToString("N")[..8];
+    private static string EvidenceUrl(Guid jobId) => $"/api/farm/jobs/{jobId}/evidence";
+    private static string EvidenceFileName(Guid jobId) => $"atos-farm-evidence-{jobId:N}.json";
     private static string ShortHash(string value) =>
         value.Length <= 16 ? value : $"{value[..12]}...{value[^4..]}";
     private static string FormatBytes(long bytes) =>
