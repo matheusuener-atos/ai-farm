@@ -23,6 +23,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmAgentEnrollmentRecord> FarmAgentEnrollments => Set<FarmAgentEnrollmentRecord>();
     public DbSet<FarmJobRecord> FarmJobs => Set<FarmJobRecord>();
     public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
+    public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -339,6 +340,24 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<FarmEconomicsScenarioRecord>(entity =>
+        {
+            entity.ToTable("farm_economics_scenarios", table =>
+            {
+                table.HasCheckConstraint("CK_farm_economics_digest", "length(\"Digest\") = 64");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.Version).HasMaxLength(80);
+            entity.Property(x => x.InputPayload).HasColumnType("text");
+            entity.Property(x => x.ResultPayload).HasColumnType("text");
+            entity.Property(x => x.SourceEvidenceDigest).HasMaxLength(64);
+            entity.Property(x => x.Digest).HasMaxLength(64);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.SourceJobId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MessageFeedbackRecord>(entity =>
         {
             entity.ToTable("message_feedback", table =>
@@ -437,7 +456,23 @@ public sealed class FarmJobEventRecord
     public string Status { get; set; } = string.Empty;
     public string Detail { get; set; } = string.Empty;
     public DateTimeOffset OccurredAtUtc { get; set; }
-}public sealed class AccountRecord
+}
+
+public sealed class FarmEconomicsScenarioRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public string InputPayload { get; set; } = string.Empty;
+    public string ResultPayload { get; set; } = string.Empty;
+    public Guid? SourceJobId { get; set; }
+    public string? SourceEvidenceDigest { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public string Digest { get; set; } = string.Empty;
+}
+
+public sealed class AccountRecord
 {
     public Guid Id { get; set; }
     public string DisplayName { get; set; } = string.Empty;

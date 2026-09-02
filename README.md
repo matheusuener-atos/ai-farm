@@ -413,7 +413,9 @@ reserva de risco. O resultado mostra o reward máximo financiável em BRL e o
 eventual déficit. A capacidade pode ser preenchida pela vazão do último
 benchmark concluído, mantendo a referência ao Job e à validade da evidência.
 Ponto de equilíbrio e cenários de stress, base e favorável expõem a
-sensibilidade das hipóteses.
+sensibilidade das hipóteses. Fotografias de cenário são append-only, privadas
+por conta e persistem entrada, resultado, versão, benchmark de origem e digest
+SHA-256 para detectar alterações.
 
 Os valores iniciais são apenas um exemplo editável. O simulador não define
 preço real, não converte CU em AIC e não registra Reward no Ledger. Uma futura

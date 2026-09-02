@@ -43,3 +43,9 @@ O ponto de equilíbrio calcula o menor valor bruto por 1.000 CU que cobre
 energia e deduções percentuais. A análise de sensibilidade exibe três cenários
 transparentes — stress, base e favorável — para impedir que uma única projeção
 seja interpretada como promessa.
+
+Fotografias escolhidas pelo usuário são persistidas como registros append-only
+e isolados por conta. Cada registro congela os JSONs de entrada e resultado,
+versão, horário, Job/evidência de origem e um digest SHA-256 que inclui a conta.
+Recarregar uma fotografia cria uma cópia editável; salvar novamente acrescenta
+outro registro em vez de alterar o histórico.
