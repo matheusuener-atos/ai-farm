@@ -12,6 +12,67 @@ public sealed class PostgresAuditTrailTests
 {
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task PersonalApiTokensAreHashedScopedRevocableAndAccountIsolated()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var firstIdentity = NewIdentity("token-first");
+        var secondIdentity = NewIdentity("token-second");
+        try
+        {
+            await using var first = BuildProvider(connectionString, firstIdentity);
+            await using var second = BuildProvider(connectionString, secondIdentity);
+            await first.InitializeAIFarmAsync();
+            await second.InitializeAIFarmAsync();
+            var firstTokens = first.GetRequiredService<IApiTokenService>();
+            var secondTokens = second.GetRequiredService<IApiTokenService>();
+            var created = await firstTokens.CreateAsync(new ApiTokenCreateRequest(
+                "integração de teste",
+                ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead,
+                DateTimeOffset.UtcNow.AddDays(30)));
+
+            Assert.StartsWith("iris_pat_", created.Secret);
+            Assert.DoesNotContain(created.Secret, created.Token.Prefix);
+            Assert.Single(await firstTokens.ListAsync());
+            Assert.Empty(await secondTokens.ListAsync());
+            var authenticated = await first.GetRequiredService<IApiTokenAuthenticator>()
+                .AuthenticateAsync(created.Secret);
+            Assert.NotNull(authenticated);
+            Assert.Equal(firstIdentity.AccountId, authenticated.AccountId);
+            Assert.True(authenticated.Scopes.HasFlag(ApiTokenScope.UsageRead));
+            Assert.False(authenticated.Scopes.HasFlag(ApiTokenScope.AuditRead));
+            var security = await first.GetRequiredService<IAuditTrail>().SearchAsync(
+                new AuditQuery(Category: AuditCategory.Security));
+            var issuedEvent = Assert.Single(security.Events);
+            Assert.Equal("API_TOKEN", issuedEvent.Action);
+            Assert.Equal("ACTIVE", issuedEvent.Status);
+            Assert.Null(await first.GetRequiredService<IApiTokenAuthenticator>()
+                .AuthenticateAsync(created.Secret + "x"));
+
+            await using (var scope = first.CreateAsyncScope())
+            {
+                var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var stored = await db.ApiTokens.SingleAsync(x => x.Id == created.Token.Id);
+                Assert.Equal(32, stored.SecretHash.Length);
+                Assert.NotNull(stored.LastUsedAtUtc);
+            }
+            Assert.False(await secondTokens.RevokeAsync(created.Token.Id));
+            Assert.True(await firstTokens.RevokeAsync(created.Token.Id));
+            Assert.Null(await first.GetRequiredService<IApiTokenAuthenticator>()
+                .AuthenticateAsync(created.Secret));
+            var revoked = await first.GetRequiredService<IAuditTrail>().SearchAsync(
+                new AuditQuery(Category: AuditCategory.Security));
+            Assert.Equal("REVOKED", Assert.Single(revoked.Events).Status);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, firstIdentity, secondIdentity);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task IrisBudgetIsEnforcedIdempotentAndIsolatedByAccount()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
@@ -198,6 +259,7 @@ public sealed class PostgresAuditTrailTests
         var transactionIds = await db.LedgerTransactions.Where(x => walletIds.Contains(x.WalletId)).Select(x => x.Id).ToArrayAsync();
 
         db.OperationalIncidentAcknowledgements.RemoveRange(db.OperationalIncidentAcknowledgements.Where(x => accountIds.Contains(x.AccountId)));
+        db.ApiTokens.RemoveRange(db.ApiTokens.Where(x => accountIds.Contains(x.AccountId)));
         db.AiUsageBudgetReservations.RemoveRange(db.AiUsageBudgetReservations.Where(x => accountIds.Contains(x.AccountId)));
         db.AiUsageBudgetPolicies.RemoveRange(db.AiUsageBudgetPolicies.Where(x => accountIds.Contains(x.AccountId)));
         db.Messages.RemoveRange(db.Messages.Where(x => conversationIds.Contains(x.ConversationId)));

@@ -8,6 +8,7 @@ using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
 using atos.AIFarm.Web.Components.Account;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -41,7 +42,16 @@ builder.Services.AddAuthentication(options =>
         options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
     })
     .AddIdentityCookies();
-builder.Services.AddAuthorization();
+builder.Services.AddAuthentication()
+    .AddScheme<AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(
+        AIFarmApiTokenDefaults.Scheme, _ => { });
+builder.Services.AddAuthorization(options =>
+{
+    AddApiPolicy(options, AIFarmApiTokenDefaults.ProfileReadPolicy, ApiTokenScope.ProfileRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.UsageReadPolicy, ApiTokenScope.UsageRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.IncidentsReadPolicy, ApiTokenScope.IncidentsRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.AuditReadPolicy, ApiTokenScope.AuditRead);
+});
 builder.Services.AddHttpContextAccessor();
 if (builder.Configuration.GetValue<bool>("RENDER"))
 {
@@ -64,6 +74,17 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("personal-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst
@@ -376,6 +397,71 @@ app.MapGet("/api/audit/export", async (
     }
 }).RequireAuthorization();
 
+var personalApi = app.MapGroup("/api/v1")
+    .RequireRateLimiting("personal-api");
+personalApi.MapGet("/me", async (
+    IAIFarmIdentityAccessor identityAccessor,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+    return Results.Ok(new
+    {
+        identity.AccountId,
+        identity.DisplayName,
+        authenticatedWith = "iris_personal_token"
+    });
+}).RequireAuthorization(AIFarmApiTokenDefaults.ProfileReadPolicy);
+
+personalApi.MapGet("/usage", async (
+    IAiUsageQuery usage,
+    IAiUsageBudgetService budget,
+    CancellationToken cancellationToken) => Results.Ok(new
+    {
+        usage = await usage.GetDashboardAsync(20, cancellationToken),
+        budget = await budget.GetSnapshotAsync(cancellationToken)
+    })).RequireAuthorization(AIFarmApiTokenDefaults.UsageReadPolicy);
+
+personalApi.MapGet("/incidents", async (
+    string? search,
+    string? severity,
+    bool? openOnly,
+    IOperationalIncidentService incidents,
+    CancellationToken cancellationToken) =>
+{
+    if (!string.IsNullOrWhiteSpace(severity) &&
+        !Enum.TryParse<IncidentSeverity>(severity, true, out _))
+        return Results.BadRequest(new { error = "Severidade inválida." });
+    var parsed = Enum.TryParse<IncidentSeverity>(severity, true, out var value)
+        ? value : (IncidentSeverity?)null;
+    return Results.Ok(await incidents.SearchAsync(
+        new IncidentQuery(search, parsed, openOnly ?? true), cancellationToken));
+}).RequireAuthorization(AIFarmApiTokenDefaults.IncidentsReadPolicy);
+
+personalApi.MapGet("/audit", async (
+    string? search,
+    string? category,
+    int? page,
+    int? pageSize,
+    IAuditTrail audit,
+    CancellationToken cancellationToken) =>
+{
+    if (!string.IsNullOrWhiteSpace(category) &&
+        !Enum.TryParse<AuditCategory>(category, true, out _))
+        return Results.BadRequest(new { error = "Categoria inválida." });
+    var parsed = Enum.TryParse<AuditCategory>(category, true, out var value)
+        ? value : (AuditCategory?)null;
+    try
+    {
+        return Results.Ok(await audit.SearchAsync(
+            new AuditQuery(search, parsed, Page: page ?? 1, PageSize: pageSize ?? 25),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.AuditReadPolicy);
+
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,
     HttpResponse response,
@@ -565,6 +651,19 @@ static string ReadBearer(HttpRequest request)
     return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
         ? authorization["Bearer ".Length..].Trim()
         : string.Empty;
+}
+
+static void AddApiPolicy(
+    Microsoft.AspNetCore.Authorization.AuthorizationOptions options,
+    string name,
+    ApiTokenScope scope)
+{
+    options.AddPolicy(name, policy =>
+    {
+        policy.AddAuthenticationSchemes(AIFarmApiTokenDefaults.Scheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireClaim(AIFarmApiTokenDefaults.ScopeClaim, scope.ToString());
+    });
 }
 
 static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string contentRootPath)

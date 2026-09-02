@@ -40,7 +40,7 @@ public sealed class AuditQueryTests
     public void PageReportsNavigationFromFilteredTotal()
     {
         var page = new AuditPage(
-            [], new AuditTotals(51, 10, 10, 10, 10, 11, 0), 2, 25, false);
+            [], new AuditTotals(51, 10, 10, 10, 10, 11, 0, 0), 2, 25, false);
 
         Assert.Equal(3, page.TotalPages);
         Assert.True(page.HasPreviousPage);

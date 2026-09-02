@@ -28,6 +28,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
     public DbSet<AiUsageBudgetPolicyRecord> AiUsageBudgetPolicies => Set<AiUsageBudgetPolicyRecord>();
     public DbSet<AiUsageBudgetReservationRecord> AiUsageBudgetReservations => Set<AiUsageBudgetReservationRecord>();
+    public DbSet<ApiTokenRecord> ApiTokens => Set<ApiTokenRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -426,6 +427,23 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<ApiTokenRecord>(entity =>
+        {
+            entity.ToTable("api_tokens", table =>
+            {
+                table.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 15");
+                table.HasCheckConstraint("CK_api_tokens_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => x.Prefix);
+            entity.HasIndex(x => x.SecretHash).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.Prefix).HasMaxLength(12);
+            entity.Property(x => x.SecretHash).HasMaxLength(32);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MessageFeedbackRecord>(entity =>
         {
             entity.ToTable("message_feedback", table =>
@@ -587,6 +605,20 @@ public sealed class AiUsageBudgetReservationRecord
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset ExpiresAtUtc { get; set; }
     public DateTimeOffset? SettledAtUtc { get; set; }
+}
+
+public sealed class ApiTokenRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Prefix { get; set; } = string.Empty;
+    public byte[] SecretHash { get; set; } = [];
+    public int Scopes { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? LastUsedAtUtc { get; set; }
+    public DateTimeOffset? RevokedAtUtc { get; set; }
 }
 
 public sealed class AccountRecord

@@ -212,6 +212,25 @@ public sealed class PostgresAuditTrail(
             }));
         }
 
+        if (query.Category is null or AuditCategory.Security)
+        {
+            var records = await db.ApiTokens.AsNoTracking()
+                .Where(x => x.AccountId == identity.AccountId)
+                .Where(x => query.FromUtc == null || x.CreatedAtUtc >= query.FromUtc)
+                .Where(x => query.ToUtc == null || x.CreatedAtUtc <= query.ToUtc)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(MaximumScan + 1)
+                .ToArrayAsync(cancellationToken);
+            truncated |= records.Length > MaximumScan;
+            var now = timeProvider.GetUtcNow().ToUniversalTime();
+            events.AddRange(records.Take(MaximumScan).Select(record => new AuditEventSnapshot(
+                record.Id, record.CreatedAtUtc, AuditCategory.Security,
+                "API_TOKEN", record.RevokedAtUtc is not null ? "REVOKED" : record.ExpiresAtUtc <= now ? "EXPIRED" : "ACTIVE",
+                $"{record.Name} // {(ApiTokenScope)record.Scopes} // EXPIRA {record.ExpiresAtUtc:O}",
+                $"iris_pat_{record.Prefix}...", Short(record.Id), null, null,
+                AuditIntegrityStatus.NotApplicable)));
+        }
+
         return new LoadedEvents(events.OrderByDescending(x => x.OccurredAtUtc).ToArray(), truncated);
     }
 
@@ -237,6 +256,7 @@ public sealed class PostgresAuditTrail(
         events.Count(x => x.Category == AuditCategory.Farm),
         events.Count(x => x.Category == AuditCategory.Economics),
         events.Count(x => x.Category == AuditCategory.Reward),
+        events.Count(x => x.Category == AuditCategory.Security),
         events.Count(x => x.Integrity == AuditIntegrityStatus.Invalid));
 
     private static string Short(Guid value) => value.ToString("N")[..8];

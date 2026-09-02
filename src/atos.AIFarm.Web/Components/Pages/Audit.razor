@@ -9,7 +9,7 @@
     <div>
         <p class="eyebrow">atos:/AUDIT/CENTER</p>
         <h1>CENTRO DE AUDITORIA</h1>
-        <p>LEDGER // IRIS // FARM // ECONOMIA // REWARDS</p>
+        <p>LEDGER // IRIS // FARM // ECONOMIA // REWARDS // SEGURANÇA</p>
     </div>
     <a class="audit-export" href="@ExportUrl">[ EXPORTAR JSON ]</a>
 </header>
@@ -49,7 +49,7 @@ else if (_page is not null)
 {
     <section class="kpi-grid cols-5 audit-kpis" aria-live="polite">
         <article class="kpi kpi-purple"><span>EVENTOS</span><strong>@_page.Totals.Total</strong><small>FILTRO ATUAL</small></article>
-        <article class="kpi"><span>LEDGER + IRIS</span><strong>@(_page.Totals.Ledger + _page.Totals.Iris)</strong><small>@_page.Totals.Ledger LEDGER // @_page.Totals.Iris IRIS</small></article>
+        <article class="kpi"><span>CORE + SEGURANÇA</span><strong>@(_page.Totals.Ledger + _page.Totals.Iris + _page.Totals.Security)</strong><small>@_page.Totals.Ledger LEDGER // @_page.Totals.Iris IRIS // @_page.Totals.Security SECURITY</small></article>
         <article class="kpi kpi-amber"><span>FARM</span><strong>@_page.Totals.Farm</strong><small>JOBS E EVIDÊNCIAS</small></article>
         <article class="kpi"><span>ECONOMIA + REWARD</span><strong>@(_page.Totals.Economics + _page.Totals.Reward)</strong><small>@_page.Totals.Economics CENÁRIOS // @_page.Totals.Reward PROPOSTAS</small></article>
         <article class="kpi @(_page.Totals.IntegrityFailures == 0 ? "kpi-green" : "kpi-red")"><span>INTEGRIDADE</span><strong>@(_page.Totals.IntegrityFailures == 0 ? "OK" : $"{_page.Totals.IntegrityFailures} FALHA(S)")</strong><small>VALIDAÇÃO CRIPTOGRÁFICA E CONTÁBIL</small></article>
@@ -164,7 +164,8 @@ else if (_page is not null)
     private static string CategoryLabel(AuditCategory category) => category switch
     {
         AuditCategory.Ledger => "LEDGER", AuditCategory.Iris => "IRIS", AuditCategory.Farm => "FARM",
-        AuditCategory.Economics => "ECONOMIA", AuditCategory.Reward => "REWARD", _ => category.ToString().ToUpperInvariant()
+        AuditCategory.Economics => "ECONOMIA", AuditCategory.Reward => "REWARD",
+        AuditCategory.Security => "SEGURANÇA", _ => category.ToString().ToUpperInvariant()
     };
     private static string IntegrityLabel(AuditIntegrityStatus status) => status switch
     {

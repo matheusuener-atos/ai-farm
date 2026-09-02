@@ -6,7 +6,8 @@ public enum AuditCategory
     Iris,
     Farm,
     Economics,
-    Reward
+    Reward,
+    Security
 }
 
 public enum AuditIntegrityStatus
@@ -62,6 +63,7 @@ public sealed record AuditTotals(
     int Farm,
     int Economics,
     int Reward,
+    int Security,
     int IntegrityFailures);
 
 public sealed record AuditPage(

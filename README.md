@@ -402,6 +402,27 @@ Implementado:
 - Centro de Auditoria unificado e isolado por conta para Ledger, Iris, Farm, economia e rewards, com filtros, validação de integridade e exportação JSON digestada.
 - Centro de Incidentes que prioriza falhas de integridade, Iris, Farm e Node, com reconhecimento persistente e idempotente sem alterar a evidência original.
 - orçamento preventivo da Iris por conta, com teto por tarefa, dia e mês UTC, retenções concorrentes idempotentes e painel em `/iris/budget`.
+- tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos de leitura, expiração, revogação, rate limit e endpoints REST `/api/v1`.
+
+### API pessoal da Iris
+
+Emita e revogue credenciais na rota autenticada `/account/api-tokens`. O segredo
+`iris_pat_...` aparece uma única vez e deve ser enviado como Bearer somente aos
+endpoints compatíveis com os escopos selecionados:
+
+```text
+GET /api/v1/me
+GET /api/v1/usage
+GET /api/v1/incidents?openOnly=true
+GET /api/v1/audit?page=1&pageSize=25
+```
+
+Exemplo, sem registrar o token no repositório:
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:IRIS_API_TOKEN" }
+Invoke-RestMethod "http://localhost:5159/api/v1/usage" -Headers $headers
+```
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

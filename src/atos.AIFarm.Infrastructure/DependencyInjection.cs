@@ -108,6 +108,8 @@ public static class DependencyInjection
         services.RemoveAll<IAuditTrail>();
         services.RemoveAll<IOperationalIncidentService>();
         services.RemoveAll<IAiUsageBudgetService>();
+        services.RemoveAll<IApiTokenService>();
+        services.RemoveAll<IApiTokenAuthenticator>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
@@ -122,6 +124,9 @@ public static class DependencyInjection
         services.AddScoped<IAuditTrail, PostgresAuditTrail>();
         services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
         services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();
+        services.AddScoped<PostgresApiTokenService>();
+        services.AddScoped<IApiTokenService>(provider => provider.GetRequiredService<PostgresApiTokenService>());
+        services.AddScoped<IApiTokenAuthenticator>(provider => provider.GetRequiredService<PostgresApiTokenService>());
         if (objectStorage is null)
         {
             services.AddSingleton<IChatAttachmentService, UnavailableChatAttachmentService>();

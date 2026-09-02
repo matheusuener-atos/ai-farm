@@ -360,6 +360,8 @@ public sealed class PostgresAccountIsolationTests
             x => accountIds.Contains(x.AccountId)));
         db.AiUsageBudgetPolicies.RemoveRange(db.AiUsageBudgetPolicies.Where(
             x => accountIds.Contains(x.AccountId)));
+        db.ApiTokens.RemoveRange(db.ApiTokens.Where(
+            x => accountIds.Contains(x.AccountId)));
         await db.SaveChangesAsync();
         db.Messages.RemoveRange(db.Messages.Where(
             x => conversationIds.Contains(x.ConversationId)));
