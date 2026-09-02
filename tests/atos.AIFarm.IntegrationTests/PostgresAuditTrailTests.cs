@@ -12,6 +12,52 @@ public sealed class PostgresAuditTrailTests
 {
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task IrisBudgetIsEnforcedIdempotentAndIsolatedByAccount()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var firstIdentity = NewIdentity("budget-first");
+        var secondIdentity = NewIdentity("budget-second");
+        try
+        {
+            await using var first = BuildProvider(connectionString, firstIdentity);
+            await using var second = BuildProvider(connectionString, secondIdentity);
+            await first.InitializeAIFarmAsync();
+            await second.InitializeAIFarmAsync();
+            var firstBudget = first.GetRequiredService<IAiUsageBudgetService>();
+            var secondBudget = second.GetRequiredService<IAiUsageBudgetService>();
+            await firstBudget.UpdatePolicyAsync(new AiUsageBudgetPolicy(true, 20_000, 30_000, 100_000));
+
+            var operation = Guid.NewGuid();
+            var reservation = await firstBudget.ReserveAsync(operation, 20_000, "budget:test");
+            var replay = await firstBudget.ReserveAsync(operation, 20_000, "budget:test");
+            Assert.True(reservation.IsEnforced);
+            Assert.Equal(reservation, replay);
+            await Assert.ThrowsAsync<AiUsageBudgetExceededException>(() =>
+                firstBudget.ReserveAsync(Guid.NewGuid(), 20_000, "budget:blocked"));
+            Assert.False((await secondBudget.GetSnapshotAsync()).Policy.IsEnabled);
+            Assert.Equal(0, (await secondBudget.GetSnapshotAsync()).ReservedMinor);
+
+            await firstBudget.ReleaseAsync(operation);
+            Assert.Equal(0, (await firstBudget.GetSnapshotAsync()).ReservedMinor);
+
+            await firstBudget.UpdatePolicyAsync(new AiUsageBudgetPolicy(true, 10_000, 30_000, 100_000));
+            var workflow = first.GetRequiredService<ChatWorkflow>();
+            var blocked = await Assert.ThrowsAsync<AiUsageBudgetExceededException>(() =>
+                workflow.SendAsync("não deve alcançar o provider", "budget:workflow-blocked"));
+            Assert.Contains("por tarefa", blocked.Message);
+            var wallet = await first.GetRequiredService<IWalletService>().GetSnapshotAsync();
+            Assert.Single(wallet.Transactions);
+            Assert.Equal(1_000_000, wallet.Balance.AvailableMinor);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, firstIdentity, secondIdentity);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task IncidentsAreDetectedAcknowledgedAndIsolatedByAccount()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
@@ -95,7 +141,7 @@ public sealed class PostgresAuditTrailTests
                 PageSize: 100));
 
             Assert.True(all.Totals.Ledger >= 3);
-            Assert.Equal(1, all.Totals.Iris);
+            Assert.Equal(2, all.Totals.Iris);
             Assert.Equal(0, all.Totals.IntegrityFailures);
             Assert.All(all.Events.Where(x => x.Category == AuditCategory.Ledger),
                 x => Assert.Equal(AuditIntegrityStatus.Valid, x.Integrity));
@@ -106,6 +152,7 @@ public sealed class PostgresAuditTrailTests
             Assert.Empty(secondIris.Events);
 
             var export = await firstAudit.ExportAsync(new AuditQuery(
+                Search: "atos-fake-chat-v1",
                 Category: AuditCategory.Iris));
             Assert.StartsWith("atos-audit-", export.FileName);
             Assert.Equal("application/json; charset=utf-8", export.ContentType);
@@ -151,6 +198,8 @@ public sealed class PostgresAuditTrailTests
         var transactionIds = await db.LedgerTransactions.Where(x => walletIds.Contains(x.WalletId)).Select(x => x.Id).ToArrayAsync();
 
         db.OperationalIncidentAcknowledgements.RemoveRange(db.OperationalIncidentAcknowledgements.Where(x => accountIds.Contains(x.AccountId)));
+        db.AiUsageBudgetReservations.RemoveRange(db.AiUsageBudgetReservations.Where(x => accountIds.Contains(x.AccountId)));
+        db.AiUsageBudgetPolicies.RemoveRange(db.AiUsageBudgetPolicies.Where(x => accountIds.Contains(x.AccountId)));
         db.Messages.RemoveRange(db.Messages.Where(x => conversationIds.Contains(x.ConversationId)));
         db.AiExecutions.RemoveRange(db.AiExecutions.Where(x => requestIds.Contains(x.AiRequestId)));
         db.AiRequests.RemoveRange(db.AiRequests.Where(x => accountIds.Contains(x.AccountId)));

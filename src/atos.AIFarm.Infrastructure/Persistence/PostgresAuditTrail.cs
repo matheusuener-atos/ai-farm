@@ -125,6 +125,22 @@ public sealed class PostgresAuditTrail(
                 $"{item.Execution.Provider} // {item.Execution.Model} // {item.Request.DataClassification}",
                 Short(item.Request.ConversationId), Short(item.Request.OperationId),
                 item.Execution.ActualCostMinor, null, AuditIntegrityStatus.NotApplicable)));
+
+            var budgets = await db.AiUsageBudgetReservations.AsNoTracking()
+                .Where(x => x.AccountId == identity.AccountId)
+                .Where(x => query.FromUtc == null || x.CreatedAtUtc >= query.FromUtc)
+                .Where(x => query.ToUtc == null || x.CreatedAtUtc <= query.ToUtc)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(MaximumScan + 1)
+                .ToArrayAsync(cancellationToken);
+            truncated |= budgets.Length > MaximumScan;
+            events.AddRange(budgets.Take(MaximumScan).Select(record => new AuditEventSnapshot(
+                record.Id, record.CreatedAtUtc, AuditCategory.Iris,
+                "AI_BUDGET", record.Status.ToUpperInvariant(),
+                $"RETENÇÃO DE ORÇAMENTO // EXPIRA {record.ExpiresAtUtc:O}",
+                Short(record.OperationId), Short(record.Id),
+                record.Status == "Settled" ? record.ActualMinor : record.ReservedMinor,
+                null, AuditIntegrityStatus.NotApplicable)));
         }
 
         if (query.Category is null or AuditCategory.Farm)

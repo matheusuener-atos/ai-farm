@@ -85,6 +85,29 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task ProviderFailureAlsoReleasesTheAccountBudgetHold()
+    {
+        var wallet = await FundedWalletAsync();
+        var budget = new InMemoryAiUsageBudgetService(TimeProvider.System);
+        await budget.UpdatePolicyAsync(new AiUsageBudgetPolicy(
+            true, Aic.FromAic(20), Aic.FromAic(100), Aic.FromAic(500)));
+        var workflow = new ChatWorkflow(
+            wallet,
+            new FixedPriceEstimator(),
+            new BestAvailableRouteSelector(),
+            new ThrowingProvider(),
+            new InMemoryChatStore(),
+            usageBudget: budget);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.SendAsync("falhar com orçamento", "budget-provider-failure"));
+
+        var snapshot = await budget.GetSnapshotAsync();
+        Assert.Equal(0, snapshot.ReservedMinor);
+        Assert.Equal(0, snapshot.UsedTodayMinor);
+    }
+
+    [Fact]
     public async Task RepeatedRequestReturnsPreviousResultWithoutSecondDebit()
     {
         var wallet = await FundedWalletAsync();

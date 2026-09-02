@@ -12,7 +12,8 @@ public sealed class ChatWorkflow(
     TimeProvider? timeProvider = null,
     IChatContextPlanner? contextPlanner = null,
     IAiModelCatalog? modelCatalog = null,
-    IChatAttachmentService? attachmentService = null)
+    IChatAttachmentService? attachmentService = null,
+    IAiUsageBudgetService? usageBudget = null)
 {
     private readonly ChatExecutionLimits _executionLimits =
         ValidateLimits(executionLimits ?? ChatExecutionLimits.Default);
@@ -258,13 +259,36 @@ public sealed class ChatWorkflow(
         }
 
         var operationId = Guid.NewGuid();
-        var reservation = await wallet.ReservePromotionalAsync(
-            operationId,
-            plan.MaximumCostMinor,
-            $"{idempotencyKey}:reserve",
-            cancellationToken);
+        if (usageBudget is not null)
+        {
+            await usageBudget.ReserveAsync(
+                operationId,
+                plan.MaximumCostMinor,
+                $"{idempotencyKey}:budget",
+                cancellationToken);
+        }
+
+        ReservationResult reservation;
+        try
+        {
+            reservation = await wallet.ReservePromotionalAsync(
+                operationId,
+                plan.MaximumCostMinor,
+                $"{idempotencyKey}:reserve",
+                cancellationToken);
+        }
+        catch
+        {
+            if (usageBudget is not null)
+            {
+                try { await usageBudget.ReleaseAsync(operationId, CancellationToken.None); }
+                catch { /* A retenção expira automaticamente; preserve a falha original do Ledger. */ }
+            }
+            throw;
+        }
 
         var startedAtUtc = _timeProvider.GetUtcNow();
+        var budgetSettled = false;
         try
         {
             var request = new AiProviderRequest(
@@ -300,6 +324,14 @@ public sealed class ChatWorkflow(
                 providerResult.ActualCostMinor,
                 $"{idempotencyKey}:capture",
                 CancellationToken.None);
+            if (usageBudget is not null)
+            {
+                await usageBudget.SettleAsync(
+                    operationId,
+                    providerResult.ActualCostMinor,
+                    CancellationToken.None);
+                budgetSettled = true;
+            }
 
             var result = new ChatExecutionResult(
                 conversationId,
@@ -329,6 +361,8 @@ public sealed class ChatWorkflow(
                 $"{idempotencyKey}:release",
                 "Execução de IA não concluída",
                 CancellationToken.None);
+            if (usageBudget is not null && !budgetSettled)
+                await usageBudget.ReleaseAsync(operationId, CancellationToken.None);
             await chat.SaveFailedAsync(
                 idempotencyKey,
                 new FailedChatExecution(

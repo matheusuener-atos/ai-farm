@@ -1,0 +1,160 @@
+@page "/iris/budget"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IAiUsageBudgetService Budget
+
+<PageTitle>Orçamento da Iris // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow">atos:/IRIS/BUDGET</p>
+    <h1>LIMITES DE USO</h1>
+    <p>CONTROLE PREVENTIVO // RETENÇÕES CONCORRENTES // PERÍODOS EM UTC</p>
+</div>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+@if (_notice is not null)
+{
+    <p class="budget-notice" role="status">@_notice</p>
+}
+
+@if (_snapshot is null)
+{
+    <p>CARREGANDO ORÇAMENTO...</p>
+}
+else
+{
+    <div class="kpi-grid cols-5 budget-kpis">
+        <section class="kpi @(_snapshot.Policy.IsEnabled ? "kpi-green" : "kpi-amber")">
+            <span>POLÍTICA</span>
+            <strong>@(_snapshot.Policy.IsEnabled ? "ATIVA" : "DESATIVADA")</strong>
+            <small>ATUALIZADA @_snapshot.UpdatedAtUtc.ToString("dd/MM HH:mm") UTC</small>
+        </section>
+        <section class="kpi kpi-purple">
+            <span>USADO HOJE</span>
+            <strong>@Aic.Format(_snapshot.UsedTodayMinor)</strong>
+            <small>DESDE @_snapshot.DayStartedAtUtc.ToString("dd/MM 00:00") UTC</small>
+        </section>
+        <section class="kpi">
+            <span>USADO NO MÊS</span>
+            <strong>@Aic.Format(_snapshot.UsedThisMonthMinor)</strong>
+            <small>DESDE @_snapshot.MonthStartedAtUtc.ToString("dd/MM 00:00") UTC</small>
+        </section>
+        <section class="kpi kpi-amber">
+            <span>EM EXECUÇÃO</span>
+            <strong>@Aic.Format(_snapshot.ReservedMinor)</strong>
+            <small>RETENÇÕES ATIVAS</small>
+        </section>
+        <section class="kpi kpi-green">
+            <span>RESTANTE DIÁRIO</span>
+            <strong>@FormatRemaining(_snapshot.DailyRemainingMinor)</strong>
+            <small>MENSAL @FormatRemaining(_snapshot.MonthlyRemainingMinor)</small>
+        </section>
+    </div>
+
+    <section class="panel budget-panel">
+        <div class="panel-head section-heading">
+            <div>
+                <h2>POLÍTICA DA CONTA</h2>
+                <p class="muted">A ESTIMATIVA É RETIDA ANTES DO LEDGER E LIBERADA EM FALHAS</p>
+            </div>
+            <label class="budget-switch">
+                <input type="checkbox" @bind="_enabled" />
+                <span>@(_enabled ? "[ PROTEÇÃO ATIVA ]" : "[ PROTEÇÃO DESATIVADA ]")</span>
+            </label>
+        </div>
+
+        <div class="budget-form">
+            <label>
+                MÁXIMO POR TAREFA (AIC)
+                <input type="number" min="1" step="1" @bind="_perRequestAic" disabled="@_saving" />
+                <small>Bloqueia a execução antes de qualquer chamada externa.</small>
+            </label>
+            <label>
+                LIMITE DIÁRIO (AIC)
+                <input type="number" min="1" step="1" @bind="_dailyAic" disabled="@_saving" />
+                <small>Consumo liquidado + retenções ativas no dia UTC.</small>
+            </label>
+            <label>
+                LIMITE MENSAL (AIC)
+                <input type="number" min="1" step="1" @bind="_monthlyAic" disabled="@_saving" />
+                <small>Consumo liquidado + retenções ativas no mês UTC.</small>
+            </label>
+        </div>
+
+        <div class="budget-actions">
+            <button type="button" @onclick="SaveAsync" disabled="@_saving">
+                @(_saving ? "[ SALVANDO... ]" : "[ SALVAR POLÍTICA ]")
+            </button>
+            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_saving">[ ATUALIZAR CONSUMO ]</button>
+        </div>
+        <p class="muted budget-help">Desativar a política não apaga histórico. O limite global de segurança da instalação continua válido.</p>
+    </section>
+}
+
+@code {
+    private AiUsageBudgetSnapshot? _snapshot;
+    private bool _enabled;
+    private long _perRequestAic = 20;
+    private long _dailyAic = 100;
+    private long _monthlyAic = 1_000;
+    private bool _saving;
+    private string? _error;
+    private string? _notice;
+
+    protected override Task OnInitializedAsync() => LoadAsync(true);
+
+    private Task LoadAsync() => LoadAsync(false);
+
+    private async Task LoadAsync(bool copyPolicy)
+    {
+        _error = null;
+        try
+        {
+            _snapshot = await Budget.GetSnapshotAsync();
+            if (copyPolicy)
+            {
+                _enabled = _snapshot.Policy.IsEnabled;
+                if (_snapshot.Policy.MaximumPerRequestMinor > 0) _perRequestAic = ToAic(_snapshot.Policy.MaximumPerRequestMinor);
+                if (_snapshot.Policy.DailyLimitMinor > 0) _dailyAic = ToAic(_snapshot.Policy.DailyLimitMinor);
+                if (_snapshot.Policy.MonthlyLimitMinor > 0) _monthlyAic = ToAic(_snapshot.Policy.MonthlyLimitMinor);
+            }
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível carregar o orçamento da Iris.";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var policy = new AiUsageBudgetPolicy(
+                _enabled,
+                Aic.FromAic(_perRequestAic),
+                Aic.FromAic(_dailyAic),
+                Aic.FromAic(_monthlyAic));
+            _snapshot = await Budget.UpdatePolicyAsync(policy);
+            _notice = _enabled
+                ? "POLÍTICA ATIVA // NOVAS EXECUÇÕES SERÃO BLOQUEADAS ANTES DE ULTRAPASSAR O ORÇAMENTO"
+                : "POLÍTICA DESATIVADA // HISTÓRICO PRESERVADO";
+        }
+        catch (Exception exception) when (exception is ArgumentException or OverflowException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static long ToAic(long minor) => (long)Math.Ceiling(minor / (decimal)Aic.MinorUnitsPerAic);
+    private static string FormatRemaining(long? value) => value is null ? "SEM LIMITE" : Aic.Format(value.Value);
+}

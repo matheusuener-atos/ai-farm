@@ -40,6 +40,7 @@ public static class DependencyInjection
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageQuery>(provider =>
             provider.GetRequiredService<InMemoryChatStore>());
+        services.AddSingleton<IAiUsageBudgetService, InMemoryAiUsageBudgetService>();
         services.TryAddScoped<IConversationExportService, ConversationExportService>();
         if (openAi is null)
         {
@@ -106,6 +107,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmRewardProposalStore>();
         services.RemoveAll<IAuditTrail>();
         services.RemoveAll<IOperationalIncidentService>();
+        services.RemoveAll<IAiUsageBudgetService>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
@@ -119,6 +121,7 @@ public static class DependencyInjection
         services.AddScoped<IFarmRewardProposalStore, PostgresFarmRewardProposalStore>();
         services.AddScoped<IAuditTrail, PostgresAuditTrail>();
         services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
+        services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();
         if (objectStorage is null)
         {
             services.AddSingleton<IChatAttachmentService, UnavailableChatAttachmentService>();

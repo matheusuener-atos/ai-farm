@@ -355,6 +355,96 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.ToTable("ai_requests", "aifarm");
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.AiUsageBudgetPolicyRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("DailyLimitMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<long>("MaximumPerRequestMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("MonthlyLimitMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId")
+                        .IsUnique();
+
+                    b.ToTable("ai_usage_budget_policies", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_ai_usage_budget_policy_limits", "\"MaximumPerRequestMinor\" >= 0 AND \"DailyLimitMinor\" >= 0 AND \"MonthlyLimitMinor\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.AiUsageBudgetReservationRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ActualMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ReservedMinor")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("SettledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "Status", "ExpiresAtUtc");
+
+                    b.ToTable("ai_usage_budget_reservations", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_ai_usage_budget_reservation_amounts", "\"ReservedMinor\" > 0 AND \"ActualMinor\" >= 0 AND \"ActualMinor\" <= \"ReservedMinor\"");
+
+                            t.HasCheckConstraint("CK_ai_usage_budget_reservation_status", "\"Status\" IN ('Active', 'Settled', 'Released')");
+                        });
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.BalanceReservationRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1334,6 +1424,24 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasOne("atos.AIFarm.Infrastructure.Persistence.ConversationRecord", null)
                         .WithMany()
                         .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.AiUsageBudgetPolicyRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.AiUsageBudgetReservationRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

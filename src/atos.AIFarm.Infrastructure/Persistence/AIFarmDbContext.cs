@@ -26,6 +26,8 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
     public DbSet<FarmRewardProposalRecord> FarmRewardProposals => Set<FarmRewardProposalRecord>();
     public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
+    public DbSet<AiUsageBudgetPolicyRecord> AiUsageBudgetPolicies => Set<AiUsageBudgetPolicyRecord>();
+    public DbSet<AiUsageBudgetReservationRecord> AiUsageBudgetReservations => Set<AiUsageBudgetReservationRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -394,6 +396,36 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<AiUsageBudgetPolicyRecord>(entity =>
+        {
+            entity.ToTable("ai_usage_budget_policies", table =>
+            {
+                table.HasCheckConstraint("CK_ai_usage_budget_policy_limits",
+                    "\"MaximumPerRequestMinor\" >= 0 AND \"DailyLimitMinor\" >= 0 AND \"MonthlyLimitMinor\" >= 0");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AiUsageBudgetReservationRecord>(entity =>
+        {
+            entity.ToTable("ai_usage_budget_reservations", table =>
+            {
+                table.HasCheckConstraint("CK_ai_usage_budget_reservation_amounts",
+                    "\"ReservedMinor\" > 0 AND \"ActualMinor\" >= 0 AND \"ActualMinor\" <= \"ReservedMinor\"");
+                table.HasCheckConstraint("CK_ai_usage_budget_reservation_status",
+                    "\"Status\" IN ('Active', 'Settled', 'Released')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.OperationId }).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.IdempotencyKey }).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.Status, x.ExpiresAtUtc });
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(200);
+            entity.Property(x => x.Status).HasMaxLength(16);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MessageFeedbackRecord>(entity =>
         {
             entity.ToTable("message_feedback", table =>
@@ -530,6 +562,31 @@ public sealed class OperationalIncidentAcknowledgementRecord
     public Guid AccountId { get; set; }
     public string IncidentKey { get; set; } = string.Empty;
     public DateTimeOffset AcknowledgedAtUtc { get; set; }
+}
+
+public sealed class AiUsageBudgetPolicyRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public bool IsEnabled { get; set; }
+    public long MaximumPerRequestMinor { get; set; }
+    public long DailyLimitMinor { get; set; }
+    public long MonthlyLimitMinor { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class AiUsageBudgetReservationRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid OperationId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public long ReservedMinor { get; set; }
+    public long ActualMinor { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? SettledAtUtc { get; set; }
 }
 
 public sealed class AccountRecord
