@@ -11,8 +11,9 @@ public enum ApiTokenScope
     ConversationsRead = 16,
     IrisExecute = 32,
     FarmRead = 64,
+    FarmExecute = 128,
     AllRead = ProfileRead | UsageRead | IncidentsRead | AuditRead | ConversationsRead,
-    All = AllRead | IrisExecute | FarmRead
+    All = AllRead | IrisExecute | FarmRead | FarmExecute
 }
 
 public sealed record ApiTokenCreateRequest(

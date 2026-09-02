@@ -57,13 +57,42 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default) =>
         RunWorkloadAsync(FarmWorkloadCatalog.DefaultId, cancellationToken);
 
-    public async Task<FarmJobSnapshot> RunWorkloadAsync(
+    public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(workloadId, null, null, cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
+        string workloadId,
+        Guid tokenId,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(workloadId, tokenId, idempotencyKey, cancellationToken);
+
+    private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
+        string workloadId,
+        Guid? apiTokenId,
+        string? apiIdempotencyKey,
+        CancellationToken cancellationToken)
     {
         var definition = FarmWorkloadCatalog.GetRequired(workloadId);
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        if (apiTokenId is Guid tokenId && apiIdempotencyKey is not null)
+        {
+            var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                x => x.AccountId == identity.AccountId &&
+                     x.ApiTokenId == tokenId &&
+                     x.ApiIdempotencyKey == apiIdempotencyKey,
+                cancellationToken);
+            if (replay is not null)
+            {
+                if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version)
+                    throw new InvalidOperationException(
+                        "A chave de idempotência já foi usada com outro workload.");
+                return await LoadJobAsync(db, replay.Id, cancellationToken);
+            }
+        }
         var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
         await FarmJobLifecycle.ExpireAsync(
             db,
@@ -86,7 +115,24 @@ internal sealed class PostgresFarmLabService(
                 x => x.AccountId == identity.AccountId &&
                      FarmJobLifecycle.ActiveStatuses.Contains(x.Status),
                 cancellationToken))
+        {
+            if (apiTokenId is Guid activeTokenId && apiIdempotencyKey is not null)
+            {
+                var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == identity.AccountId &&
+                         x.ApiTokenId == activeTokenId &&
+                         x.ApiIdempotencyKey == apiIdempotencyKey,
+                    cancellationToken);
+                if (replay is not null)
+                {
+                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version)
+                        throw new InvalidOperationException(
+                            "A chave de idempotência já foi usada com outro workload.");
+                    return await LoadJobAsync(db, replay.Id, cancellationToken);
+                }
+            }
             throw new InvalidOperationException("Já existe um Job do laboratório em execução.");
+        }
 
         var now = timeProvider.GetUtcNow();
         var jobId = Guid.NewGuid();
@@ -126,6 +172,8 @@ internal sealed class PostgresFarmLabService(
             Id = jobId,
             AccountId = identity.AccountId,
             NodeId = node.Id,
+            ApiTokenId = apiTokenId,
+            ApiIdempotencyKey = apiIdempotencyKey,
             Workload = definition.Workload,
             WorkloadVersion = definition.Version,
             VerificationPolicy = definition.VerificationPolicy,
@@ -150,6 +198,22 @@ internal sealed class PostgresFarmLabService(
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException exception)
         {
+            if (apiTokenId is Guid replayTokenId && apiIdempotencyKey is not null)
+            {
+                await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
+                var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == identity.AccountId &&
+                         x.ApiTokenId == replayTokenId &&
+                         x.ApiIdempotencyKey == apiIdempotencyKey,
+                    cancellationToken);
+                if (replay is not null)
+                {
+                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version)
+                        throw new InvalidOperationException(
+                            "A chave de idempotência já foi usada com outro workload.", exception);
+                    return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
+                }
+            }
             throw new InvalidOperationException(
                 "Não foi possível enfileirar o Job; pode existir outra execução ativa.",
                 exception);
@@ -234,6 +298,19 @@ internal sealed class PostgresFarmLabService(
         }
 
         return await LoadJobAsync(db, job.Id, cancellationToken);
+    }
+
+    public async Task<FarmJobSnapshot?> GetJobAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (jobId == Guid.Empty) return null;
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var exists = await db.FarmJobs.AsNoTracking().AnyAsync(
+            x => x.Id == jobId && x.AccountId == identity.AccountId,
+            cancellationToken);
+        return exists ? await LoadJobAsync(db, jobId, cancellationToken) : null;
     }
 
     public async Task<FarmDashboard> CancelJobAsync(

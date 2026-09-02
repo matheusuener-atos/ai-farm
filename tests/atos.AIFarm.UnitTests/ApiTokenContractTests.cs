@@ -11,7 +11,8 @@ public sealed class ApiTokenContractTests
     {
         var request = new ApiTokenCreateRequest(
             "  painel   interno  ",
-            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute | ApiTokenScope.FarmRead,
+            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute |
+            ApiTokenScope.FarmRead | ApiTokenScope.FarmExecute,
             Now.AddDays(30));
 
         var normalized = request.Normalize(Now);
@@ -20,6 +21,7 @@ public sealed class ApiTokenContractTests
         Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.UsageRead));
         Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.IrisExecute));
         Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.FarmRead));
+        Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.FarmExecute));
         Assert.Equal(TimeSpan.Zero, normalized.ExpiresAtUtc.Offset);
     }
 
@@ -33,7 +35,7 @@ public sealed class ApiTokenContractTests
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
             "token válido", ApiTokenScope.ProfileRead, Now.AddDays(367)).Normalize(Now));
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
-            "token válido", (ApiTokenScope)128, Now.AddDays(1)).Normalize(Now));
+            "token válido", (ApiTokenScope)256, Now.AddDays(1)).Normalize(Now));
     }
 
     [Theory]
@@ -51,5 +53,15 @@ public sealed class ApiTokenContractTests
             new IrisApiExecutionRequest("  ").Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new IrisApiExecutionRequest("válido", MaximumContextMessages: 65).Validate());
+    }
+
+    [Fact]
+    public void FarmApiValidatesCatalogAndSharedIdempotencyKey()
+    {
+        var definition = new FarmApiJobRequest("merkle-root-sha256-v1").Validate();
+        Assert.Equal("MERKLE_ROOT_SHA256", definition.Workload);
+        Assert.Equal("request-0001", PersonalApiIdempotencyKey.Normalize(" request-0001 "));
+        Assert.Throws<ArgumentException>(() => new FarmApiJobRequest("shell-v1").Validate());
+        Assert.Throws<ArgumentException>(() => PersonalApiIdempotencyKey.Normalize("curta"));
     }
 }

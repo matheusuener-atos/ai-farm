@@ -54,6 +54,7 @@ builder.Services.AddAuthorization(options =>
     AddApiPolicy(options, AIFarmApiTokenDefaults.ConversationsReadPolicy, ApiTokenScope.ConversationsRead);
     AddApiPolicy(options, AIFarmApiTokenDefaults.IrisExecutePolicy, ApiTokenScope.IrisExecute);
     AddApiPolicy(options, AIFarmApiTokenDefaults.FarmReadPolicy, ApiTokenScope.FarmRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.FarmExecutePolicy, ApiTokenScope.FarmExecute);
 });
 builder.Services.AddHttpContextAccessor();
 if (builder.Configuration.GetValue<bool>("RENDER"))
@@ -93,6 +94,17 @@ builder.Services.AddRateLimiter(options =>
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst
             }));
     options.AddPolicy("iris-execute", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("farm-execute", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
                 context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -470,6 +482,76 @@ personalApi.MapGet("/farm/workloads", () => Results.Ok(new
     catalogVersion = FarmWorkloadCatalog.Version,
     workloads = FarmWorkloadCatalog.Definitions
 })).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/jobs", async (
+    FarmApiJobRequest submission,
+    HttpRequest request,
+    HttpResponse response,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        return Results.Ok(await jobs.SubmitAsync(
+            submission,
+            tokenId,
+            request.Headers["X-Idempotency-Key"].ToString(),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(4 * 1024));
+
+personalApi.MapGet("/farm/jobs/{jobId:guid}", async (
+    Guid jobId,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var job = await jobs.GetAsync(jobId, cancellationToken);
+    return job is null ? Results.NotFound() : Results.Ok(job);
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/jobs/{jobId:guid}/cancel", async (
+    Guid jobId,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await jobs.CancelAsync(jobId, cancellationToken));
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/jobs/{jobId:guid}/evidence", async (
+    Guid jobId,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var evidence = await jobs.DownloadEvidenceAsync(jobId, cancellationToken);
+    return evidence is null
+        ? Results.NotFound()
+        : Results.File(evidence.Content, "application/json", evidence.FileName);
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
 personalApi.MapGet("/incidents", async (
     string? search,

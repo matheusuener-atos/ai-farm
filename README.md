@@ -419,6 +419,7 @@ Implementado:
 - Centro Analítico da Iris em `/iris/analytics`, com séries UTC, sucesso, latência, unidades, custos, economia de reserva, comparação entre períodos e breakdown por rota sem expor prompts ou respostas.
 - Centro Analítico da Farm em `/farm/analytics`, com CP verificado, vazão, sucesso, falhas, workloads, saúde do Node/Agent e pipeline econômico não liquidado.
 - catálogo compartilhado de workloads com seleção na Farm, benchmark SHA-256 e construção verificável de raiz Merkle no worker isolado.
+- API pessoal de Jobs da Farm com escopo privilegiado independente, submissão idempotente, consulta, cancelamento cooperativo e download de evidência assinada.
 
 ### API pessoal da Iris
 
@@ -436,6 +437,10 @@ GET /api/v1/conversations?page=1&pageSize=25
 GET /api/v1/conversations/{conversationId}
 GET /api/v1/farm/analytics?days=30
 GET /api/v1/farm/workloads
+POST /api/v1/farm/jobs
+GET /api/v1/farm/jobs/{jobId}
+POST /api/v1/farm/jobs/{jobId}/cancel
+GET /api/v1/farm/jobs/{jobId}/evidence
 POST /api/v1/iris/responses
 ```
 
@@ -473,6 +478,38 @@ liquida o custo na Wallet. `ConversationsRead` é um escopo separado e permite
 consultar o histórico sem conceder execução. As consultas têm limite de 120
 chamadas por minuto por token; a rota de execução usa o limite mais restritivo
 de 20 por minuto. Não registre tokens, prompts ou respostas em logs.
+
+### API de Jobs da Farm
+
+O escopo `FarmRead` permite consultar analytics, catálogo, Jobs e evidências da
+própria conta. Para submeter ou cancelar Jobs, emita um token com o escopo
+privilegiado `FarmExecute`. A API aceita somente workloads versionados do
+catálogo assinado; ela não executa comandos arbitrários, não emite AIC e não
+converte automaticamente CP em AIC.
+
+A submissão exige `X-Idempotency-Key` entre 8 e 120 caracteres. A chave é
+persistida e isolada por token: chamadas simultâneas com a mesma chave e o
+mesmo workload devolvem o mesmo Job, sem duplicar processamento. Reutilizar a
+chave para outro workload é rejeitado com conflito.
+
+```powershell
+$headers = @{
+  Authorization = "Bearer $env:IRIS_API_TOKEN"
+  "X-Idempotency-Key" = "farm-job-0001"
+}
+$body = @{ workloadId = "atos-sha256-chain-v1" } | ConvertTo-Json
+$job = Invoke-RestMethod "http://localhost:5159/api/v1/farm/jobs" `
+  -Method Post -ContentType "application/json" -Headers $headers -Body $body
+
+Invoke-RestMethod "http://localhost:5159/api/v1/farm/jobs/$($job.id)" -Headers $headers
+Invoke-WebRequest "http://localhost:5159/api/v1/farm/jobs/$($job.id)/evidence" `
+  -Headers $headers -OutFile "farm-evidence.json"
+```
+
+`POST /api/v1/farm/jobs/{jobId}/cancel` solicita cancelamento cooperativo ao
+Agent quando o Job já está em execução. Consultas exigem `FarmRead`; submissão
+e cancelamento exigem `FarmExecute` e têm limite de 20 chamadas por minuto por
+token. Todos os acessos são filtrados pela conta vinculada ao token.
 
 ### Centro Analítico da Iris
 

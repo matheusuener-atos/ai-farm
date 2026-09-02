@@ -497,7 +497,7 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_api_tokens_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
 
-                            t.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 127");
+                            t.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 255");
                         });
                 });
 
@@ -874,6 +874,13 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("AgentLeaseRenewedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ApiIdempotencyKey")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid?>("ApiTokenId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("AttemptId")
                         .HasColumnType("uuid");
 
@@ -1002,9 +1009,14 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("AccountId", "CreatedAtUtc");
 
+                    b.HasIndex("ApiTokenId", "ApiIdempotencyKey")
+                        .IsUnique();
+
                     b.ToTable("farm_jobs", "aifarm", t =>
                         {
                             t.HasCheckConstraint("CK_farm_jobs_agent_lease", "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR (\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
+
+                            t.HasCheckConstraint("CK_farm_jobs_api_idempotency_complete", "(\"ApiTokenId\" IS NULL AND \"ApiIdempotencyKey\" IS NULL) OR (\"ApiTokenId\" IS NOT NULL AND \"ApiIdempotencyKey\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
 

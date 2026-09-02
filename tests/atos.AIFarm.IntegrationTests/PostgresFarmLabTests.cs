@@ -64,6 +64,22 @@ public sealed class PostgresFarmLabTests
             Assert.Equal(1_000, merkle.ComputeUnitsMilli);
             Assert.Equal(64, merkle.ResultDigest?.Length);
             Assert.True(merkle.Evidence?.IsValid);
+
+            var api = provider.GetRequiredService<IFarmApiJobService>();
+            var tokenId = Guid.NewGuid();
+            var submissions = await Task.WhenAll(
+                Enumerable.Range(0, 4).Select(_ => api.SubmitAsync(
+                    new FarmApiJobRequest(FarmWorkloadCatalog.DefaultId),
+                    tokenId,
+                    "farm-api-job-0001")));
+            var submittedId = Assert.Single(submissions.Select(x => x.Id).Distinct());
+            var submitted = Assert.IsType<FarmJobSnapshot>(await api.GetAsync(submittedId));
+            Assert.Equal(FarmJobStatus.Completed, submitted.Status);
+            Assert.Equal(submittedId, submitted.Id);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => api.SubmitAsync(
+                new FarmApiJobRequest("merkle-root-sha256-v1"),
+                tokenId,
+                "farm-api-job-0001"));
         }
         finally
         {

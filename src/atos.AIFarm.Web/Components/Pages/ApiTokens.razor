@@ -61,7 +61,8 @@
     <fieldset class="token-scopes">
         <legend>ESCOPOS DE EXECUÇÃO</legend>
         <label><input type="checkbox" @bind="_irisExecute" /> EXECUTAR IRIS <small>POST /api/v1/iris/responses</small></label>
-        <p class="muted">ATENÇÃO // ESTE ESCOPO PODE CONSUMIR AIC DA WALLET E ESTÁ SUJEITO AOS ORÇAMENTOS DA CONTA.</p>
+        <label><input type="checkbox" @bind="_farmExecute" /> EXECUTAR FARM <small>SUBMETER E CANCELAR JOBS</small></label>
+        <p class="muted">ATENÇÃO // EXECUTAR IRIS PODE CONSUMIR AIC. EXECUTAR FARM CONSOME PROCESSAMENTO, SEM CONVERSÃO AUTOMÁTICA DE CP EM AIC.</p>
     </fieldset>
     <button type="button" @onclick="CreateAsync" disabled="@_working">
         @(_working ? "[ EMITINDO... ]" : "[ EMITIR TOKEN ]")
@@ -115,6 +116,7 @@
     private bool _auditRead;
     private bool _conversationsRead;
     private bool _farmRead;
+    private bool _farmExecute;
     private bool _irisExecute;
     private bool _loading = true;
     private bool _working;
@@ -165,6 +167,7 @@
         (_auditRead ? ApiTokenScope.AuditRead : 0) |
         (_conversationsRead ? ApiTokenScope.ConversationsRead : 0) |
         (_farmRead ? ApiTokenScope.FarmRead : 0) |
+        (_farmExecute ? ApiTokenScope.FarmExecute : 0) |
         (_irisExecute ? ApiTokenScope.IrisExecute : 0);
 
     private async Task CopySecretAsync()

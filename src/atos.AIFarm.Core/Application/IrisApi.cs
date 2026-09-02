@@ -96,12 +96,5 @@ public sealed class IrisApiService(IChatStore chat, ChatWorkflow workflow)
             result.WasReplayed);
 
     public static string NormalizeIdempotencyKey(string value)
-    {
-        var normalized = value?.Trim() ?? string.Empty;
-        if (normalized.Length is < 8 or > 120 || normalized.Any(char.IsControl))
-            throw new ArgumentException(
-                "X-Idempotency-Key deve conter entre 8 e 120 caracteres válidos.",
-                nameof(value));
-        return normalized;
-    }
+        => PersonalApiIdempotencyKey.Normalize(value);
 }

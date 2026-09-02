@@ -291,6 +291,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
                 table.HasCheckConstraint(
+                    "CK_farm_jobs_api_idempotency_complete",
+                    "(\"ApiTokenId\" IS NULL AND \"ApiIdempotencyKey\" IS NULL) OR " +
+                    "(\"ApiTokenId\" IS NOT NULL AND \"ApiIdempotencyKey\" IS NOT NULL)");
+                table.HasCheckConstraint(
                     "CK_farm_jobs_worker_telemetry",
                     "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR " +
                     "(\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
@@ -309,6 +313,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
             entity.HasIndex(x => x.AccountId)
                 .HasDatabaseName("UX_farm_jobs_account_active")
                 .IsUnique()
@@ -316,6 +321,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasIndex(x => x.NodeId);
             entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);
+            entity.Property(x => x.ApiIdempotencyKey).HasMaxLength(120);
             entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
             entity.Property(x => x.VerificationPolicy).HasMaxLength(120);
             entity.Property(x => x.Nonce).HasMaxLength(64);
@@ -431,7 +437,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("api_tokens", table =>
             {
-                table.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 127");
+                table.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 255");
                 table.HasCheckConstraint("CK_api_tokens_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
             });
             entity.HasKey(x => x.Id);
@@ -500,6 +506,8 @@ public sealed class FarmJobRecord
     public Guid Id { get; set; }
     public Guid AccountId { get; set; }
     public Guid NodeId { get; set; }
+    public Guid? ApiTokenId { get; set; }
+    public string? ApiIdempotencyKey { get; set; }
     public string Workload { get; set; } = string.Empty;
     public string WorkloadVersion { get; set; } = string.Empty;
     public string VerificationPolicy { get; set; } = string.Empty;

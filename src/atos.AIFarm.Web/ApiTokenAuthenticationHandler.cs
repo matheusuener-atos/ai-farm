@@ -18,6 +18,7 @@ public static class AIFarmApiTokenDefaults
     public const string ConversationsReadPolicy = "api:conversations:read";
     public const string IrisExecutePolicy = "api:iris:execute";
     public const string FarmReadPolicy = "api:farm:read";
+    public const string FarmExecutePolicy = "api:farm:execute";
 }
 
 public sealed class ApiTokenAuthenticationHandler(

@@ -197,6 +197,9 @@ public interface IFarmLabService
     Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default);
+    Task<FarmJobSnapshot?> GetJobAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default);
     Task<FarmDashboard> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
         Guid jobId,
