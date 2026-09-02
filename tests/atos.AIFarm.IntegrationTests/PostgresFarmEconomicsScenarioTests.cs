@@ -4,6 +4,7 @@ using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text;
 
 namespace atos.AIFarm.IntegrationTests;
 
@@ -58,6 +59,14 @@ public sealed class PostgresFarmEconomicsScenarioTests
 
             var storeB = providerB.GetRequiredService<IFarmEconomicsScenarioStore>();
             Assert.Empty(await storeB.ListAsync());
+            var report = Assert.IsType<FarmEconomicsReportDownload>(
+                await storeA.DownloadReportAsync(saved.Id));
+            Assert.Equal($"atos-farm-economics-{saved.Id:N}.json", report.FileName);
+            var reportJson = Encoding.UTF8.GetString(report.Content);
+            Assert.Contains("atos-farm-economics-report-v1", reportJson);
+            Assert.Contains(saved.Id.ToString(), reportJson);
+            Assert.Contains(saved.Digest, reportJson);
+            Assert.Null(await storeB.DownloadReportAsync(saved.Id));
             var balanceB = await providerB.GetRequiredService<IFarmBalanceQuery>().GetAsync();
             Assert.Equal(0, balanceB.CompletedJobs);
             Assert.Equal(0, balanceB.VerifiedComputeUnitsMilli);
@@ -76,6 +85,8 @@ public sealed class PostgresFarmEconomicsScenarioTests
 
             var tampered = Assert.Single(await storeA.ListAsync());
             Assert.False(tampered.IsIntegrityValid);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                storeA.DownloadReportAsync(saved.Id));
         }
         finally
         {

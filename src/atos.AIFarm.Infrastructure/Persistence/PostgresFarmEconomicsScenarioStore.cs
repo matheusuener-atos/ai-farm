@@ -76,6 +76,46 @@ public sealed class PostgresFarmEconomicsScenarioStore(
         return ToSnapshot(record);
     }
 
+    public async Task<FarmEconomicsReportDownload?> DownloadReportAsync(
+        Guid scenarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var record = await db.FarmEconomicsScenarios.AsNoTracking().SingleOrDefaultAsync(
+            x => x.Id == scenarioId && x.AccountId == identity.AccountId,
+            cancellationToken);
+        if (record is null) return null;
+
+        var snapshot = ToSnapshot(record);
+        if (!snapshot.IsIntegrityValid)
+            throw new InvalidOperationException("A fotografia econômica falhou na verificação de integridade.");
+
+        var payload = new FarmEconomicsReportPayload(
+            snapshot.Id,
+            snapshot.Name,
+            snapshot.Version,
+            snapshot.CreatedAtUtc,
+            snapshot.SourceJobId,
+            snapshot.SourceEvidenceDigest,
+            snapshot.Scenario,
+            snapshot.Result,
+            snapshot.Digest);
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
+        var payloadDigest = Convert.ToHexStringLower(SHA256.HashData(payloadBytes));
+        var report = new FarmEconomicsReportEnvelope(
+            "atos-farm-economics-report-v1",
+            "SHA256",
+            payloadDigest,
+            payload);
+        var content = JsonSerializer.SerializeToUtf8Bytes(
+            report,
+            new JsonSerializerOptions(JsonOptions) { WriteIndented = true });
+        return new FarmEconomicsReportDownload(
+            $"atos-farm-economics-{scenarioId:N}.json",
+            content);
+    }
+
     private static FarmEconomicsScenarioSnapshot ToSnapshot(FarmEconomicsScenarioRecord record)
     {
         var scenario = JsonSerializer.Deserialize<FarmEconomicsScenario>(record.InputPayload, JsonOptions)
@@ -122,4 +162,21 @@ public sealed class PostgresFarmEconomicsScenarioStore(
             throw new ArgumentException("O nome do cenário deve ter entre 1 e 80 caracteres.", nameof(value));
         return normalized;
     }
+
+    private sealed record FarmEconomicsReportPayload(
+        Guid ScenarioId,
+        string Name,
+        string ScenarioVersion,
+        DateTimeOffset CreatedAtUtc,
+        Guid? SourceJobId,
+        string? SourceEvidenceDigest,
+        FarmEconomicsScenario Input,
+        FarmEconomicsResult Result,
+        string SnapshotDigest);
+
+    private sealed record FarmEconomicsReportEnvelope(
+        string Version,
+        string Algorithm,
+        string PayloadDigest,
+        FarmEconomicsReportPayload Payload);
 }

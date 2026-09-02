@@ -12,8 +12,8 @@ automaticamente capacidade financeira para recompensar o Provider.
 
 A primeira prova da Fase 4 é um simulador puro e determinístico. Ele combina
 capacidade, utilização, sucesso, energia e deduções econômicas para calcular o
-reward máximo financiável em BRL. Os cenários não são persistidos e não alteram
-a Wallet ou o Ledger.
+reward máximo financiável em BRL. Fotografias escolhidas pelo usuário são
+persistidas, mas o simulador não altera a Wallet ou o Ledger.
 
 Não existe conversão CU → AIC neste incremento. Valores iniciais são exemplos
 editáveis, não preços ou promessas. Reward real permanece bloqueado até a fonte
@@ -49,3 +49,9 @@ e isolados por conta. Cada registro congela os JSONs de entrada e resultado,
 versão, horário, Job/evidência de origem e um digest SHA-256 que inclui a conta.
 Recarregar uma fotografia cria uma cópia editável; salvar novamente acrescenta
 outro registro em vez de alterar o histórico.
+
+Uma fotografia cuja integridade foi validada pode ser exportada pela própria
+conta em um relatório JSON. O relatório contém entradas, resultados, referência
+ao benchmark, digest da fotografia e um segundo digest SHA-256 calculado sobre
+o payload exportado. Esse segundo digest detecta alterações no arquivo, mas não
+é uma assinatura e não prova autoria. Fotografias adulteradas não são exportadas.

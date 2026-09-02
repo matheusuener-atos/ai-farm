@@ -12,6 +12,10 @@ public sealed record FarmEconomicsScenarioSnapshot(
     string Digest,
     bool IsIntegrityValid);
 
+public sealed record FarmEconomicsReportDownload(
+    string FileName,
+    byte[] Content);
+
 public interface IFarmEconomicsScenarioStore
 {
     Task<IReadOnlyList<FarmEconomicsScenarioSnapshot>> ListAsync(
@@ -22,5 +26,9 @@ public interface IFarmEconomicsScenarioStore
         string name,
         FarmEconomicsScenario scenario,
         Guid? sourceJobId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<FarmEconomicsReportDownload?> DownloadReportAsync(
+        Guid scenarioId,
         CancellationToken cancellationToken = default);
 }

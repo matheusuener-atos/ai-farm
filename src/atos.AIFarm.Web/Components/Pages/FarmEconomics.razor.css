@@ -60,6 +60,22 @@
 .economics-history dt { color: var(--muted); font-size: .62rem; }
 .economics-history dd { margin: .3rem 0 0; overflow-wrap: anywhere; }
 .economics-history button { padding: .45rem .65rem; font-size: .68rem; }
+.economics-history-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.economics-report-download {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    padding: .45rem .65rem;
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-size: .68rem;
+    text-decoration: none;
+}
+.economics-report-download:hover, .economics-report-download:focus-visible {
+    color: var(--black);
+    background: var(--green);
+    outline: none;
+}
 
 @media (max-width: 760px) {
     .economics-warning, .benchmark-source, .economics-result > header { align-items: flex-start; flex-direction: column; }

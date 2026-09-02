@@ -415,7 +415,10 @@ benchmark concluído, mantendo a referência ao Job e à validade da evidência.
 Ponto de equilíbrio e cenários de stress, base e favorável expõem a
 sensibilidade das hipóteses. Fotografias de cenário são append-only, privadas
 por conta e persistem entrada, resultado, versão, benchmark de origem e digest
-SHA-256 para detectar alterações.
+SHA-256 para detectar alterações. Cada fotografia íntegra pode ser baixada como
+relatório JSON pela própria conta. O envelope inclui um segundo digest SHA-256
+do payload exportado; ele permite verificar integridade e não representa uma
+assinatura criptográfica.
 
 Os valores iniciais são apenas um exemplo editável. O simulador não define
 preço real, não converte CU em AIC e não registra Reward no Ledger. Uma futura

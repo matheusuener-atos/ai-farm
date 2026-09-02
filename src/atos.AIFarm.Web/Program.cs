@@ -328,6 +328,27 @@ app.MapGet("/api/farm/jobs/{jobId:guid}/evidence", async (
     }
 }).RequireAuthorization();
 
+app.MapGet("/api/farm/economics/{scenarioId:guid}/report", async (
+    Guid scenarioId,
+    HttpResponse response,
+    IFarmEconomicsScenarioStore scenarios,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var report = await scenarios.DownloadReportAsync(scenarioId, cancellationToken);
+        return report is null
+            ? Results.NotFound()
+            : Results.File(report.Content, "application/json; charset=utf-8", report.FileName);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,
     HttpResponse response,

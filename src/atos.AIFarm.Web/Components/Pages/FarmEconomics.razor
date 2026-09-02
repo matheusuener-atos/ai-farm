@@ -170,9 +170,17 @@ else if (_result is not null)
                     <div><dt>BENCHMARK</dt><dd>@(saved.SourceJobId is null ? "MANUAL" : ShortId(saved.SourceJobId.Value))</dd></div>
                     <div><dt>DIGEST</dt><dd title="@saved.Digest">@ShortHash(saved.Digest)</dd></div>
                 </dl>
-                <button type="button" class="button-secondary" @onclick="() => LoadScenario(saved)" disabled="@(!saved.IsIntegrityValid)">
-                    [ CARREGAR CENÁRIO ]
-                </button>
+                <div class="economics-history-actions">
+                    <button type="button" class="button-secondary" @onclick="() => LoadScenario(saved)" disabled="@(!saved.IsIntegrityValid)">
+                        [ CARREGAR CENÁRIO ]
+                    </button>
+                    @if (saved.IsIntegrityValid)
+                    {
+                        <a class="economics-report-download" href="@ReportUrl(saved.Id)" download="@ReportFileName(saved.Id)">
+                            [ BAIXAR RELATÓRIO ]
+                        </a>
+                    }
+                </div>
             </article>
         }
     }
@@ -291,6 +299,8 @@ else if (_result is not null)
     private static string BreakEven(decimal? value) => value is null ? "INDETERMINADO" : Money(value.Value);
     private static string ShortId(Guid id) => id.ToString("N")[..8];
     private static string ShortHash(string value) => value.Length <= 16 ? value : $"{value[..12]}...{value[^4..]}";
+    private static string ReportUrl(Guid id) => $"/api/farm/economics/{id}/report";
+    private static string ReportFileName(Guid id) => $"atos-farm-economics-{id:N}.json";
     private static string ProjectionLabel(FarmEconomicsProjectionKind kind) => kind switch
     {
         FarmEconomicsProjectionKind.Stress => "STRESS",
