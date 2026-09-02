@@ -400,6 +400,7 @@ Implementado:
 - fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
 - propostas imutáveis de reward vinculadas a Job, evidência e cenário econômico, sem emissão automática de AIC.
 - Centro de Auditoria unificado e isolado por conta para Ledger, Iris, Farm, economia e rewards, com filtros, validação de integridade e exportação JSON digestada.
+- Centro de Incidentes que prioriza falhas de integridade, Iris, Farm e Node, com reconhecimento persistente e idempotente sem alterar a evidência original.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

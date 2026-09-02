@@ -12,6 +12,55 @@ public sealed class PostgresAuditTrailTests
 {
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task IncidentsAreDetectedAcknowledgedAndIsolatedByAccount()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var firstIdentity = NewIdentity("incident-first");
+        var secondIdentity = NewIdentity("incident-second");
+        try
+        {
+            await using var first = BuildProvider(connectionString, firstIdentity);
+            await using var second = BuildProvider(connectionString, secondIdentity);
+            await first.InitializeAIFarmAsync();
+            await second.InitializeAIFarmAsync();
+            var store = first.GetRequiredService<IChatStore>();
+            var conversation = await store.CreateConversationAsync();
+            var operationId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            await store.SaveFailedAsync(
+                $"incident:{operationId:N}",
+                new FailedChatExecution(
+                    conversation.Id, operationId,
+                    new AiRoute("test-provider", "test-model", "test-v1"),
+                    2_000, "Timeout", now, now.AddSeconds(30)),
+                CancellationToken.None);
+
+            var firstIncidents = first.GetRequiredService<IOperationalIncidentService>();
+            var secondIncidents = second.GetRequiredService<IOperationalIncidentService>();
+            var detected = await firstIncidents.SearchAsync(new IncidentQuery(
+                Severity: IncidentSeverity.Critical, OpenOnly: true));
+            var incident = Assert.Single(detected.Incidents, x => x.Source == IncidentSource.Iris);
+            Assert.Equal("AI_EXECUTION_FAILURE", incident.Code);
+            Assert.False(incident.IsAcknowledged);
+            Assert.False(await secondIncidents.AcknowledgeAsync(incident.Key));
+            Assert.True(await firstIncidents.AcknowledgeAsync(incident.Key));
+            Assert.True(await firstIncidents.AcknowledgeAsync(incident.Key));
+
+            var after = await firstIncidents.SearchAsync(new IncidentQuery(Search: "timeout"));
+            Assert.True(Assert.Single(after.Incidents).IsAcknowledged);
+            Assert.Equal(0, after.Open);
+            Assert.Empty((await firstIncidents.SearchAsync(new IncidentQuery(OpenOnly: true))).Incidents);
+            Assert.Empty((await secondIncidents.SearchAsync(new IncidentQuery())).Incidents);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, firstIdentity, secondIdentity);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task AuditIsAccountScopedFilterableAndExportsDigestEnvelope()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
@@ -101,6 +150,7 @@ public sealed class PostgresAuditTrailTests
         var requestIds = await db.AiRequests.Where(x => accountIds.Contains(x.AccountId)).Select(x => x.Id).ToArrayAsync();
         var transactionIds = await db.LedgerTransactions.Where(x => walletIds.Contains(x.WalletId)).Select(x => x.Id).ToArrayAsync();
 
+        db.OperationalIncidentAcknowledgements.RemoveRange(db.OperationalIncidentAcknowledgements.Where(x => accountIds.Contains(x.AccountId)));
         db.Messages.RemoveRange(db.Messages.Where(x => conversationIds.Contains(x.ConversationId)));
         db.AiExecutions.RemoveRange(db.AiExecutions.Where(x => requestIds.Contains(x.AiRequestId)));
         db.AiRequests.RemoveRange(db.AiRequests.Where(x => accountIds.Contains(x.AccountId)));
@@ -110,6 +160,11 @@ public sealed class PostgresAuditTrailTests
         db.LedgerEntries.RemoveRange(db.LedgerEntries.Where(x => transactionIds.Contains(x.TransactionId)));
         await db.SaveChangesAsync();
         db.LedgerTransactions.RemoveRange(db.LedgerTransactions.Where(x => walletIds.Contains(x.WalletId)));
+        await db.SaveChangesAsync();
+        var jobIds = await db.FarmJobs.Where(x => accountIds.Contains(x.AccountId)).Select(x => x.Id).ToArrayAsync();
+        db.FarmJobEvents.RemoveRange(db.FarmJobEvents.Where(x => jobIds.Contains(x.JobId)));
+        db.FarmJobs.RemoveRange(db.FarmJobs.Where(x => accountIds.Contains(x.AccountId)));
+        db.FarmNodes.RemoveRange(db.FarmNodes.Where(x => accountIds.Contains(x.AccountId)));
         await db.SaveChangesAsync();
         db.Wallets.RemoveRange(db.Wallets.Where(x => walletIds.Contains(x.Id)));
         db.Accounts.RemoveRange(db.Accounts.Where(x => accountIds.Contains(x.Id)));

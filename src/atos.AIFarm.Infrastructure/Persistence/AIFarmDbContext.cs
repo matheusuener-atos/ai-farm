@@ -25,6 +25,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
     public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
     public DbSet<FarmRewardProposalRecord> FarmRewardProposals => Set<FarmRewardProposalRecord>();
+    public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -384,6 +385,15 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<FarmEconomicsScenarioRecord>().WithMany().HasForeignKey(x => x.ScenarioId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<OperationalIncidentAcknowledgementRecord>(entity =>
+        {
+            entity.ToTable("operational_incident_acknowledgements");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.IncidentKey }).IsUnique();
+            entity.Property(x => x.IncidentKey).HasMaxLength(200);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MessageFeedbackRecord>(entity =>
         {
             entity.ToTable("message_feedback", table =>
@@ -512,6 +522,14 @@ public sealed class FarmRewardProposalRecord
     public string Status { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
     public string Digest { get; set; } = string.Empty;
+}
+
+public sealed class OperationalIncidentAcknowledgementRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string IncidentKey { get; set; } = string.Empty;
+    public DateTimeOffset AcknowledgedAtUtc { get; set; }
 }
 
 public sealed class AccountRecord
