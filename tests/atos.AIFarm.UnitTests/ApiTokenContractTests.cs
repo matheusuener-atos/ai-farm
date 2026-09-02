@@ -11,7 +11,7 @@ public sealed class ApiTokenContractTests
     {
         var request = new ApiTokenCreateRequest(
             "  painel   interno  ",
-            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute,
+            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute | ApiTokenScope.FarmRead,
             Now.AddDays(30));
 
         var normalized = request.Normalize(Now);
@@ -19,6 +19,7 @@ public sealed class ApiTokenContractTests
         Assert.Equal("painel interno", normalized.Name);
         Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.UsageRead));
         Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.IrisExecute));
+        Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.FarmRead));
         Assert.Equal(TimeSpan.Zero, normalized.ExpiresAtUtc.Offset);
     }
 
@@ -32,7 +33,7 @@ public sealed class ApiTokenContractTests
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
             "token válido", ApiTokenScope.ProfileRead, Now.AddDays(367)).Normalize(Now));
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
-            "token válido", (ApiTokenScope)64, Now.AddDays(1)).Normalize(Now));
+            "token válido", (ApiTokenScope)128, Now.AddDays(1)).Normalize(Now));
     }
 
     [Theory]

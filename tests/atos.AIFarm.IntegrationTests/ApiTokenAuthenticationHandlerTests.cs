@@ -17,7 +17,7 @@ public sealed class ApiTokenAuthenticationHandlerTests
         var tokenId = Guid.NewGuid();
         var authenticator = new StubAuthenticator("iris_pat_123456789abc_secret", new ApiTokenIdentity(
             tokenId, accountId, "Conta API",
-            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute));
+            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute | ApiTokenScope.FarmRead));
         var handler = NewHandler(authenticator, "Bearer iris_pat_123456789abc_secret");
 
         var result = await handler.AuthenticateAsync();
@@ -27,6 +27,7 @@ public sealed class ApiTokenAuthenticationHandlerTests
         Assert.Equal(tokenId.ToString(), result.Principal.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value);
         Assert.Contains(result.Principal.FindAll(AIFarmApiTokenDefaults.ScopeClaim), x => x.Value == "UsageRead");
         Assert.Contains(result.Principal.FindAll(AIFarmApiTokenDefaults.ScopeClaim), x => x.Value == "IrisExecute");
+        Assert.Contains(result.Principal.FindAll(AIFarmApiTokenDefaults.ScopeClaim), x => x.Value == "FarmRead");
         Assert.DoesNotContain(result.Principal.FindAll(AIFarmApiTokenDefaults.ScopeClaim), x => x.Value == "AuditRead");
     }
 

@@ -497,7 +497,7 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_api_tokens_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
 
-                            t.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 63");
+                            t.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 127");
                         });
                 });
 

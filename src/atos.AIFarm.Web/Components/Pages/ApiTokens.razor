@@ -56,6 +56,7 @@
         <label><input type="checkbox" @bind="_incidentsRead" /> INCIDENTES <small>GET /api/v1/incidents</small></label>
         <label><input type="checkbox" @bind="_auditRead" /> AUDITORIA <small>GET /api/v1/audit</small></label>
         <label><input type="checkbox" @bind="_conversationsRead" /> CONVERSAS <small>GET /api/v1/conversations</small></label>
+        <label><input type="checkbox" @bind="_farmRead" /> FARM <small>GET /api/v1/farm/analytics</small></label>
     </fieldset>
     <fieldset class="token-scopes">
         <legend>ESCOPOS DE EXECUÇÃO</legend>
@@ -113,6 +114,7 @@
     private bool _incidentsRead;
     private bool _auditRead;
     private bool _conversationsRead;
+    private bool _farmRead;
     private bool _irisExecute;
     private bool _loading = true;
     private bool _working;
@@ -162,6 +164,7 @@
         (_incidentsRead ? ApiTokenScope.IncidentsRead : 0) |
         (_auditRead ? ApiTokenScope.AuditRead : 0) |
         (_conversationsRead ? ApiTokenScope.ConversationsRead : 0) |
+        (_farmRead ? ApiTokenScope.FarmRead : 0) |
         (_irisExecute ? ApiTokenScope.IrisExecute : 0);
 
     private async Task CopySecretAsync()

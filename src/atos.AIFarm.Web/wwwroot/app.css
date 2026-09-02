@@ -247,6 +247,14 @@ button:disabled { cursor: not-allowed; opacity: .6; }
 .analytics-statuses > div:not(.panel-head) { display: grid; grid-template-columns: 1fr auto auto; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--line); font-size: .68rem; }
 .analytics-statuses > div small { color: var(--muted); }
 .analytics-empty { padding: 1rem; }
+.farm-analytics-kpis .kpi::before { background: var(--amber); }
+.farm-analytics-node-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.farm-analytics-node-grid > div { display: grid; gap: .5rem; min-height: 105px; padding: 1rem; border-right: 1px solid var(--line); }
+.farm-analytics-node-grid > div:last-child { border-right: 0; }
+.farm-analytics-node-grid span, .farm-analytics-node-grid small { color: var(--muted); font-size: .6rem; }
+.farm-analytics-node-grid strong { overflow-wrap: anywhere; }
+.analytics-bar-track .farm-analytics-bar { background: var(--amber); }
+.farm-economics-summary { border-color: rgba(255, 176, 0, .45); }
 .budget-notice { border: 1px solid var(--green); color: var(--green); padding: .85rem 1rem; }
 .budget-panel { padding: 1rem; }
 .budget-switch { display: flex; align-items: center; gap: .65rem; color: var(--green); cursor: pointer; }
@@ -591,6 +599,7 @@ tbody tr:hover { background: var(--surface-2); }
     .auth-hero { min-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line-strong); }
     .auth-hero h1 { font-size: clamp(2.6rem, 11vw, 5rem); }
     .analytics-detail-grid { grid-template-columns: 1fr; }
+    .farm-analytics-node-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 700px) {
@@ -605,4 +614,6 @@ tbody tr:hover { background: var(--surface-2); }
     .analytics-kpis { grid-template-columns: 1fr; }
     .analytics-bar-row { grid-template-columns: 44px minmax(80px, 1fr) auto; }
     .analytics-bar-row small { display: none; }
+    .farm-analytics-node-grid { grid-template-columns: 1fr; }
+    .farm-analytics-node-grid > div { border-right: 0; border-bottom: 1px solid var(--line); }
 }

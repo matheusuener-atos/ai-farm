@@ -53,6 +53,7 @@ builder.Services.AddAuthorization(options =>
     AddApiPolicy(options, AIFarmApiTokenDefaults.AuditReadPolicy, ApiTokenScope.AuditRead);
     AddApiPolicy(options, AIFarmApiTokenDefaults.ConversationsReadPolicy, ApiTokenScope.ConversationsRead);
     AddApiPolicy(options, AIFarmApiTokenDefaults.IrisExecutePolicy, ApiTokenScope.IrisExecute);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.FarmReadPolicy, ApiTokenScope.FarmRead);
 });
 builder.Services.AddHttpContextAccessor();
 if (builder.Configuration.GetValue<bool>("RENDER"))
@@ -448,6 +449,21 @@ personalApi.MapGet("/usage/analytics", async (
         return Results.BadRequest(new { error = exception.Message });
     }
 }).RequireAuthorization(AIFarmApiTokenDefaults.UsageReadPolicy);
+
+personalApi.MapGet("/farm/analytics", async (
+    int? days,
+    IFarmAnalyticsQuery analytics,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await analytics.GetAsync(days ?? 30, cancellationToken));
+    }
+    catch (ArgumentOutOfRangeException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
 personalApi.MapGet("/incidents", async (
     string? search,

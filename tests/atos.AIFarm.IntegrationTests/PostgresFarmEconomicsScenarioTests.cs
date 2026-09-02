@@ -67,6 +67,15 @@ public sealed class PostgresFarmEconomicsScenarioTests
             Assert.Single(concurrentProposals.Select(x => x.Id).Distinct());
             Assert.Equal(2, (await proposalsA.ListAsync()).Count);
 
+            var analyticsA = await providerA.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);
+            Assert.Equal(1, analyticsA.JobCount);
+            Assert.Equal(1, analyticsA.CompletedJobCount);
+            Assert.Equal(1_000, analyticsA.VerifiedProcessingPointsMilli);
+            Assert.NotNull(analyticsA.Node);
+            Assert.Equal(2, analyticsA.Economics.ScenarioCount);
+            Assert.Equal(2, analyticsA.Economics.RewardProposalCount);
+            Assert.Equal(2_000, analyticsA.Economics.ProposedProcessingPointsMilli);
+
             var walletA = providerA.GetRequiredService<IWalletService>();
             var operationId = Guid.NewGuid();
             var reservation = await walletA.ReservePromotionalAsync(
@@ -86,6 +95,11 @@ public sealed class PostgresFarmEconomicsScenarioTests
             Assert.Empty(await storeB.ListAsync());
             var proposalsB = providerB.GetRequiredService<IFarmRewardProposalStore>();
             Assert.Empty(await proposalsB.ListAsync());
+            var analyticsB = await providerB.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);
+            Assert.Equal(0, analyticsB.JobCount);
+            Assert.Null(analyticsB.Node);
+            Assert.Equal(0, analyticsB.Economics.ScenarioCount);
+            Assert.Equal(0, analyticsB.Economics.RewardProposalCount);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 proposalsB.CreateAsync(job.Id, saved.Id));
             var report = Assert.IsType<FarmEconomicsReportDownload>(

@@ -404,6 +404,7 @@ Implementado:
 - orçamento preventivo da Iris por conta, com teto por tarefa, dia e mês UTC, retenções concorrentes idempotentes e painel em `/iris/budget`.
 - tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos mínimos, expiração, revogação, rate limit e endpoints REST `/api/v1` para consulta e execução idempotente.
 - Centro Analítico da Iris em `/iris/analytics`, com séries UTC, sucesso, latência, unidades, custos, economia de reserva, comparação entre períodos e breakdown por rota sem expor prompts ou respostas.
+- Centro Analítico da Farm em `/farm/analytics`, com CP verificado, vazão, sucesso, falhas, workloads, saúde do Node/Agent e pipeline econômico não liquidado.
 
 ### API pessoal da Iris
 
@@ -419,6 +420,7 @@ GET /api/v1/incidents?openOnly=true
 GET /api/v1/audit?page=1&pageSize=25
 GET /api/v1/conversations?page=1&pageSize=25
 GET /api/v1/conversations/{conversationId}
+GET /api/v1/farm/analytics?days=30
 POST /api/v1/iris/responses
 ```
 
@@ -470,6 +472,20 @@ Clientes com `UsageRead` obtêm o mesmo contrato por
 `GET /api/v1/usage/analytics?days=30`. O parâmetro aceita de 1 a 365 dias. A
 resposta preenche inclusive dias sem atividade, facilitando gráficos externos,
 e inclui o período anterior apenas como base agregada de comparação.
+
+### Centro Analítico da Farm
+
+A rota autenticada `/farm/analytics` consolida janelas móveis de 7, 30 ou 90
+dias em UTC. O painel mede Jobs ativos, concluídos e falhos, taxa de sucesso,
+CP verificado, CP por hora, duração, memória, tempo de CPU, variação contra o
+período anterior, série diária e desempenho por workload. Também mostra o
+estado efetivo do Node/Agent e resume cenários e propostas econômicas.
+
+Somente Jobs concluídos contribuem CP. O painel não executa workloads, não
+converte CP em AIC e não liquida propostas. Todas as consultas são filtradas
+pela conta autenticada. Tokens pessoais com o escopo `FarmRead` podem obter o
+mesmo contrato por `GET /api/v1/farm/analytics?days=30`; o parâmetro aceita de
+1 a 365 dias.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
