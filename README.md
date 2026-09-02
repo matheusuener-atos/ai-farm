@@ -422,6 +422,14 @@ preço real, não converte CU em AIC e não registra Reward no Ledger. Uma futur
 política comercial somente poderá consumir seus resultados depois que fonte de
 receita, regra CU → AIC e orçamento forem decididos explicitamente.
 
+### Saldo da Farm
+
+A rota autenticada `/saldo-farm` relaciona, sem converter automaticamente,
+todo CU de Jobs concluídos com transações `Reward` e `Capture` do Ledger. Ela
+distingue AIC gerado, AIC consumido, `Earned` disponível e saldo total. Enquanto
+não existir Reward Pool financiado, compute verificado aparece com zero AIC
+gerado de forma explícita.
+
 ## Marco 2 — Provider OpenAI
 
 A primeira integração real usa a Responses API server-side, com o snapshot

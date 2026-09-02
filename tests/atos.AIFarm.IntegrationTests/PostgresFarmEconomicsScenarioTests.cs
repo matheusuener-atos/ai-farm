@@ -1,4 +1,5 @@
 using atos.AIFarm.Core.Application;
+using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -40,8 +41,28 @@ public sealed class PostgresFarmEconomicsScenarioTests
             Assert.True(saved.Result.MaximumFundedReward > 0);
             Assert.Single(await storeA.ListAsync());
 
+            var walletA = providerA.GetRequiredService<IWalletService>();
+            var operationId = Guid.NewGuid();
+            var reservation = await walletA.ReservePromotionalAsync(
+                operationId, Aic.FromAic(20), "farm-balance:reserve");
+            await walletA.CaptureAsync(
+                reservation.ReservationId, Aic.FromAic(12), "farm-balance:capture");
+            var balanceA = await providerA.GetRequiredService<IFarmBalanceQuery>().GetAsync();
+            Assert.Equal(1_000, balanceA.VerifiedComputeUnitsMilli);
+            Assert.Equal(1, balanceA.CompletedJobs);
+            Assert.Equal(Aic.FromAic(12), balanceA.ConsumedAicMinor);
+            Assert.Equal(0, balanceA.GeneratedEarnedAicMinor);
+            Assert.Equal(0, balanceA.EarnedAvailableAicMinor);
+            Assert.Equal(Aic.FromAic(988), balanceA.TotalAvailableAicMinor);
+            Assert.False(balanceA.HasFundedRewards);
+
             var storeB = providerB.GetRequiredService<IFarmEconomicsScenarioStore>();
             Assert.Empty(await storeB.ListAsync());
+            var balanceB = await providerB.GetRequiredService<IFarmBalanceQuery>().GetAsync();
+            Assert.Equal(0, balanceB.CompletedJobs);
+            Assert.Equal(0, balanceB.VerifiedComputeUnitsMilli);
+            Assert.Equal(0, balanceB.ConsumedAicMinor);
+            Assert.Equal(Aic.FromAic(1_000), balanceB.TotalAvailableAicMinor);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 storeB.SaveAsync("origem alheia", Scenario(), job.Id));
 

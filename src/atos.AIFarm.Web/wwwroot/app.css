@@ -287,7 +287,7 @@ code { color: var(--white); }
 }
 
 .farm-node-panel { border: 1px solid var(--amber); background: var(--amber-deep); margin-bottom: 1rem; }
-.farm-economics-link { display: inline-block; margin: 0 0 1rem; border: 1px solid var(--amber); padding: .6rem .8rem; color: var(--amber-bright); text-decoration: none; font-size: .72rem; }
+.farm-economics-link { display: inline-block; margin: 0 .5rem 1rem 0; border: 1px solid var(--amber); padding: .6rem .8rem; color: var(--amber-bright); text-decoration: none; font-size: .72rem; }
 .farm-economics-link:hover { color: var(--black); background: var(--amber); }
 .farm-node-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid #4b3600; }
 .farm-node-header > div { display: grid; gap: .35rem; }

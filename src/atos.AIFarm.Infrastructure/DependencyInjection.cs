@@ -102,6 +102,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmLabService>();
         services.RemoveAll<IFarmAgentService>();
         services.RemoveAll<IFarmEconomicsScenarioStore>();
+        services.RemoveAll<IFarmBalanceQuery>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
@@ -111,6 +112,7 @@ public static class DependencyInjection
         services.AddScoped<IFarmLabService, PostgresFarmLabService>();
         services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();
         services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
+        services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
         if (objectStorage is null)
         {
             services.AddSingleton<IChatAttachmentService, UnavailableChatAttachmentService>();
