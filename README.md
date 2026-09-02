@@ -431,6 +431,7 @@ Implementado:
 - catálogo compartilhado de workloads com seleção na Farm, benchmark SHA-256 e construção verificável de raiz Merkle no worker isolado.
 - API pessoal de Jobs da Farm com escopo privilegiado independente, submissão idempotente, consulta, cancelamento cooperativo e download de evidência assinada.
 - verificação profunda de evidências contra manifesto, Job e lifecycle persistido, integrada à UI, API, Auditoria, downloads e gate de rewards.
+- Centro de Jobs em `/farm/jobs`, com histórico paginado, filtros operacionais, origem API/painel, inspeção do lifecycle e exportação JSON digestada.
 
 ### API pessoal da Iris
 
@@ -448,6 +449,8 @@ GET /api/v1/conversations?page=1&pageSize=25
 GET /api/v1/conversations/{conversationId}
 GET /api/v1/farm/analytics?days=30
 GET /api/v1/farm/workloads
+GET /api/v1/farm/jobs?page=1&pageSize=20
+GET /api/v1/farm/jobs/export
 POST /api/v1/farm/jobs
 GET /api/v1/farm/jobs/{jobId}
 POST /api/v1/farm/jobs/{jobId}/cancel
@@ -524,6 +527,22 @@ token. Todos os acessos são filtrados pela conta vinculada ao token. A consulta
 do Job devolve `evidence.verification` com os estados independentes de HMAC,
 manifesto, vínculo do Job e lifecycle; `evidence.isValid` só é verdadeiro quando
 as quatro verificações são aprovadas.
+
+### Centro de Jobs da Farm
+
+A rota autenticada `/farm/jobs` remove a limitação operacional dos dez Jobs
+recentes do Compute Lab. Ela permite pesquisar por UUID, attempt, workload,
+versão ou política e filtrar por workload catalogado, status, origem, período
+UTC e falha de integridade. Cada resultado inclui manifesto, diagnóstico do
+bundle e lifecycle completo, sempre isolado pela conta autenticada.
+
+O botão de exportação gera um envelope `atos-farm-job-history-export-v1` com os
+filtros aplicados, totais, Jobs e digest SHA-256 do payload. Segredos de token e
+chaves de idempotência não fazem parte do contrato. A consulta limita cada
+varredura a 5.000 registros e sinaliza truncamento para que o operador refine o
+período. Clientes com `FarmRead` usam as mesmas projeções em
+`GET /api/v1/farm/jobs` e `GET /api/v1/farm/jobs/export`; paginação aceita de 1
+a 100 itens por página.
 
 ### Centro Analítico da Iris
 

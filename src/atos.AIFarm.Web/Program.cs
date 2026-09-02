@@ -375,6 +375,33 @@ app.MapGet("/api/farm/jobs/{jobId:guid}/evidence", async (
     }
 }).RequireAuthorization();
 
+app.MapGet("/api/farm/jobs/export", async (
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    HttpResponse response,
+    IFarmJobHistoryService history,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var export = await history.ExportAsync(BuildFarmJobHistoryQuery(
+            search, workloadId, status, origin, integrityFailuresOnly,
+            fromUtc, toUtc, 1, 100), cancellationToken);
+        return Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
 app.MapGet("/api/farm/economics/{scenarioId:guid}/report", async (
     Guid scenarioId,
     HttpResponse response,
@@ -482,6 +509,58 @@ personalApi.MapGet("/farm/workloads", () => Results.Ok(new
     catalogVersion = FarmWorkloadCatalog.Version,
     workloads = FarmWorkloadCatalog.Definitions
 })).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/jobs", async (
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    int? page,
+    int? pageSize,
+    IFarmJobHistoryService history,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await history.SearchAsync(BuildFarmJobHistoryQuery(
+            search, workloadId, status, origin, integrityFailuresOnly,
+            fromUtc, toUtc, page ?? 1, pageSize ?? 20), cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/jobs/export", async (
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    HttpResponse response,
+    IFarmJobHistoryService history,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var export = await history.ExportAsync(BuildFarmJobHistoryQuery(
+            search, workloadId, status, origin, integrityFailuresOnly,
+            fromUtc, toUtc, 1, 100), cancellationToken);
+        return Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
 personalApi.MapPost("/farm/jobs", async (
     FarmApiJobRequest submission,
@@ -873,6 +952,47 @@ static void AddApiPolicy(
         policy.RequireAuthenticatedUser();
         policy.RequireClaim(AIFarmApiTokenDefaults.ScopeClaim, scope.ToString());
     });
+}
+
+static FarmJobHistoryQuery BuildFarmJobHistoryQuery(
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    int page,
+    int pageSize)
+{
+    FarmJobStatus? parsedStatus = null;
+    if (!string.IsNullOrWhiteSpace(status))
+    {
+        if (!Enum.TryParse<FarmJobStatus>(status, true, out var value) ||
+            !Enum.IsDefined(value))
+            throw new ArgumentException("Status de Job inválido.", nameof(status));
+        parsedStatus = value;
+    }
+
+    FarmJobOrigin? parsedOrigin = null;
+    if (!string.IsNullOrWhiteSpace(origin))
+    {
+        if (!Enum.TryParse<FarmJobOrigin>(origin, true, out var value) ||
+            !Enum.IsDefined(value))
+            throw new ArgumentException("Origem de Job inválida.", nameof(origin));
+        parsedOrigin = value;
+    }
+
+    return new FarmJobHistoryQuery(
+        search,
+        workloadId,
+        parsedStatus,
+        parsedOrigin,
+        integrityFailuresOnly ?? false,
+        fromUtc,
+        toUtc,
+        page,
+        pageSize).Normalize();
 }
 
 static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string contentRootPath)

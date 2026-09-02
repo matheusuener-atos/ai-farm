@@ -96,6 +96,10 @@ public sealed class PostgresFarmEconomicsScenarioTests
             var farmApiB = providerB.GetRequiredService<IFarmApiJobService>();
             Assert.Null(await farmApiB.GetAsync(job.Id));
             Assert.Null(await farmApiB.DownloadEvidenceAsync(job.Id));
+            var historyB = await providerB.GetRequiredService<IFarmJobHistoryService>()
+                .SearchAsync(new FarmJobHistoryQuery());
+            Assert.Empty(historyB.Items);
+            Assert.Equal(0, historyB.Totals.Total);
             var proposalsB = providerB.GetRequiredService<IFarmRewardProposalStore>();
             Assert.Empty(await proposalsB.ListAsync());
             var analyticsB = await providerB.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);

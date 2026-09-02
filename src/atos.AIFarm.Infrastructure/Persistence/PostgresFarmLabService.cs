@@ -561,7 +561,7 @@ internal sealed class PostgresFarmLabService(
             node.ProfileVerifiedAtUtc);
     }
 
-    private FarmJobSnapshot ToSnapshot(
+    internal FarmJobSnapshot ToSnapshot(
         FarmJobRecord job,
         IEnumerable<FarmJobEventRecord> events)
     {

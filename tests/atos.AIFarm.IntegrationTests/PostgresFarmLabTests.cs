@@ -3,6 +3,7 @@ using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text;
 
 namespace atos.AIFarm.IntegrationTests;
 
@@ -111,6 +112,36 @@ public sealed class PostgresFarmLabTests
             var balance = await provider.GetRequiredService<IFarmBalanceQuery>().GetAsync();
             Assert.Equal(2, balance.CompletedJobs);
             Assert.Equal(2_000, balance.VerifiedComputeUnitsMilli);
+
+            var history = provider.GetRequiredService<IFarmJobHistoryService>();
+            var allJobs = await history.SearchAsync(new FarmJobHistoryQuery(PageSize: 1));
+            Assert.Equal(3, allJobs.Totals.Total);
+            Assert.Equal(3, allJobs.TotalPages);
+            Assert.Single(allJobs.Items);
+            Assert.Equal(2, allJobs.Totals.Completed);
+            Assert.Equal(1, allJobs.Totals.IntegrityFailures);
+            Assert.Equal(2_000, allJobs.Totals.VerifiedProcessingPointsMilli);
+
+            var apiJobs = await history.SearchAsync(new FarmJobHistoryQuery(
+                Origin: FarmJobOrigin.PersonalApi));
+            Assert.Single(apiJobs.Items);
+            Assert.Equal(submitted.Id, apiJobs.Items[0].Job.Id);
+            var merkleJobs = await history.SearchAsync(new FarmJobHistoryQuery(
+                WorkloadId: "merkle-root-sha256-v1"));
+            Assert.Single(merkleJobs.Items);
+            Assert.Equal(merkle.Id, merkleJobs.Items[0].Job.Id);
+            var invalidJobs = await history.SearchAsync(new FarmJobHistoryQuery(
+                IntegrityFailuresOnly: true));
+            Assert.Single(invalidJobs.Items);
+            Assert.Equal(completed.Id, invalidJobs.Items[0].Job.Id);
+
+            var export = await history.ExportAsync(new FarmJobHistoryQuery(
+                IntegrityFailuresOnly: true));
+            var exportJson = Encoding.UTF8.GetString(export.Content);
+            Assert.Contains("atos-farm-job-history-export-v1", exportJson);
+            Assert.Contains("payloadDigest", exportJson);
+            Assert.Contains(completed.Id.ToString(), exportJson);
+            Assert.DoesNotContain(submitted.Id.ToString(), exportJson);
         }
         finally
         {

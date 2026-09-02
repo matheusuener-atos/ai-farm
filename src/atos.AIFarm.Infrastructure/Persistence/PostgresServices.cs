@@ -18,11 +18,20 @@ public sealed class PostgresWalletService(
         var transactionRecords = await db.LedgerTransactions
             .Where(x => x.WalletId == identity.WalletId)
             .OrderBy(x => x.CreatedAtUtc)
+            .ThenBy(x =>
+                x.Type == "Grant" ? 0 :
+                x.Type == "Reserve" ? 1 :
+                x.Type == "Capture" ? 2 :
+                x.Type == "Release" ? 3 :
+                x.Type == "Refund" ? 4 :
+                x.Type == "Reward" ? 5 : 6)
+            .ThenBy(x => x.Id)
             .ToListAsync(cancellationToken);
         var transactionIds = transactionRecords.Select(x => x.Id).ToArray();
         var entryRecords = await db.LedgerEntries
             .Where(x => transactionIds.Contains(x.TransactionId))
             .OrderBy(x => x.CreatedAtUtc)
+            .ThenBy(x => x.Id)
             .ToListAsync(cancellationToken);
 
         var entriesByTransaction = entryRecords
