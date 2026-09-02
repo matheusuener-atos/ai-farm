@@ -206,7 +206,7 @@ internal sealed class PostgresFarmLabService(
                 node.AgentVersion);
             node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
             node.LastSeenAtUtc = job.FinishedAtUtc.Value;
-            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, "1,000 CU verificado; nenhum AIC emitido.");
+            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, "1,000 CP verificado; nenhum AIC emitido.");
             await db.SaveChangesAsync(cancellationToken);
             await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -269,7 +269,7 @@ internal sealed class PostgresFarmLabService(
                 db,
                 job.Id,
                 FarmJobStatus.Cancelled,
-                "Oferta cancelada pelo usuário antes do aceite do Agent; nenhum CU ou AIC emitido.",
+                "Oferta cancelada pelo usuário antes do aceite do Agent; nenhum CP ou AIC emitido.",
                 now,
                 cancellationToken))
             return await BuildDashboardAsync(db, node, cancellationToken);
@@ -440,7 +440,7 @@ internal sealed class PostgresFarmLabService(
         job.Status = status.ToString();
         job.FailureReason = reason;
         job.FinishedAtUtc = timeProvider.GetUtcNow();
-        AddEvent(db, job, status, job.FinishedAtUtc.Value, $"{reason} Nenhum CU ou AIC emitido.");
+        AddEvent(db, job, status, job.FinishedAtUtc.Value, $"{reason} Nenhum CP ou AIC emitido.");
         await db.SaveChangesAsync(CancellationToken.None);
     }
 

@@ -5,7 +5,7 @@
 
 <PageTitle>Operações // atos AI Farm</PageTitle>
 
-<div class="page-heading">
+<div class="page-head">
     <p class="eyebrow">atos:/AI/OPERATIONS</p>
     <h1>OPERAÇÕES</h1>
     <p>USO MEDIDO // CUSTO AUDITÁVEL // ISOLADO POR CONTA</p>
@@ -21,36 +21,36 @@ else if (_dashboard is null)
 }
 else
 {
-    <div class="operations-grid">
-        <section class="metric purple-border">
+    <div class="kpi-grid cols-5">
+        <section class="kpi kpi-purple">
             <span>EXECUÇÕES</span>
             <strong>@_dashboard.Totals.ExecutionCount</strong>
             <small>@_dashboard.Totals.ConversationCount conversa(s)</small>
         </section>
-        <section class="metric">
+        <section class="kpi">
             <span>UNIDADES MEDIDAS</span>
             <strong>@(_dashboard.Totals.InputUnits + _dashboard.Totals.OutputUnits)</strong>
             <small>IN @_dashboard.Totals.InputUnits // OUT @_dashboard.Totals.OutputUnits</small>
         </section>
-        <section class="metric amber-border">
+        <section class="kpi kpi-amber">
             <span>CUSTO LIQUIDADO</span>
             <strong>@Aic.Format(_dashboard.Totals.ActualCostMinor)</strong>
             <small>ESTIMADO @Aic.Format(_dashboard.Totals.EstimatedCostMinor)</small>
         </section>
-        <section class="metric green-border">
+        <section class="kpi kpi-green">
             <span>AIC LIBERADO</span>
             <strong>@Aic.Format(_dashboard.Totals.ReleasedCostMinor)</strong>
             <small>ESTIMATIVA NÃO CONSUMIDA</small>
         </section>
-        <section class="metric purple-border">
+        <section class="kpi kpi-purple">
             <span>SATISFAÇÃO</span>
             <strong>@(_dashboard.Totals.SatisfactionPercent is decimal satisfaction ? $"{satisfaction:0.0}%" : "---")</strong>
             <small>@_dashboard.Totals.PositiveFeedbackCount ÚTIL // @_dashboard.Totals.NegativeFeedbackCount NÃO ÚTIL</small>
         </section>
     </div>
 
-    <section class="ledger operations-ledger">
-        <div class="section-heading">
+    <section class="panel ledger operations-ledger">
+        <div class="panel-head section-heading">
             <div>
                 <h2>EXECUÇÕES RECENTES</h2>
                 <p class="muted">ATÉ 50 OPERAÇÕES // PROMPTS E RESPOSTAS NÃO SÃO EXIBIDOS</p>
@@ -60,7 +60,7 @@ else
             </button>
         </div>
 
-        <div class="operations-filters">
+        <div class="filters operations-filters">
             <label>
                 BUSCAR
                 <input type="search" @bind="_search" @bind:event="oninput" placeholder="conversa, modelo ou operação" />

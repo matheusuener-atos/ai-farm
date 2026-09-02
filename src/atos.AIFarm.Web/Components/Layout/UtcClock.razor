@@ -1,0 +1,23 @@
+@implements IDisposable
+
+<time datetime="@_utc.ToString("O")">UTC @_utc.ToString("HH:mm:ss")</time>
+
+@code {
+    private DateTimeOffset _utc = DateTimeOffset.UtcNow;
+    private System.Threading.Timer? _timer;
+
+    protected override void OnInitialized()
+    {
+        _timer = new System.Threading.Timer(
+            _ => _ = InvokeAsync(() =>
+            {
+                _utc = DateTimeOffset.UtcNow;
+                StateHasChanged();
+            }),
+            null,
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(1));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -372,7 +372,7 @@ internal static class AgentApplication
                 execution.Token);
             Write(
                 "JOB",
-                $"{acknowledgement.Status.ToString().ToUpperInvariant()} // VERIFIED={acknowledgement.Verified} // CU={acknowledgement.ComputeUnitsMilli / 1000d:0.000} // PEAK={workerResult.PeakMemoryBytes / 1024d / 1024d:0.0}MB // CPU={workerResult.ProcessorTimeMilliseconds}ms // LIMIT={workerResult.Enforcement}");
+                $"{acknowledgement.Status.ToString().ToUpperInvariant()} // VERIFIED={acknowledgement.Verified} // CP={acknowledgement.ComputeUnitsMilli / 1000d:0.000} // PEAK={workerResult.PeakMemoryBytes / 1024d / 1024d:0.0}MB // CPU={workerResult.ProcessorTimeMilliseconds}ms // LIMIT={workerResult.Enforcement}");
         }
         catch (OperationCanceledException) when (!execution.IsCancellationRequested)
         {

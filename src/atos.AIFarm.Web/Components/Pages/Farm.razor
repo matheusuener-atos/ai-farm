@@ -7,10 +7,12 @@
 
 <PageTitle>Compute Lab // atos AI Farm</PageTitle>
 
-<div class="page-heading">
+<div class="page-head">
     <p class="eyebrow amber">atos:/FARM/COMPUTE_LAB</p>
     <h1>COMPUTE CONTROLADO</h1>
-    <p>Benchmark determinístico em host conhecido. CU técnico experimental, sem emissão de AIC.</p>
+    <p>Benchmark determinístico em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
+    <a class="farm-economics-link" href="/farm/economy">[ SIMULAR ECONOMIA → ]</a>
+    <a class="farm-economics-link" href="/saldo-farm">[ VER SALDO DA FARM → ]</a>
 </div>
 
 @if (_error is not null)
@@ -51,8 +53,8 @@ else
                 <strong>@FormatBytes(_dashboard.Node.MemoryBytes)</strong>
             </article>
             <article>
-                <span>CU VERIFICADO</span>
-                <strong>@FormatCu(_dashboard.VerifiedComputeUnitsMilli)</strong>
+                <span>CP VERIFICADO</span>
+                <strong>@FormatCp(_dashboard.VerifiedComputeUnitsMilli)</strong>
             </article>
             <article>
                 <span>CONEXÃO</span>
@@ -178,7 +180,7 @@ else
                     <dl>
                         <div><dt>VERSÃO</dt><dd>@job.WorkloadVersion</dd></div>
                         <div><dt>VERIFICAÇÃO</dt><dd>@job.VerificationPolicy</dd></div>
-                        <div><dt>CU</dt><dd>@FormatCu(job.ComputeUnitsMilli)</dd></div>
+                        <div><dt>CP</dt><dd>@FormatCp(job.ComputeUnitsMilli)</dd></div>
                         <div><dt>DURAÇÃO</dt><dd>@(job.DurationMilliseconds is null ? "---" : $"{job.DurationMilliseconds} MS")</dd></div>
                         <div><dt>DIGEST</dt><dd>@(job.ResultDigest is null ? "---" : job.ResultDigest[..12])</dd></div>
                         <div><dt>PICO DE MEMÓRIA</dt><dd>@(job.WorkerPeakMemoryBytes is null ? "---" : FormatBytes(job.WorkerPeakMemoryBytes.Value))</dd></div>
@@ -247,7 +249,7 @@ else
                             <li>
                                 <time>@entry.OccurredAtUtc.ToLocalTime().ToString("HH:mm:ss")</time>
                                 <strong>@JobStatusLabel(entry.Status)</strong>
-                                <span>@entry.Detail</span>
+                                <span>@DisplayEventDetail(entry.Detail)</span>
                             </li>
                         }
                     </ol>
@@ -406,7 +408,11 @@ else
     private static bool CanCancelStatus(FarmJobStatus status) =>
         status is FarmJobStatus.Offered or FarmJobStatus.Accepted or FarmJobStatus.Running;
 
-    private static string FormatCu(long milli) => $"{milli / 1000d:0.000} CU";
+    private static string FormatCp(long milli) => $"{milli / 1000d:0.000} CP";
+    private static string DisplayEventDetail(string detail) => detail
+        .Replace(" CU ", " CP ", StringComparison.Ordinal)
+        .Replace(" CU.", " CP.", StringComparison.Ordinal)
+        .Replace(" CU,", " CP,", StringComparison.Ordinal);
     private static string ShortId(Guid id) => id.ToString("N")[..8];
     private static string EvidenceUrl(Guid jobId) => $"/api/farm/jobs/{jobId}/evidence";
     private static string EvidenceFileName(Guid jobId) => $"atos-farm-evidence-{jobId:N}.json";

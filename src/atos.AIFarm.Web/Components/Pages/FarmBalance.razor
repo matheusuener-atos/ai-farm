@@ -1,0 +1,115 @@
+@page "/saldo-farm"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmBalanceQuery FarmBalanceQuery
+
+<PageTitle>Saldo da Farm // atos AI Farm</PageTitle>
+
+<div class="page-heading">
+    <p class="eyebrow amber">atos:/FARM/SALDO</p>
+    <h1>QUANTO EU JÁ FARMEI?</h1>
+    <p>Compute verificado, reward registrado e consumo de IA sem misturar grandezas.</p>
+</div>
+
+@if (_error is not null)
+{
+    <div class="error" role="alert">@_error</div>
+}
+else if (_snapshot is null)
+{
+    <section class="terminal placeholder">
+        <div class="terminal-title">[ CONSOLIDANDO FARM + LEDGER ]</div>
+    </section>
+}
+else
+{
+    <section class="farm-value-equation" aria-label="Fluxo de valor da Farm">
+        <article>
+            <span>[ 01 ] COMPUTE ÚTIL</span>
+            <strong>@FormatCp(_snapshot.VerifiedComputeUnitsMilli)</strong>
+            <small>@_snapshot.CompletedJobs JOBS CONCLUÍDOS</small>
+        </article>
+        <span aria-hidden="true">→</span>
+        <article>
+            <span>[ 02 ] AIC GERADO</span>
+            <strong>@Aic.Format(_snapshot.GeneratedEarnedAicMinor)</strong>
+            <small>REWARDS FINANCIADOS NO LEDGER</small>
+        </article>
+        <span aria-hidden="true">→</span>
+        <article>
+            <span>[ 03 ] IA CONSUMIDA</span>
+            <strong>@Aic.Format(_snapshot.ConsumedAicMinor)</strong>
+            <small>CAPTURAS LIQUIDADAS</small>
+        </article>
+    </section>
+
+    @if (!_snapshot.HasFundedRewards)
+    {
+        <section class="farm-no-reward" role="note">
+            <strong>[ SEM REWARD FINANCIADO ]</strong>
+            <p>Seu compute foi medido, mas não gerou AIC. Isso é esperado enquanto a política CP → AIC e o Reward Pool não forem aprovados e financiados.</p>
+        </section>
+    }
+
+    <section class="farm-balance-grid">
+        <article class="metric amber-border">
+            <span>EARNED DISPONÍVEL</span>
+            <strong>@Aic.Format(_snapshot.EarnedAvailableAicMinor)</strong>
+            <small>Somente rewards já registrados.</small>
+        </article>
+        <article class="metric">
+            <span>PURCHASED DISPONÍVEL</span>
+            <strong>@Aic.Format(_snapshot.PurchasedAvailableAicMinor)</strong>
+            <small>Compras ainda não fazem parte do MVP.</small>
+        </article>
+        <article class="metric purple-border">
+            <span>PROMOTIONAL DISPONÍVEL</span>
+            <strong>@Aic.Format(_snapshot.PromotionalAvailableAicMinor)</strong>
+            <small>Créditos do ambiente experimental.</small>
+        </article>
+        <article class="metric green-border">
+            <span>TOTAL DISPONÍVEL</span>
+            <strong>@Aic.Format(_snapshot.TotalAvailableAicMinor)</strong>
+            <small>Soma dos buckets da Wallet.</small>
+        </article>
+        <article class="metric">
+            <span>RESERVADO</span>
+            <strong>@Aic.Format(_snapshot.ReservedAicMinor)</strong>
+            <small>Operações ainda não liquidadas.</small>
+        </article>
+    </section>
+
+    <section class="terminal farm-balance-audit">
+        <div class="terminal-title">ORIGEM DOS NÚMEROS</div>
+        <dl>
+            <div><dt>COMPUTE</dt><dd>JOBS `COMPLETED` DA CONTA</dd></div>
+            <div><dt>AIC GERADO</dt><dd>TRANSAÇÕES `REWARD` DO LEDGER</dd></div>
+            <div><dt>IA CONSUMIDA</dt><dd>TRANSAÇÕES `CAPTURE` LIQUIDADAS</dd></div>
+            <div><dt>PERÍODO DA FARM</dt><dd>@FarmPeriod(_snapshot)</dd></div>
+        </dl>
+        <p>CP mede processamento. AIC mede poder de consumo. Esta tela não converte uma unidade na outra.</p>
+    </section>
+}
+
+<div class="farm-balance-links">
+    <a class="text-link" href="/farm">← COMPUTE LAB</a>
+    <a class="text-link" href="/farm/economy">SIMULAR ECONOMIA →</a>
+</div>
+
+@code {
+    private FarmBalanceSnapshot? _snapshot;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _snapshot = await FarmBalanceQuery.GetAsync(); }
+        catch (InvalidOperationException exception) { _error = exception.Message; }
+    }
+
+    private static string FormatCp(long milli) => $"{milli / 1_000m:N3} CP";
+
+    private static string FarmPeriod(FarmBalanceSnapshot snapshot) =>
+        snapshot.FirstCompletedJobAtUtc is null || snapshot.LastCompletedJobAtUtc is null
+            ? "SEM JOBS CONCLUÍDOS"
+            : $"{snapshot.FirstCompletedJobAtUtc.Value.ToLocalTime():dd/MM/yyyy HH:mm} → {snapshot.LastCompletedJobAtUtc.Value.ToLocalTime():dd/MM/yyyy HH:mm}";
+}

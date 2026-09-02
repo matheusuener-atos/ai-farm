@@ -206,21 +206,21 @@ pausar e retomar sua disponibilidade e executa somente o workload versionado
 atos-sha256-chain-v1.
 
 O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
-manifest no verificador e só registra 1,000 CU quando os digests coincidem.
+manifest no verificador e só registra 1,000 CP quando os digests coincidem.
 Cada novo Job congela um manifesto canônico assinado por HMAC-SHA256 com
 `attempt_id`, validade, timeout, limites de CPU/memória, classificação
 `STANDARD` e rede `DENY_ALL`. A assinatura e a allowlist são verificadas antes
 do runtime; Jobs históricos anteriores permanecem visíveis como legados.
 O PostgreSQL também impede mais de um Job ativo por conta, inclusive entre
 abas ou instâncias concorrentes, e cancelamentos terminalizam a tentativa sem
-emitir CU ou AIC.
+emitir CP ou AIC.
 No laboratório `EMBEDDED`, cada transição é persistida de forma ordenada:
 
     QUEUED → RUNNING → VERIFYING → COMPLETED
                                     ↘ FAILED
 
-Este CU é uma medição técnica experimental e específica dessa política; ainda
-não existe conversão CU → AIC. O laboratório não concede reward, não aceita
+Este CP (Ponto de Processamento) é uma medição técnica experimental e específica dessa política; ainda
+não existe conversão CP → AIC. O laboratório não concede reward, não aceita
 shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
 `EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
 executando — localmente, a máquina de desenvolvimento; no Render, o container
@@ -327,7 +327,7 @@ benchmark para aceitar ou rejeitar a evidência:
                                   └→ REJECTED
 
 Falhas de assinatura, manifesto expirado, resultado divergente ou estado
-inválido encerram a tentativa sem emitir CU ou AIC. Reenvios idempotentes só são
+inválido encerram a tentativa sem emitir CP ou AIC. Reenvios idempotentes só são
 aceitos quando apresentam exatamente a mesma evidência já concluída. O watchdog
 terminaliza ofertas abandonadas ao fim da validade assinada e runtimes que
 ultrapassam 30 segundos, liberando o índice de Job ativo para um novo despacho.
@@ -391,18 +391,60 @@ Implementado:
 - feedback persistente e atualizável por resposta, isolado por conta;
 - satisfação agregada por execução no painel operacional;
 - exportação autenticada e portável de conversas em Markdown e JSON.
-- Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
+- Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CP técnico e trilha de estados.
 - protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
 - executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
 - despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
 - cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
 - política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
 - fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
+- propostas imutáveis de reward vinculadas a Job, evidência e cenário econômico, sem emissão automática de AIC.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
 controlado depende da configuração de uma chave. Políticas comerciais e a Farm
 distribuída continuam fora deste marco.
+
+## Fase 4 — Simulador econômico
+
+A rota autenticada `/farm/economy` inicia a prova econômica sem alterar a
+Wallet. O cenário combina capacidade em CP/h, utilização, taxa de sucesso,
+energia, valor bruto do workload, verificação, plataforma, impostos, margem e
+reserva de risco. O resultado mostra o reward máximo financiável em BRL e o
+eventual déficit. A capacidade pode ser preenchida pela vazão do último
+benchmark concluído, mantendo a referência ao Job e à validade da evidência.
+Ponto de equilíbrio e cenários de stress, base e favorável expõem a
+sensibilidade das hipóteses. Fotografias de cenário são append-only, privadas
+por conta e persistem entrada, resultado, versão, benchmark de origem e digest
+SHA-256 para detectar alterações. Cada fotografia íntegra pode ser baixada como
+relatório JSON pela própria conta. O envelope inclui um segundo digest SHA-256
+do payload exportado; ele permite verificar integridade e não representa uma
+assinatura criptográfica.
+
+A rota autenticada `/farm/rewards` fecha a cadeia de proveniência antes de
+qualquer pagamento. Uma proposta só pode ser registrada quando o Job concluído
+possui evidência HMAC válida e a fotografia econômica íntegra foi criada a
+partir desse mesmo Job. Ela congela CP, valor recomendado em BRL, digests das
+duas fontes, versão, horário e digest próprio. A operação é idempotente por
+cenário e isolada por conta.
+
+Todas as propostas permanecem em `AwaitingPolicyAndFunding`. Elas não criam
+AIC, não movimentam o Ledger e não afirmam uma taxa CP → AIC. Liquidação só
+poderá ser adicionada depois que fonte do Reward Pool, orçamento, autoridade de
+aprovação e política de conversão forem definidos explicitamente.
+
+Os valores iniciais são apenas um exemplo editável. O simulador não define
+preço real, não converte CP em AIC e não registra Reward no Ledger. Uma futura
+política comercial somente poderá consumir seus resultados depois que fonte de
+receita, regra CP → AIC e orçamento forem decididos explicitamente.
+
+### Saldo da Farm
+
+A rota autenticada `/saldo-farm` relaciona, sem converter automaticamente,
+todo CP de Jobs concluídos com transações `Reward` e `Capture` do Ledger. Ela
+distingue AIC gerado, AIC consumido, `Earned` disponível e saldo total. Enquanto
+não existir Reward Pool financiado, compute verificado aparece com zero AIC
+gerado de forma explícita.
 
 ## Marco 2 — Provider OpenAI
 

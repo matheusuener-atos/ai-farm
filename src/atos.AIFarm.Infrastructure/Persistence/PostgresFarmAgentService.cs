@@ -514,7 +514,7 @@ internal sealed class PostgresFarmAgentService(
                 db,
                 job,
                 FarmJobStatus.Failed,
-                "Digest divergente; nenhum CU ou AIC emitido.",
+                "Digest divergente; nenhum CP ou AIC emitido.",
                 cancellationToken);
         }
         else
@@ -528,7 +528,7 @@ internal sealed class PostgresFarmAgentService(
                 db,
                 job,
                 FarmJobStatus.Completed,
-                "1,000 CU remoto verificado; nenhum AIC emitido.",
+                "1,000 CP remoto verificado; nenhum AIC emitido.",
                 cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
