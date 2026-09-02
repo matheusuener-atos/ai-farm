@@ -137,6 +137,49 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task ResourceAwareSchedulerUsesBestFitNodeAndUpdatesCapacityMatrix()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "capacity matrix test");
+        var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            var bestFitId = Guid.NewGuid();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                db.FarmNodes.AddRange(
+                    Agent(bestFitId, accountId, "BEST-FIT", 128L * 1024 * 1024, clock.GetUtcNow()),
+                    Agent(Guid.NewGuid(), accountId, "LARGE-NODE", 256L * 1024 * 1024, clock.GetUtcNow()));
+                await db.SaveChangesAsync();
+            }
+            var capacity = provider.GetRequiredService<IFarmCapacityQuery>();
+            var before = await capacity.GetAsync();
+            Assert.Equal(2, before.Workloads.Single(x => x.WorkloadId == "iris-text-index-v1").EligibleNodeCount);
+
+            var queue = provider.GetRequiredService<IFarmDemandQueueService>();
+            var demand = await queue.SubmitAsync(new(
+                "iris-text-index-v1", "Selecionar best fit", "Preservar o Node maior."));
+            Assert.Equal(128L * 1024 * 1024, demand.RequiredMemoryBytes);
+            Assert.Equal(1, await provider.GetRequiredService<IFarmDemandDispatcher>().DispatchDueAsync());
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var job = await db.FarmJobs.AsNoTracking().SingleAsync(x => x.DemandId == demand.Id);
+                Assert.Equal(bestFitId, job.NodeId);
+            }
+            var after = await capacity.GetAsync();
+            Assert.Equal(1, after.Workloads.Single(x => x.WorkloadId == "iris-text-index-v1").EligibleNodeCount);
+            Assert.True(after.Nodes.Single(x => x.Node.Id == bestFitId).Busy);
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
     private static ServiceProvider BuildProvider(string connectionString, AIFarmIdentity identity, TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
@@ -146,6 +189,21 @@ public sealed class PostgresFarmDemandQueueTests
         services.AddAIFarmPostgres(connectionString, identity);
         return services.BuildServiceProvider();
     }
+
+    private static FarmNodeRecord Agent(
+        Guid id, Guid accountId, string name, long authorizedMemory, DateTimeOffset now) => new()
+    {
+        Id = id, AccountId = accountId, Name = name,
+        Status = FarmNodeStatus.Online.ToString(),
+        VerificationLevel = FarmVerificationLevel.Detected.ToString(),
+        ConnectionKind = FarmNodeConnectionKind.Agent.ToString(),
+        AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
+        AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
+        AgentCredentialIssuedAtUtc = now, AgentAcceptJobs = true,
+        AgentMaxLogicalProcessors = 1, AgentMaxMemoryBytes = authorizedMemory,
+        Runtime = ".NET 10 // test", LogicalProcessors = 4,
+        MemoryBytes = 512L * 1024 * 1024, CreatedAtUtc = now, LastSeenAtUtc = now
+    };
 
     private static async Task CleanupAsync(string connectionString, Guid accountId)
     {

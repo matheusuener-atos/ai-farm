@@ -537,6 +537,12 @@ personalApi.MapGet("/farm/nodes", async (
     Results.Ok((await farm.GetDashboardAsync(cancellationToken)).Nodes))
     .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
+personalApi.MapGet("/farm/capacity", async (
+    IFarmCapacityQuery capacity,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await capacity.GetAsync(cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
 personalApi.MapPost("/farm/nodes/{nodeId:guid}/pause", async (
     Guid nodeId,
     IFarmLabService farm,

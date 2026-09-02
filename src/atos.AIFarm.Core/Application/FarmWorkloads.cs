@@ -22,7 +22,19 @@ public sealed record FarmWorkloadDefinition(
     string NetworkPolicy,
     string DataClassification,
     string? InputSchema = null,
-    string? OutputSchema = null);
+    string? OutputSchema = null,
+    int RequiredLogicalProcessors = 1,
+    long RequiredMemoryBytes = 64L * 1024 * 1024)
+{
+    public FarmWorkloadDefinition ValidateResources()
+    {
+        if (RequiredLogicalProcessors < 1 || RequiredLogicalProcessors > MaxLogicalProcessors)
+            throw new InvalidOperationException($"Requisito de CPU inválido no workload {Id}.");
+        if (RequiredMemoryBytes < 1 || RequiredMemoryBytes > MaxMemoryBytes)
+            throw new InvalidOperationException($"Requisito de memória inválido no workload {Id}.");
+        return this;
+    }
+}
 
 public static class FarmWorkloadCatalog
 {
@@ -44,7 +56,8 @@ public static class FarmWorkloadCatalog
             256L * 1024 * 1024,
             1_000,
             "DENY_ALL",
-            "STANDARD"),
+            "STANDARD",
+            RequiredMemoryBytes: 64L * 1024 * 1024),
         new(
             "merkle-root-sha256-v1",
             "MERKLE_ROOT_SHA256",
@@ -58,7 +71,8 @@ public static class FarmWorkloadCatalog
             256L * 1024 * 1024,
             1_000,
             "DENY_ALL",
-            "STANDARD"),
+            "STANDARD",
+            RequiredMemoryBytes: 128L * 1024 * 1024),
         new(
             "iris-text-index-v1",
             "IRIS_TEXT_INDEX",
@@ -74,12 +88,17 @@ public static class FarmWorkloadCatalog
             "DENY_ALL",
             "STANDARD",
             "atos-text-input-v1",
-            "atos-text-index-v1")
+            "atos-text-index-v1",
+            RequiredMemoryBytes: 128L * 1024 * 1024)
     ];
 
-    public static FarmWorkloadDefinition GetRequired(string id) =>
-        Definitions.SingleOrDefault(x => string.Equals(x.Id, id?.Trim(), StringComparison.Ordinal))
-        ?? throw new ArgumentException("O workload não pertence ao catálogo autorizado.", nameof(id));
+    public static FarmWorkloadDefinition GetRequired(string id)
+    {
+        var definition = Definitions.SingleOrDefault(x =>
+            string.Equals(x.Id, id?.Trim(), StringComparison.Ordinal))
+            ?? throw new ArgumentException("O workload não pertence ao catálogo autorizado.", nameof(id));
+        return definition.ValidateResources();
+    }
 
     public static FarmWorkloadDefinition? Find(string workload, string version) =>
         Definitions.SingleOrDefault(x =>

@@ -26,6 +26,8 @@ public sealed record FarmDemandSnapshot(
     string WorkloadId,
     string Workload,
     string WorkloadVersion,
+    int RequiredLogicalProcessors,
+    long RequiredMemoryBytes,
     string Label,
     int InputSizeBytes,
     string InputDigest,

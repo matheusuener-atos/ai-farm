@@ -426,12 +426,14 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint("CK_farm_demands_priority", "\"Priority\" >= 0 AND \"Priority\" <= 2");
                 table.HasCheckConstraint("CK_farm_demands_attempts", "\"Attempts\" >= 0");
                 table.HasCheckConstraint("CK_farm_demands_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
+                table.HasCheckConstraint("CK_farm_demands_resources", "\"RequiredLogicalProcessors\" > 0 AND \"RequiredMemoryBytes\" > 0 AND length(\"WorkloadVersion\") > 0");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.Status, x.NextAttemptAtUtc, x.Priority });
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
             entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
             entity.Property(x => x.WorkloadId).HasMaxLength(80);
+            entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
             entity.Property(x => x.Label).HasMaxLength(120);
             entity.Property(x => x.InputVersion).HasMaxLength(80);
             entity.Property(x => x.InputPayload).HasColumnType("text");
@@ -690,6 +692,9 @@ public sealed class FarmDemandRecord
     public Guid? ApiTokenId { get; set; }
     public string? ApiIdempotencyKey { get; set; }
     public string WorkloadId { get; set; } = string.Empty;
+    public string WorkloadVersion { get; set; } = string.Empty;
+    public int RequiredLogicalProcessors { get; set; }
+    public long RequiredMemoryBytes { get; set; }
     public string Label { get; set; } = string.Empty;
     public string InputVersion { get; set; } = string.Empty;
     public string InputPayload { get; set; } = string.Empty;

@@ -190,7 +190,7 @@ internal sealed class PostgresFarmLabService(
             timeProvider.GetUtcNow(),
             cancellationToken,
             accountId: accountId);
-        var node = await SelectExecutionNodeAsync(db, accountId, cancellationToken);
+        var node = await SelectExecutionNodeAsync(db, accountId, definition, cancellationToken);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
 
         var now = timeProvider.GetUtcNow();
@@ -555,6 +555,7 @@ internal sealed class PostgresFarmLabService(
     private async Task<FarmNodeRecord> SelectExecutionNodeAsync(
         AIFarmDbContext db,
         Guid accountId,
+        FarmWorkloadDefinition definition,
         CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
@@ -567,31 +568,50 @@ internal sealed class PostgresFarmLabService(
             .GroupBy(x => x.NodeId)
             .Select(group => new { NodeId = group.Key, LastAtUtc = group.Max(x => x.CreatedAtUtc) })
             .ToDictionaryAsync(x => x.NodeId, x => x.LastAtUtc, cancellationToken);
-        var agents = nodes.Where(x => x.ConnectionKind == "Agent").ToArray();
-        var compatibleAgents = agents
-            .Where(x => x.AgentVersion == FarmAgentProtocol.CurrentAgentVersion)
-            .ToArray();
-        if (agents.Length > 0 && compatibleAgents.Length == 0)
-            throw new InvalidOperationException(
-                $"Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion} antes de despachar.");
-        var selected = compatibleAgents
-            .Where(x => x.Status == FarmNodeStatus.Online.ToString() &&
-                        x.AgentAcceptJobs &&
-                        now - x.LastSeenAtUtc <= AgentHeartbeatTolerance &&
-                        !activeNodeIds.Contains(x.Id))
-            .OrderBy(x => lastAssignments.GetValueOrDefault(x.Id, DateTimeOffset.MinValue))
-            .ThenBy(x => x.Id)
+        var poolHasAgents = nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent.ToString());
+        var evaluated = nodes.Select(node => new
+        {
+            Node = node,
+            Snapshot = ToSnapshot(node),
+            Blocker = FarmCapacityEvaluator.Evaluate(
+                ToSnapshot(node), definition, activeNodeIds.Contains(node.Id), poolHasAgents)
+        }).ToArray();
+        var selected = evaluated
+            .Where(x => x.Blocker == FarmCapacityBlocker.None)
+            .OrderBy(x => x.Snapshot.AuthorizedLogicalProcessors - definition.RequiredLogicalProcessors)
+            .ThenBy(x => x.Snapshot.AuthorizedMemoryBytes - definition.RequiredMemoryBytes)
+            .ThenBy(x => lastAssignments.GetValueOrDefault(x.Node.Id, DateTimeOffset.MinValue))
+            .ThenBy(x => x.Node.Id)
+            .Select(x => x.Node)
             .FirstOrDefault();
         if (selected is not null) return selected;
-        if (agents.Length > 0)
-            throw new InvalidOperationException(
-                "Nenhum Compute Agent do pool está online, compatível e disponível.");
-        return nodes.SingleOrDefault(x =>
-                   x.ConnectionKind == "Embedded" &&
-                   x.Status == FarmNodeStatus.Online.ToString() &&
-                   !activeNodeIds.Contains(x.Id))
-            ?? throw new InvalidOperationException("Nenhum Node do pool está disponível.");
+        var reasons = string.Join(", ", evaluated
+            .Where(x => x.Blocker != FarmCapacityBlocker.EmbeddedSuppressed)
+            .GroupBy(x => x.Blocker)
+            .OrderBy(x => x.Key)
+            .Select(x => $"{CapacityLabel(x.Key)}={x.Count()}"));
+        var versionGuidance = evaluated.Any(x => x.Blocker == FarmCapacityBlocker.AgentVersionMismatch)
+            ? $" Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion}."
+            : string.Empty;
+        throw new InvalidOperationException(
+            $"Nenhum Node atende {definition.RequiredLogicalProcessors} CPU / " +
+            $"{definition.RequiredMemoryBytes / 1024 / 1024} MiB para {definition.DisplayName}. " +
+            $"Bloqueios: {(string.IsNullOrEmpty(reasons) ? "POOL_VAZIO" : reasons)}." +
+            versionGuidance);
     }
+
+    private static string CapacityLabel(FarmCapacityBlocker blocker) => blocker switch
+    {
+        FarmCapacityBlocker.Paused => "PAUSADO",
+        FarmCapacityBlocker.Offline => "OFFLINE",
+        FarmCapacityBlocker.StaleHeartbeat => "HEARTBEAT_EXPIRADO",
+        FarmCapacityBlocker.JobsDisabled => "POLÍTICA_LOCAL",
+        FarmCapacityBlocker.AgentVersionMismatch => "VERSÃO_AGENT",
+        FarmCapacityBlocker.InsufficientProcessors => "CPU_INSUFICIENTE",
+        FarmCapacityBlocker.InsufficientMemory => "MEMÓRIA_INSUFICIENTE",
+        FarmCapacityBlocker.Busy => "OCUPADO",
+        _ => blocker.ToString().ToUpperInvariant()
+    };
 
     private async Task<FarmDashboard> BuildDashboardAsync(
         AIFarmDbContext db,

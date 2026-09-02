@@ -369,6 +369,21 @@ pessoal oferece `GET/POST /api/v1/farm/demands` e
 `POST /api/v1/farm/demands/{id}/cancel`; submissões exigem
 `X-Idempotency-Key`. O Centro de Jobs identifica `DEMANDA` como origem própria.
 
+O **Resource-Aware Scheduler v1** acrescenta requisitos mínimos de CPU e memória
+ao catálogo versionado. Ao aceitar uma demanda, a Farm congela a versão e os
+recursos exigidos no PostgreSQL; uma mudança posterior do catálogo não pode
+alterar silenciosamente o contrato que já estava na fila. Antes de criar o
+manifesto, o scheduler elimina Nodes pausados, offline, com heartbeat vencido,
+política local desabilitada, Agent incompatível, recursos insuficientes ou Job
+ativo. Entre os elegíveis, usa best-fit por CPU e memória e preserva máquinas
+maiores para workloads que realmente precisem delas.
+
+`/farm/capacity` apresenta a matriz em tempo real de Node × workload, incluindo
+CPU/memória autorizadas, ocupação e o motivo exato de cada bloqueio. A mesma
+visão está disponível em `GET /api/v1/farm/capacity` com escopo de leitura da
+Farm. A fila mostra o contrato de recursos congelado em cada demanda e utiliza
+os diagnósticos do scheduler nas retentativas.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto

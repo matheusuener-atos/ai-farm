@@ -114,6 +114,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmScheduleDispatcher>();
         services.RemoveAll<IFarmDemandQueueService>();
         services.RemoveAll<IFarmDemandDispatcher>();
+        services.RemoveAll<IFarmCapacityQuery>();
         services.RemoveAll<IAuditTrail>();
         services.RemoveAll<IOperationalIncidentService>();
         services.RemoveAll<IAiUsageBudgetService>();
@@ -147,6 +148,7 @@ public static class DependencyInjection
         services.AddScoped<IFarmDemandDispatcher>(provider =>
             provider.GetRequiredService<PostgresFarmDemandQueueService>());
         services.AddHostedService<FarmDemandWorker>();
+        services.AddScoped<IFarmCapacityQuery, PostgresFarmCapacityQuery>();
         services.AddScoped<IAuditTrail, PostgresAuditTrail>();
         services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
         services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();

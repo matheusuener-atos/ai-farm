@@ -75,6 +75,9 @@ internal sealed class PostgresFarmDemandQueueService(
             Id = Guid.NewGuid(), AccountId = identity.AccountId,
             ApiTokenId = tokenId, ApiIdempotencyKey = idempotencyKey,
             WorkloadId = validated.Submission.Definition.Id,
+            WorkloadVersion = validated.Submission.Definition.Version,
+            RequiredLogicalProcessors = validated.Submission.Definition.RequiredLogicalProcessors,
+            RequiredMemoryBytes = validated.Submission.Definition.RequiredMemoryBytes,
             Label = validated.Submission.Label,
             InputVersion = validated.Submission.InputVersion,
             InputPayload = validated.Submission.InputPayload,
@@ -167,6 +170,11 @@ internal sealed class PostgresFarmDemandQueueService(
         try
         {
             var definition = FarmWorkloadCatalog.GetRequired(demand.WorkloadId);
+            if (definition.Version != demand.WorkloadVersion ||
+                definition.RequiredLogicalProcessors != demand.RequiredLogicalProcessors ||
+                definition.RequiredMemoryBytes != demand.RequiredMemoryBytes)
+                throw new InvalidOperationException(
+                    "O contrato de recursos da demanda não corresponde mais ao catálogo ativo.");
             var submission = new FarmUsefulJobSubmission(
                 definition, demand.Label, demand.InputVersion, demand.InputPayload,
                 demand.InputSizeBytes, demand.InputDigest);
@@ -245,7 +253,8 @@ internal sealed class PostgresFarmDemandQueueService(
     private static FarmDemandSnapshot ToSnapshot(FarmDemandRecord record, FarmJobRecord? job)
     {
         var definition = FarmWorkloadCatalog.GetRequired(record.WorkloadId);
-        return new(record.Id, record.WorkloadId, definition.Workload, definition.Version,
+        return new(record.Id, record.WorkloadId, definition.Workload, record.WorkloadVersion,
+            record.RequiredLogicalProcessors, record.RequiredMemoryBytes,
             record.Label, record.InputSizeBytes, record.InputDigest,
             (FarmDemandPriority)record.Priority, Enum.Parse<FarmDemandStatus>(record.Status),
             record.Attempts, record.NextAttemptAtUtc, record.ExpiresAtUtc, record.JobId,

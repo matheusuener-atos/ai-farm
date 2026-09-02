@@ -71,7 +71,7 @@
     {
         <article class="useful-job">
             <div><strong>@demand.Label</strong><small>@demand.WorkloadVersion // @demand.Id.ToString("N")[..8]</small></div>
-            <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>INPUT @Short(demand.InputDigest) // TENTATIVAS @demand.Attempts</small></div>
+            <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>REQUER @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) // TENTATIVAS @demand.Attempts</small><small>INPUT @Short(demand.InputDigest)</small></div>
             <div><span class="@StatusClass(demand.Status)">[ @Status(demand.Status) ]</span><small>@demand.Detail</small></div>
             <div class="queue-actions">
                 @if (demand.Status == FarmDemandStatus.Queued)
@@ -154,4 +154,5 @@
     private static string Status(FarmDemandStatus value) => value switch { FarmDemandStatus.Queued => "AGUARDANDO", FarmDemandStatus.Dispatching => "DESPACHANDO", FarmDemandStatus.Submitted => "SUBMETIDA", FarmDemandStatus.Cancelled => "CANCELADA", FarmDemandStatus.Expired => "EXPIRADA", _ => "FALHA" };
     private static string StatusClass(FarmDemandStatus value) => value == FarmDemandStatus.Submitted ? "green" : value is FarmDemandStatus.Failed or FarmDemandStatus.Expired ? "error" : "amber";
     private static string OutputUrl(Guid id) => $"/api/farm/jobs/{id}/output";
+    private static string FormatBytes(long bytes) => $"{bytes / 1024d / 1024d:N0} MiB";
 }
