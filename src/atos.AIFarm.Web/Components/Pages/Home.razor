@@ -5,35 +5,54 @@
 
 <PageTitle>atos AI Farm</PageTitle>
 
-<section class="hero">
-    <p class="eyebrow">atos:/HOME</p>
-    <h1>SEU COMPUTADOR.<br /><span>SUA INTELIGÊNCIA.</span></h1>
-    <p class="thesis">Eu farmo créditos com o computador que já tenho e gasto esses créditos nas ferramentas de IA que realmente quero usar.</p>
-</section>
-
-<section class="balance-panel" aria-live="polite">
+<header class="page-head dashboard-head">
     <div>
-        <span class="label">SALDO DISPONÍVEL</span>
-        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong>
-        <span class="muted">PROMOTIONAL // AMBIENTE DE TESTE</span>
+        <p class="eyebrow">atos:/COMMAND_CENTER</p>
+        <h1>VISÃO GERAL</h1>
+        <p>CONTROLE TÉCNICO E FINANCEIRO DA SUA INFRAESTRUTURA DE IA</p>
     </div>
-    <span class="status"><span aria-hidden="true">●</span> SISTEMA ONLINE</span>
+    <span class="tag tag-online"><i aria-hidden="true"></i>SISTEMA ONLINE</span>
+</header>
+
+<section class="kpi-grid cols-3" aria-live="polite">
+    <article class="kpi kpi-purple">
+        <span>SALDO DISPONÍVEL</span>
+        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong>
+        <small>CRÉDITOS PARA USO IMEDIATO</small>
+    </article>
+    <article class="kpi kpi-amber">
+        <span>SALDO RESERVADO</span>
+        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.ReservedMinor))</strong>
+        <small>OPERAÇÕES EM PROCESSAMENTO</small>
+    </article>
+    <article class="kpi">
+        <span>CRÉDITO PROMOCIONAL</span>
+        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableByBucket[CreditBucket.Promotional]))</strong>
+        <small>AMBIENTE OPERACIONAL</small>
+    </article>
 </section>
 
-<div class="action-grid">
-    <a class="action action-ai" href="/chat">
-        <span class="index">[ U ]</span>
-        <strong>USAR IA</strong>
-        <small>CONVERSAR COM IRIS →</small>
+<section class="dashboard-grid">
+    <a class="command-card command-ai" href="/chat">
+        <span class="command-index">01 // IRIS</span>
+        <div><strong>CONVERSAR</strong><p>Use seus créditos para executar tarefas com inteligência artificial.</p></div>
+        <span class="command-arrow">→</span>
     </a>
-    <a class="action action-farm" href="/farm">
-        <span class="index">[ F ]</span>
-        <strong>FARMAR</strong>
-        <small>COMPUTE LAB CONTROLADO →</small>
+    <a class="command-card command-farm" href="/farm">
+        <span class="command-index">02 // COMPUTE</span>
+        <div><strong>FARMAR</strong><p>Valide capacidade computacional em um ambiente controlado e auditável.</p></div>
+        <span class="command-arrow">→</span>
     </a>
-</div>
+</section>
 
-<p class="statement">“Meu computador está pagando minha própria IA.”</p>
+<section class="panel system-panel">
+    <header class="panel-head"><h2>ESTADO DA PLATAFORMA</h2><span class="tag">OPERATIONAL</span></header>
+    <div class="check-list">
+        <span><i></i>LEDGER COM PARTIDAS DOBRADAS</span>
+        <span><i></i>PERSISTÊNCIA ISOLADA POR CONTA</span>
+        <span><i></i>EXECUÇÕES E EVIDÊNCIAS AUDITÁVEIS</span>
+    </div>
+</section>
 
 @code {
     private WalletSnapshot? _snapshot;

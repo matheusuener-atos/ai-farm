@@ -5,7 +5,7 @@
 
 <PageTitle>Wallet // atos AI Farm</PageTitle>
 
-<div class="page-heading">
+<div class="page-head">
     <p class="eyebrow">atos:/WALLET</p>
     <h1>AI WALLET</h1>
     <p>LEDGER IMUTÁVEL // VALORES EM mAIC</p>
@@ -17,23 +17,23 @@
 }
 else
 {
-    <div class="wallet-grid">
-        <section class="metric purple-border">
+    <div class="kpi-grid cols-3">
+        <section class="kpi kpi-purple">
             <span>DISPONÍVEL</span>
             <strong>@Aic.Format(_snapshot.Balance.AvailableMinor)</strong>
         </section>
-        <section class="metric amber-border">
+        <section class="kpi kpi-amber">
             <span>RESERVADO</span>
             <strong>@Aic.Format(_snapshot.Balance.ReservedMinor)</strong>
         </section>
-        <section class="metric">
+        <section class="kpi">
             <span>PROMOTIONAL</span>
             <strong>@Aic.Format(_snapshot.Balance.AvailableByBucket[CreditBucket.Promotional])</strong>
         </section>
     </div>
 
-    <section class="ledger">
-        <h2>ATIVIDADE DO LEDGER</h2>
+    <section class="panel ledger">
+        <header class="panel-head"><h2>ATIVIDADE DO LEDGER</h2><span class="tag">IMUTÁVEL</span></header>
         <div class="table-wrap">
             <table>
                 <thead>
