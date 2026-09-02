@@ -358,7 +358,7 @@ internal static class AgentApplication
         timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
         try
         {
-            var workerResult = await worker.RunAsync(manifest, timeout.Token);
+            var workerResult = await worker.RunAsync(manifest, offer.Input, timeout.Token);
             var acknowledgement = await client.SubmitResultAsync(
                 configuration,
                 credential,
@@ -368,7 +368,8 @@ internal static class AgentApplication
                     workerResult.DurationMilliseconds,
                     workerResult.PeakMemoryBytes,
                     workerResult.ProcessorTimeMilliseconds,
-                    workerResult.Enforcement),
+                    workerResult.Enforcement,
+                    workerResult.OutputPayload),
                 execution.Token);
             Write(
                 "JOB",

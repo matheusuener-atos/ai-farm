@@ -218,6 +218,47 @@ public sealed class PostgresFarmLabTests
 
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task UsefulTextJobPersistsVerifiedOutputAndRejectsTampering()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos useful job test");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var service = provider.GetRequiredService<IFarmUsefulJobService>();
+            var tokenId = Guid.NewGuid();
+            var request = new FarmUsefulJobRequest(
+                "iris-text-index-v1", "Base de conhecimento", "Iris organiza conhecimento para a Atos.");
+
+            var completed = await service.SubmitAsync(request, tokenId, "useful-job-0001");
+            var replay = await service.SubmitAsync(request, tokenId, "useful-job-0001");
+            var output = await service.DownloadOutputAsync(completed.Id);
+
+            Assert.Equal(completed.Id, replay.Id);
+            Assert.Equal(FarmJobStatus.Completed, completed.Status);
+            Assert.Equal(2_000, completed.ComputeUnitsMilli);
+            Assert.NotNull(completed.Useful);
+            Assert.Equal(completed.Useful.InputDigest, completed.Manifest?.InputDigest);
+            Assert.True(completed.Evidence?.IsValid);
+            Assert.NotNull(output);
+            Assert.Contains("atos-text-index-v1", Encoding.UTF8.GetString(output.Content));
+
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var record = await db.FarmJobs.SingleAsync(x => x.Id == completed.Id);
+            record.OutputPayload += " ";
+            await db.SaveChangesAsync();
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DownloadOutputAsync(completed.Id));
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task PausedNodeRejectsNewJobs()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
@@ -444,6 +485,28 @@ public sealed class PostgresFarmLabTests
             Assert.Equal(merkleOffer.Id, merkleAcknowledgement?.JobId);
             Assert.True(merkleAcknowledgement?.Verified);
             Assert.Equal(1_000, merkleAcknowledgement?.ComputeUnitsMilli);
+
+            var usefulJobs = provider.GetRequiredService<IFarmUsefulJobService>();
+            var usefulOffer = await usefulJobs.SubmitAsync(new FarmUsefulJobRequest(
+                "iris-text-index-v1", "Índice remoto", "Iris distribui trabalho útil entre nodes."));
+            var usefulClaim = Assert.IsType<FarmRemoteJobOffer>(
+                await agents.ClaimJobAsync(linked.Credential));
+            var usefulInput = Assert.IsType<FarmRemoteJobInput>(usefulClaim.Input);
+            Assert.Equal(usefulOffer.Manifest?.InputDigest, usefulInput.Digest);
+            Assert.True(FarmManifestSecurity.TryVerify(
+                usefulClaim.ManifestPayload, usefulClaim.ManifestDigest, usefulClaim.ManifestSignature,
+                new FarmManifestSigningOptions(trust.VerificationKey), out var usefulManifest));
+            Assert.NotNull(usefulManifest);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, usefulClaim.JobId));
+            var usefulExecution = FarmDeterministicWorkloads.Execute(
+                usefulManifest.Workload, usefulManifest.Nonce,
+                usefulManifest.Iterations, usefulInput.Payload);
+            var usefulAck = await agents.SubmitResultAsync(
+                linked.Credential, usefulClaim.JobId,
+                RemoteResult(usefulExecution.Digest, 10) with { OutputPayload = usefulExecution.OutputPayload });
+            Assert.True(usefulAck?.Verified);
+            Assert.Equal(2_000, usefulAck?.ComputeUnitsMilli);
+            Assert.NotNull(await usefulJobs.DownloadOutputAsync(usefulOffer.Id));
 
             heartbeat = await agents.HeartbeatAsync(
                 linked.Credential,

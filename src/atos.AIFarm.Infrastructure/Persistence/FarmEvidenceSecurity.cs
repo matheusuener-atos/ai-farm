@@ -36,7 +36,14 @@ internal sealed record FarmJobEvidencePayload(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? StartedAtUtc,
     DateTimeOffset FinishedAtUtc,
-    IReadOnlyList<FarmEvidenceEvent> Events);
+    IReadOnlyList<FarmEvidenceEvent> Events,
+    string? DemandLabel = null,
+    string? InputVersion = null,
+    int? InputSizeBytes = null,
+    string? InputDigest = null,
+    string? OutputVersion = null,
+    int? OutputSizeBytes = null,
+    string? OutputDigest = null);
 
 internal sealed record SignedFarmJobEvidence(
     FarmJobEvidencePayload Evidence,
@@ -102,7 +109,14 @@ internal static class FarmEvidenceSecurity
                 x.Sequence,
                 x.Status,
                 x.OccurredAtUtc,
-                x.Detail)).ToArray());
+                x.Detail)).ToArray(),
+            job.DemandLabel,
+            job.InputVersion,
+            job.InputSizeBytes,
+            job.InputDigest,
+            job.OutputVersion,
+            job.OutputSizeBytes,
+            job.OutputDigest);
         var payload = JsonSerializer.Serialize(evidence, CanonicalOptions);
         var bytes = Encoding.UTF8.GetBytes(payload);
         return new SignedFarmJobEvidence(
@@ -189,9 +203,30 @@ internal static class FarmEvidenceSecurity
             evidence.WorkerPeakMemoryBytes == job.WorkerPeakMemoryBytes &&
             evidence.WorkerProcessorTimeMilliseconds == job.WorkerProcessorTimeMilliseconds &&
             evidence.WorkerEnforcement == job.WorkerEnforcement &&
+            evidence.DemandLabel == job.DemandLabel &&
+            evidence.InputVersion == job.InputVersion &&
+            evidence.InputSizeBytes == job.InputSizeBytes &&
+            evidence.InputDigest == job.InputDigest &&
+            evidence.OutputVersion == job.OutputVersion &&
+            evidence.OutputSizeBytes == job.OutputSizeBytes &&
+            evidence.OutputDigest == job.OutputDigest &&
+            PayloadMatchesDigest(job.InputPayload, job.InputDigest) &&
+            PayloadMatchesDigest(job.OutputPayload, job.OutputDigest) &&
             SamePostgresTimestamp(evidence.CreatedAtUtc, job.CreatedAtUtc) &&
             SameNullablePostgresTimestamp(evidence.StartedAtUtc, job.StartedAtUtc) &&
             SamePostgresTimestamp(evidence.FinishedAtUtc, job.FinishedAtUtc);
+
+    private static bool PayloadMatchesDigest(string? payload, string? digest)
+    {
+        if (payload is null || digest is null) return payload is null && digest is null;
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                SHA256.HashData(Encoding.UTF8.GetBytes(payload)),
+                Convert.FromHexString(digest));
+        }
+        catch (FormatException) { return false; }
+    }
 
     private static bool LifecycleMatches(
         IReadOnlyList<FarmEvidenceEvent> sealedEvents,

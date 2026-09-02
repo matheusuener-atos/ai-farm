@@ -25,7 +25,7 @@
         </label>
         <label>WORKLOAD
             <select @bind="_workloadId" disabled="@_working">
-                @foreach (var workload in FarmWorkloadCatalog.Definitions)
+                @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is null))
                 {
                     <option value="@workload.Id">@workload.DisplayName // @workload.Version</option>
                 }

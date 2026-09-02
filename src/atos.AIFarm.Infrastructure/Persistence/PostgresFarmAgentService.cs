@@ -272,7 +272,14 @@ internal sealed class PostgresFarmAgentService(
             job.ManifestPayload!,
             job.ManifestDigest!,
             job.ManifestSignature!,
-            SignatureAlgorithm);
+            SignatureAlgorithm,
+            job.InputVersion is null ? null : new FarmRemoteJobInput(
+                job.InputVersion,
+                "text/plain; charset=utf-8",
+                manifest.DataClassification,
+                job.InputPayload!,
+                job.InputSizeBytes!.Value,
+                job.InputDigest!));
     }
 
     public async Task<bool> MarkJobStartedAsync(
@@ -398,7 +405,8 @@ internal sealed class PostgresFarmAgentService(
                 existing.DurationMilliseconds != result.DurationMilliseconds ||
                 existing.WorkerPeakMemoryBytes != result.PeakMemoryBytes ||
                 existing.WorkerProcessorTimeMilliseconds != result.ProcessorTimeMilliseconds ||
-                existing.WorkerEnforcement != result.Enforcement)
+                existing.WorkerEnforcement != result.Enforcement ||
+                existing.OutputPayload != result.OutputPayload)
                 throw new InvalidOperationException("O Job já foi concluído com uma evidência diferente.");
             return new FarmRemoteJobAcknowledgement(
                 existing.Id,
@@ -434,6 +442,14 @@ internal sealed class PostgresFarmAgentService(
                 "O manifesto remoto armazenado não é válido.",
                 cancellationToken);
         }
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion)
+            ?? throw new InvalidOperationException("O workload remoto não pertence ao catálogo autorizado.");
+        if (definition.OutputSchema is null && result.OutputPayload is not null)
+            throw new ArgumentException("Este workload não produz saída tipada.", nameof(result));
+        if (definition.OutputSchema is not null &&
+            (string.IsNullOrWhiteSpace(result.OutputPayload) ||
+             Encoding.UTF8.GetByteCount(result.OutputPayload) > 128 * 1024))
+            throw new ArgumentException("A saída tipada é obrigatória e deve possuir até 128 KiB.", nameof(result));
         if (result.DurationMilliseconds > manifest.TimeoutSeconds * 1000L)
         {
             return await TerminateAndAcknowledgeAsync(
@@ -475,6 +491,13 @@ internal sealed class PostgresFarmAgentService(
 
         await db.Entry(existing).ReloadAsync(cancellationToken);
         var job = existing;
+        if (result.OutputPayload is not null)
+        {
+            job.OutputVersion = definition.OutputSchema;
+            job.OutputPayload = result.OutputPayload;
+            job.OutputSizeBytes = Encoding.UTF8.GetByteCount(result.OutputPayload);
+            job.OutputDigest = result.ResultDigest.ToLowerInvariant();
+        }
         await AddJobEventAsync(
             db,
             job,
@@ -492,19 +515,19 @@ internal sealed class PostgresFarmAgentService(
             cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion)
-            ?? throw new InvalidOperationException("O workload remoto não pertence ao catálogo autorizado.");
         var expected = await Task.Run(
-            () => FarmDeterministicWorkloads.Compute(
+            () => FarmDeterministicWorkloads.Execute(
                 manifest.Workload,
                 manifest.Nonce,
                 manifest.Iterations,
+                job.InputPayload,
                 cancellationToken),
             cancellationToken);
-        job.ExpectedDigest = expected;
+        job.ExpectedDigest = expected.Digest;
         var verified = CryptographicOperations.FixedTimeEquals(
             suppliedDigest,
-            Convert.FromHexString(expected));
+            Convert.FromHexString(expected.Digest)) &&
+            string.Equals(result.OutputPayload, expected.OutputPayload, StringComparison.Ordinal);
         job.FinishedAtUtc = timeProvider.GetUtcNow();
         if (!verified)
         {
@@ -601,6 +624,7 @@ internal sealed class PostgresFarmAgentService(
             manifest.WorkloadVersion == job.WorkloadVersion &&
             manifest.VerificationPolicy == definition.VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
+            manifest.InputDigest == job.InputDigest &&
             SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
             SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc) &&
             manifest.NetworkPolicy == definition.NetworkPolicy &&
@@ -609,7 +633,21 @@ internal sealed class PostgresFarmAgentService(
             manifest.TimeoutSeconds == definition.TimeoutSeconds &&
             manifest.MaxLogicalProcessors == definition.MaxLogicalProcessors &&
             manifest.MaxMemoryBytes > 0 && manifest.MaxMemoryBytes <= definition.MaxMemoryBytes &&
-            manifest.NodeProfileHash is { Length: 64 };
+            manifest.NodeProfileHash is { Length: 64 } &&
+            InputMatchesDefinition(job, definition);
+    }
+
+    private static bool InputMatchesDefinition(
+        FarmJobRecord job,
+        FarmWorkloadDefinition definition)
+    {
+        if (definition.InputSchema is null)
+            return job.InputVersion is null && job.InputPayload is null && job.InputDigest is null;
+        if (job.InputVersion != definition.InputSchema || job.InputPayload is null ||
+            job.InputSizeBytes != Encoding.UTF8.GetByteCount(job.InputPayload))
+            return false;
+        try { return job.InputDigest == FarmDeterministicWorkloads.ComputeInputDigest(job.InputPayload); }
+        catch (Exception exception) when (exception is ArgumentException or FormatException) { return false; }
     }
 
     private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>

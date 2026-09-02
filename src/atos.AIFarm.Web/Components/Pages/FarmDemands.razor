@@ -1,0 +1,104 @@
+@page "/farm/demands"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmUsefulJobService UsefulJobs
+
+<PageTitle>Demandas úteis // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow amber">atos:/FARM/USEFUL_JOBS</p>
+    <h1>TRABALHO ÚTIL</h1>
+    <p>Envie texto real para a Iris normalizar, segmentar e indexar em um Job determinístico verificável.</p>
+    <a class="text-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
+</div>
+
+@if (_message is not null)
+{
+    <p class="@(_error ? "error" : "green")" role="status">@_message</p>
+}
+
+<section class="panel">
+    <div class="panel-head"><h2>NOVA DEMANDA</h2><span>STANDARD // MÁX. 32 KiB // SEM REDE</span></div>
+    <div class="useful-form">
+        <label>RÓTULO
+            <input @bind="_label" maxlength="120" placeholder="indexar documentação do produto" disabled="@_working" />
+        </label>
+        <label>WORKLOAD
+            <select @bind="_workloadId" disabled="@_working">
+                @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is not null))
+                {
+                    <option value="@workload.Id">@workload.DisplayName // @workload.Version</option>
+                }
+            </select>
+        </label>
+        <label>TEXTO DA DEMANDA
+            <textarea @bind="_input" rows="12" maxlength="32768" placeholder="Cole aqui o conteúdo STANDARD que será processado..." disabled="@_working"></textarea>
+        </label>
+        <small>O texto poderá ser enviado ao Compute Agent vinculado. Não envie conteúdo PRIVATE ou CONFIDENTIAL.</small>
+        <button type="button" @onclick="SubmitAsync" disabled="@_working">
+            @(_working ? "[ PROCESSANDO... ]" : "[ EXECUTAR DEMANDA ]")
+        </button>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-head"><h2>DEMANDAS RECENTES</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button></div>
+    @if (_jobs.Count == 0) { <p>NENHUMA DEMANDA ÚTIL EXECUTADA.</p> }
+    @foreach (var job in _jobs)
+    {
+        <article class="useful-job">
+            <div><strong>@job.Useful?.Label</strong><small>@job.WorkloadVersion // @job.Id.ToString("N")[..8]</small></div>
+            <div><span>@job.Useful?.InputSizeBytes.ToString("N0") B</span><small>INPUT @Short(job.Useful?.InputDigest)</small></div>
+            <span class="@(job.Status == FarmJobStatus.Completed ? "green" : "amber")">[ @job.Status.ToString().ToUpperInvariant() ]</span>
+            @if (job.Status == FarmJobStatus.Completed && job.Useful?.OutputDigest is not null)
+            {
+                <a class="text-link" href="@OutputUrl(job.Id)">[ BAIXAR ÍNDICE JSON ]</a>
+            }
+        </article>
+    }
+</section>
+
+@code {
+    private readonly List<FarmJobSnapshot> _jobs = [];
+    private string _workloadId = "iris-text-index-v1";
+    private string _label = string.Empty;
+    private string _input = string.Empty;
+    private bool _working;
+    private bool _error;
+    private string? _message;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var jobs = await UsefulJobs.ListRecentAsync();
+        _jobs.Clear();
+        _jobs.AddRange(jobs);
+    }
+
+    private async Task SubmitAsync()
+    {
+        _working = true;
+        _message = null;
+        try
+        {
+            var job = await UsefulJobs.SubmitAsync(new(_workloadId, _label, _input));
+            _message = job.Status == FarmJobStatus.Completed
+                ? "Demanda processada e verificada. O índice está disponível para download."
+                : "Demanda despachada ao Compute Agent; acompanhe o status nesta tela.";
+            _label = string.Empty;
+            _input = string.Empty;
+            _error = false;
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            _message = exception.Message;
+            _error = true;
+        }
+        finally { _working = false; }
+    }
+
+    private static string Short(string? value) => value is { Length: >= 12 } ? value[..12] : "---";
+    private static string OutputUrl(Guid id) => $"/api/farm/jobs/{id}/output";
+}

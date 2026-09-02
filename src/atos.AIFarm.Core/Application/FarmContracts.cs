@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.6.0";
+    public const string CurrentAgentVersion = "atos-agent/0.7.0";
 }
 
 public static class FarmWorkerEnforcement
@@ -105,14 +105,16 @@ public sealed record FarmRemoteJobOffer(
     string ManifestPayload,
     string ManifestDigest,
     string ManifestSignature,
-    string SignatureAlgorithm);
+    string SignatureAlgorithm,
+    FarmRemoteJobInput? Input = null);
 
 public sealed record FarmRemoteJobResult(
     string ResultDigest,
     long DurationMilliseconds,
     long PeakMemoryBytes = 0,
     long ProcessorTimeMilliseconds = 0,
-    string Enforcement = "UNREPORTED");
+    string Enforcement = "UNREPORTED",
+    string? OutputPayload = null);
 
 public sealed record FarmRemoteJobRejection(
     string Reason,
@@ -144,7 +146,8 @@ public sealed record FarmJobManifestSnapshot(
     long MaxMemoryBytes,
     string NetworkPolicy,
     string DataClassification,
-    string? NodeProfileHash);
+    string? NodeProfileHash,
+    string? InputDigest = null);
 
 public sealed record FarmJobEvidenceSnapshot(
     string Version,
@@ -191,7 +194,8 @@ public sealed record FarmJobSnapshot(
     string? WorkerEnforcement,
     FarmJobManifestSnapshot? Manifest,
     FarmJobEvidenceSnapshot? Evidence,
-    IReadOnlyList<FarmJobEventSnapshot> Events);
+    IReadOnlyList<FarmJobEventSnapshot> Events,
+    FarmUsefulJobSnapshot? Useful = null);
 
 public sealed record FarmDashboard(
     FarmNodeSnapshot Node,

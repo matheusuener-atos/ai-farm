@@ -65,7 +65,8 @@ internal sealed record RemoteJobManifest(
     string DataClassification,
     DateTimeOffset IssuedAtUtc,
     DateTimeOffset ExpiresAtUtc,
-    string? NodeProfileHash = null);
+    string? NodeProfileHash = null,
+    string? InputDigest = null);
 
 internal static class RemoteJobVerifier
 {
@@ -126,10 +127,39 @@ internal static class RemoteJobVerifier
             manifest.MaxLogicalProcessors > local.MaxLogicalProcessors ||
             manifest.MaxMemoryBytes is <= 0 || manifest.MaxMemoryBytes > definition.MaxMemoryBytes ||
             manifest.MaxMemoryBytes > local.MaxMemoryBytes ||
+            (definition.InputSchema is null
+                ? manifest.InputDigest is not null || offer.Input is not null
+                : !UsefulInputIsValid(offer.Input, definition, manifest.InputDigest)) ||
             !string.Equals(manifest.NodeProfileHash, localProfileHash, StringComparison.Ordinal) ||
             manifest.ExpiresAtUtc <= now)
             throw new InvalidOperationException("O manifesto remoto viola a allowlist ou os limites locais.");
         return manifest;
+    }
+
+    private static bool UsefulInputIsValid(
+        FarmRemoteJobInput? input,
+        FarmWorkloadDefinition definition,
+        string? manifestDigest)
+    {
+        if (input is null ||
+            input.Version != definition.InputSchema ||
+            input.ContentType != "text/plain; charset=utf-8" ||
+            input.DataClassification != definition.DataClassification ||
+            input.SizeBytes != Encoding.UTF8.GetByteCount(input.Payload) ||
+            input.SizeBytes is <= 0 or > 32 * 1024 ||
+            input.Digest != manifestDigest)
+            return false;
+        try
+        {
+            var digest = FarmDeterministicWorkloads.ComputeInputDigest(input.Payload);
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(digest),
+                Convert.FromHexString(input.Digest));
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
+        {
+            return false;
+        }
     }
 
     private static byte[] DecodeHex(string value, string field)

@@ -326,6 +326,21 @@ continua sem aceitar comandos, caminhos, URLs ou código fornecido pelo usuário
 Adicionar um workload exige uma definição versionada, implementação local
 determinística e verificação equivalente no servidor.
 
+O Agent `0.7.0` e o IPC `atos-worker-ipc-v3` introduzem **Useful Jobs**. A tela
+`/farm/demands` aceita somente texto `STANDARD` de até 32 KiB e despacha o
+workload `IRIS_TEXT_INDEX`. Ele normaliza o texto, conta termos, cria segmentos
+de até 200 tokens e produz um índice JSON determinístico para recuperação
+lexical e preparação de contexto da Iris. O digest da entrada faz parte do
+manifesto assinado. A saída do Agent é reexecutada e comparada byte a byte pelo
+servidor; entrada, saída e seus digests também ficam vinculados ao bundle de
+evidência. Nenhum conteúdo `PRIVATE` ou `CONFIDENTIAL` é aceito nessa rota.
+
+Esta versão persiste payloads pequenos diretamente no PostgreSQL. Ela não é um
+modelo de embeddings nem promete similaridade semântica; armazenamento de
+artefatos maiores no Object Storage e workloads de inferência são fases
+posteriores. A conclusão válida gera 2,000 CP técnicos e continua sem converter
+CP em AIC automaticamente.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto

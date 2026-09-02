@@ -893,6 +893,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DemandLabel")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
                     b.Property<long?>("DurationMilliseconds")
                         .HasColumnType("bigint");
 
@@ -929,6 +933,20 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("FinishedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("InputDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("InputPayload")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("InputSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InputVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<string>("ManifestDigest")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -957,6 +975,20 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<string>("OutputDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("OutputPayload")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("OutputSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OutputVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<string>("ResultDigest")
                         .HasMaxLength(64)
@@ -1038,6 +1070,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_jobs_single_automation_origin", "\"ApiTokenId\" IS NULL OR \"ScheduleId\" IS NULL");
 
                             t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
+
+                            t.HasCheckConstraint("CK_farm_jobs_useful_input_complete", "(\"InputVersion\" IS NULL AND \"InputPayload\" IS NULL AND \"InputSizeBytes\" IS NULL AND \"InputDigest\" IS NULL AND \"DemandLabel\" IS NULL) OR (\"InputVersion\" IS NOT NULL AND \"InputPayload\" IS NOT NULL AND \"InputSizeBytes\" > 0 AND \"InputDigest\" IS NOT NULL AND \"DemandLabel\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_farm_jobs_useful_output_complete", "(\"OutputVersion\" IS NULL AND \"OutputPayload\" IS NULL AND \"OutputSizeBytes\" IS NULL AND \"OutputDigest\" IS NULL) OR (\"OutputVersion\" IS NOT NULL AND \"OutputPayload\" IS NOT NULL AND \"OutputSizeBytes\" > 0 AND \"OutputDigest\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_jobs_worker_telemetry", "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR (\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
                         });

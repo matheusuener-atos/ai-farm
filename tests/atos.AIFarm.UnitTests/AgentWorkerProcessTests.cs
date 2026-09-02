@@ -83,6 +83,29 @@ public sealed class AgentWorkerProcessTests
     }
 
     [Fact]
+    public async Task WorkerHostExecutesUsefulTextAndReturnsVerifiableOutput()
+    {
+        const string text = "Iris prepara contexto verificável para a Atos.";
+        var definition = FarmWorkloadCatalog.GetRequired("iris-text-index-v1");
+        var request = new AgentWorkerRequest(
+            AgentWorkerProtocol.Version, definition.Workload, definition.Version,
+            "00112233445566778899aabbccddeeff", definition.Iterations, text);
+        using var input = new StringReader(JsonSerializer.Serialize(request, AgentWorkerProtocol.JsonOptions));
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        var exitCode = await AgentWorkerHost.RunAsync(input, output, error);
+        var result = JsonSerializer.Deserialize<AgentWorkerResult>(output.ToString(), AgentWorkerProtocol.JsonOptions);
+
+        Assert.Equal(0, exitCode);
+        Assert.NotNull(result);
+        Assert.NotNull(result.OutputPayload);
+        Assert.Equal(FarmDeterministicWorkloads.Execute(
+            definition.Workload, request.Nonce, definition.Iterations, text).Digest, result.Digest);
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
     public async Task ProcessRunnerExecutesDedicatedChildAndValidatesResult()
     {
         var runner = CreateRunner();

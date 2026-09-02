@@ -67,7 +67,8 @@ internal sealed record FarmJobManifest(
     string DataClassification,
     DateTimeOffset IssuedAtUtc,
     DateTimeOffset ExpiresAtUtc,
-    string? NodeProfileHash = null);
+    string? NodeProfileHash = null,
+    string? InputDigest = null);
 
 internal sealed record SignedFarmJobManifest(
     FarmJobManifest Manifest,
@@ -143,6 +144,7 @@ internal static class FarmManifestSecurity
             manifest.WorkloadVersion == job.WorkloadVersion &&
             manifest.VerificationPolicy == job.VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
+            manifest.InputDigest == job.InputDigest &&
             SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
             SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
     }

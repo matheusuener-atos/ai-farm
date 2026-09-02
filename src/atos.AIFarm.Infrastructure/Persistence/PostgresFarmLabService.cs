@@ -59,14 +59,23 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
+        FarmUsefulJobSubmission submission,
+        Guid? tokenId,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            submission.Definition.Id, null, tokenId, idempotencyKey,
+            null, null, submission, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
         Guid accountId,
@@ -81,6 +90,7 @@ internal sealed class PostgresFarmLabService(
             null,
             scheduleId,
             scheduledForUtc.ToUniversalTime(),
+            null,
             cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
@@ -90,9 +100,14 @@ internal sealed class PostgresFarmLabService(
         string? apiIdempotencyKey,
         Guid? scheduleId,
         DateTimeOffset? scheduledForUtc,
+        FarmUsefulJobSubmission? useful,
         CancellationToken cancellationToken)
     {
-        var definition = FarmWorkloadCatalog.GetRequired(workloadId);
+        var definition = useful?.Definition ?? FarmWorkloadCatalog.GetRequired(workloadId);
+        if (definition.Id != workloadId)
+            throw new ArgumentException("A entrada útil não corresponde ao workload solicitado.", nameof(workloadId));
+        if (useful is null && definition.InputSchema is not null)
+            throw new ArgumentException("Este workload exige uma demanda tipada.", nameof(workloadId));
         var accountId = explicitAccountId ??
             (await identityAccessor.GetRequiredIdentityAsync(cancellationToken)).AccountId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -105,7 +120,8 @@ internal sealed class PostgresFarmLabService(
                 cancellationToken);
             if (replay is not null)
             {
-                if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version)
+                if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version ||
+                    replay.InputDigest != useful?.InputDigest)
                     throw new InvalidOperationException(
                         "A chave de idempotência já foi usada com outro workload.");
                 return await LoadJobAsync(db, replay.Id, cancellationToken);
@@ -153,7 +169,8 @@ internal sealed class PostgresFarmLabService(
                     cancellationToken);
                 if (replay is not null)
                 {
-                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version)
+                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version ||
+                        replay.InputDigest != useful?.InputDigest)
                         throw new InvalidOperationException(
                             "A chave de idempotência já foi usada com outro workload.");
                     return await LoadJobAsync(db, replay.Id, cancellationToken);
@@ -193,7 +210,8 @@ internal sealed class PostgresFarmLabService(
                     node.Runtime,
                     node.LogicalProcessors,
                     node.MemoryBytes,
-                    node.AgentVersion)),
+                    node.AgentVersion),
+                useful?.InputDigest),
             manifestSigning);
         var job = new FarmJobRecord
         {
@@ -204,6 +222,11 @@ internal sealed class PostgresFarmLabService(
             ApiIdempotencyKey = apiIdempotencyKey,
             ScheduleId = scheduleId,
             ScheduledForUtc = scheduledForUtc,
+            DemandLabel = useful?.Label,
+            InputVersion = useful?.InputVersion,
+            InputPayload = useful?.InputPayload,
+            InputSizeBytes = useful?.InputSizeBytes,
+            InputDigest = useful?.InputDigest,
             Workload = definition.Workload,
             WorkloadVersion = definition.Version,
             VerificationPolicy = definition.VerificationPolicy,
@@ -221,7 +244,9 @@ internal sealed class PostgresFarmLabService(
         db.FarmJobs.Add(job);
         AddEvent(db, job, FarmJobStatus.Queued, now,
             scheduleId is null
-                ? $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler."
+                ? useful is null
+                    ? $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler."
+                    : $"Demanda útil '{useful.Label}' vinculada ao manifesto assinado."
                 : $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo agendamento {scheduleId:N}.");
         if (isAgent)
         {
@@ -241,7 +266,8 @@ internal sealed class PostgresFarmLabService(
                     cancellationToken);
                 if (replay is not null)
                 {
-                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version)
+                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version ||
+                        replay.InputDigest != useful?.InputDigest)
                         throw new InvalidOperationException(
                             "A chave de idempotência já foi usada com outro workload.", exception);
                     return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
@@ -277,31 +303,41 @@ internal sealed class PostgresFarmLabService(
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
             var stopwatch = Stopwatch.StartNew();
-            var resultDigest = await Task.Run(
-                () => FarmDeterministicWorkloads.Compute(
+            var execution = await Task.Run(
+                () => FarmDeterministicWorkloads.Execute(
                     manifest.Workload,
                     manifest.Nonce,
                     manifest.Iterations,
+                    job.InputPayload,
                     timeout.Token),
                 timeout.Token);
             stopwatch.Stop();
 
             Transition(db, job, FarmJobStatus.Verifying, "Resultado recebido; reexecução determinística iniciada.");
             job.DurationMilliseconds = Math.Max(1, stopwatch.ElapsedMilliseconds);
-            job.ResultDigest = resultDigest;
+            job.ResultDigest = execution.Digest;
+            if (execution.OutputPayload is not null)
+            {
+                job.OutputVersion = definition.OutputSchema;
+                job.OutputPayload = execution.OutputPayload;
+                job.OutputSizeBytes = Encoding.UTF8.GetByteCount(execution.OutputPayload);
+                job.OutputDigest = execution.Digest;
+            }
             await db.SaveChangesAsync(cancellationToken);
 
-            var expectedDigest = await Task.Run(
-                () => FarmDeterministicWorkloads.Compute(
+            var expected = await Task.Run(
+                () => FarmDeterministicWorkloads.Execute(
                     manifest.Workload,
                     manifest.Nonce,
                     manifest.Iterations,
+                    job.InputPayload,
                     timeout.Token),
                 timeout.Token);
-            job.ExpectedDigest = expectedDigest;
+            job.ExpectedDigest = expected.Digest;
             if (!CryptographicOperations.FixedTimeEquals(
-                    Convert.FromHexString(resultDigest),
-                    Convert.FromHexString(expectedDigest)))
+                    Convert.FromHexString(execution.Digest),
+                    Convert.FromHexString(expected.Digest)) ||
+                !string.Equals(execution.OutputPayload, expected.OutputPayload, StringComparison.Ordinal))
                 throw new InvalidOperationException("O resultado do workload não passou na verificação.");
 
             job.Status = FarmJobStatus.Completed.ToString();
@@ -528,7 +564,22 @@ internal sealed class PostgresFarmLabService(
             manifest.NetworkPolicy != definition.NetworkPolicy ||
             manifest.DataClassification != definition.DataClassification)
             throw new InvalidOperationException("O manifesto do Job viola a allowlist do laboratório.");
+        if (manifest.InputDigest != job.InputDigest || !InputMatchesDefinition(job, definition))
+            throw new InvalidOperationException("A entrada do Job não corresponde ao manifesto.");
         return manifest;
+    }
+
+    private static bool InputMatchesDefinition(
+        FarmJobRecord job,
+        FarmWorkloadDefinition definition)
+    {
+        if (definition.InputSchema is null)
+            return job.InputVersion is null && job.InputPayload is null && job.InputDigest is null;
+        if (job.InputVersion != definition.InputSchema || job.InputPayload is null ||
+            job.InputSizeBytes != Encoding.UTF8.GetByteCount(job.InputPayload))
+            return false;
+        try { return job.InputDigest == FarmDeterministicWorkloads.ComputeInputDigest(job.InputPayload); }
+        catch (ArgumentException) { return false; }
     }
 
     private bool TryReadVerifiedManifest(
@@ -632,7 +683,8 @@ internal sealed class PostgresFarmLabService(
                 manifest.MaxMemoryBytes,
                 manifest.NetworkPolicy,
                 manifest.DataClassification,
-                manifest.NodeProfileHash);
+                manifest.NodeProfileHash,
+                manifest.InputDigest);
         }
 
         return new FarmJobSnapshot(
@@ -658,7 +710,15 @@ internal sealed class PostgresFarmLabService(
                 x.Sequence,
                 Enum.Parse<FarmJobStatus>(x.Status),
                 x.OccurredAtUtc,
-                x.Detail)).ToArray());
+                x.Detail)).ToArray(),
+            job.InputVersion is null ? null : new FarmUsefulJobSnapshot(
+                job.DemandLabel!,
+                job.InputVersion,
+                job.InputSizeBytes!.Value,
+                job.InputDigest!,
+                job.OutputVersion,
+                job.OutputSizeBytes,
+                job.OutputDigest));
     }
 }
 

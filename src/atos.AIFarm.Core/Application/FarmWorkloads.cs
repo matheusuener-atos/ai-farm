@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace atos.AIFarm.Core.Application;
 
@@ -18,7 +20,9 @@ public sealed record FarmWorkloadDefinition(
     long MaxMemoryBytes,
     long ProcessingPointsMilli,
     string NetworkPolicy,
-    string DataClassification);
+    string DataClassification,
+    string? InputSchema = null,
+    string? OutputSchema = null);
 
 public static class FarmWorkloadCatalog
 {
@@ -54,7 +58,23 @@ public static class FarmWorkloadCatalog
             256L * 1024 * 1024,
             1_000,
             "DENY_ALL",
-            "STANDARD")
+            "STANDARD"),
+        new(
+            "iris-text-index-v1",
+            "IRIS_TEXT_INDEX",
+            "atos-iris-text-index-v1",
+            "IRIS TEXT INDEX",
+            "Normaliza e indexa texto real para recuperação lexical e preparação de contexto da Iris.",
+            "DETERMINISTIC_OUTPUT_V1",
+            1,
+            30,
+            1,
+            256L * 1024 * 1024,
+            2_000,
+            "DENY_ALL",
+            "STANDARD",
+            "atos-text-input-v1",
+            "atos-text-index-v1")
     ];
 
     public static FarmWorkloadDefinition GetRequired(string id) =>
@@ -69,16 +89,34 @@ public static class FarmWorkloadCatalog
 
 public static class FarmDeterministicWorkloads
 {
+    public sealed record Execution(string Digest, string? OutputPayload);
+
     public static string Compute(
         string workload,
         string nonce,
         int iterations,
+        CancellationToken cancellationToken = default) =>
+        Execute(workload, nonce, iterations, null, cancellationToken).Digest;
+
+    public static Execution Execute(
+        string workload,
+        string nonce,
+        int iterations,
+        string? inputPayload,
         CancellationToken cancellationToken = default) => workload switch
         {
-            "SHA256_CHAIN" => ComputeSha256Chain(nonce, iterations, cancellationToken),
-            "MERKLE_ROOT_SHA256" => ComputeMerkleRoot(nonce, iterations, cancellationToken),
+            "SHA256_CHAIN" => DigestOnly(ComputeSha256Chain(nonce, iterations, cancellationToken)),
+            "MERKLE_ROOT_SHA256" => DigestOnly(ComputeMerkleRoot(nonce, iterations, cancellationToken)),
+            "IRIS_TEXT_INDEX" => ComputeTextIndex(inputPayload, cancellationToken),
             _ => throw new ArgumentException("Workload não autorizado.", nameof(workload))
         };
+
+    public static string ComputeInputDigest(string inputPayload)
+    {
+        ValidateTextInput(inputPayload);
+        return Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(inputPayload))).ToLowerInvariant();
+    }
 
     private static string ComputeSha256Chain(
         string nonce,
@@ -139,4 +177,89 @@ public static class FarmDeterministicWorkloads
         if (iterations <= 0)
             throw new ArgumentOutOfRangeException(nameof(iterations));
     }
+
+    private static Execution ComputeTextIndex(
+        string? inputPayload,
+        CancellationToken cancellationToken)
+    {
+        ValidateTextInput(inputPayload);
+        cancellationToken.ThrowIfCancellationRequested();
+        var input = inputPayload!;
+        var normalized = Regex.Replace(
+            input.Normalize(NormalizationForm.FormKC)
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n'),
+            @"\s+",
+            " ").Trim();
+        var tokens = Regex.Matches(normalized.ToLowerInvariant(), @"[\p{L}\p{N}]+")
+            .Select(match => match.Value)
+            .ToArray();
+        var terms = tokens.GroupBy(x => x, StringComparer.Ordinal)
+            .Select(group => new FarmTextIndexTerm(group.Key, group.Count()))
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Term, StringComparer.Ordinal)
+            .Take(32)
+            .ToArray();
+        var chunks = tokens.Chunk(200)
+            .Select((chunk, index) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var bytes = Encoding.UTF8.GetBytes(string.Join('\n', chunk));
+                return new FarmTextIndexChunk(
+                    index + 1,
+                    index * 200,
+                    chunk.Length,
+                    Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+            })
+            .ToArray();
+        var result = new FarmTextIndexResult(
+            "atos-text-index-v1",
+            ComputeInputDigest(input),
+            normalized.Length,
+            tokens.Length,
+            tokens.Distinct(StringComparer.Ordinal).Count(),
+            terms,
+            chunks);
+        var output = JsonSerializer.Serialize(result, TextIndexJsonOptions);
+        return new Execution(
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(output)))
+                .ToLowerInvariant(),
+            output);
+    }
+
+    private static void ValidateTextInput(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            throw new ArgumentException("O texto útil é obrigatório.", nameof(input));
+        var size = Encoding.UTF8.GetByteCount(input);
+        if (size > 32 * 1024)
+            throw new ArgumentOutOfRangeException(nameof(input),
+                "O texto útil deve possuir no máximo 32 KiB em UTF-8.");
+        if (input.Any(character => char.IsControl(character) &&
+                                   character is not ('\r' or '\n' or '\t')))
+            throw new ArgumentException("O texto útil contém caracteres de controle inválidos.", nameof(input));
+    }
+
+    private static Execution DigestOnly(string digest) => new(digest, null);
+
+    private static readonly JsonSerializerOptions TextIndexJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        WriteIndented = false
+    };
 }
+
+public sealed record FarmTextIndexTerm(string Term, int Count);
+public sealed record FarmTextIndexChunk(
+    int Sequence,
+    int StartToken,
+    int TokenCount,
+    string Digest);
+public sealed record FarmTextIndexResult(
+    string Version,
+    string InputDigest,
+    int CharacterCount,
+    int TokenCount,
+    int UniqueTokenCount,
+    IReadOnlyList<FarmTextIndexTerm> TopTerms,
+    IReadOnlyList<FarmTextIndexChunk> Chunks);

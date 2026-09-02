@@ -7,7 +7,7 @@ public sealed class FarmWorkloadCatalogTests
     [Fact]
     public void CatalogHasUniqueImmutableIdentifiersAndSafePolicies()
     {
-        Assert.Equal(2, FarmWorkloadCatalog.Definitions.Count);
+        Assert.Equal(3, FarmWorkloadCatalog.Definitions.Count);
         Assert.Equal(
             FarmWorkloadCatalog.Definitions.Count,
             FarmWorkloadCatalog.Definitions.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count());
@@ -15,7 +15,7 @@ public sealed class FarmWorkloadCatalogTests
         {
             Assert.Equal("DENY_ALL", definition.NetworkPolicy);
             Assert.Equal("STANDARD", definition.DataClassification);
-            Assert.Equal("DETERMINISTIC_REEXECUTION_V1", definition.VerificationPolicy);
+            Assert.StartsWith("DETERMINISTIC_", definition.VerificationPolicy, StringComparison.Ordinal);
             Assert.Equal(1, definition.MaxLogicalProcessors);
             Assert.InRange(definition.MaxMemoryBytes, 1, 256L * 1024 * 1024);
             Assert.True(definition.ProcessingPointsMilli > 0);

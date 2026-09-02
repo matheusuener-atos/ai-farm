@@ -16,7 +16,9 @@ public sealed record FarmScheduleRequest(
             throw new ArgumentException("O nome deve conter entre 3 e 80 caracteres.", nameof(Name));
         if (name.Any(char.IsControl))
             throw new ArgumentException("O nome contém caracteres inválidos.", nameof(Name));
-        _ = FarmWorkloadCatalog.GetRequired(WorkloadId);
+        var workload = FarmWorkloadCatalog.GetRequired(WorkloadId);
+        if (workload.InputSchema is not null)
+            throw new ArgumentException("Demandas com entrada não podem ser agendadas sem payload.", nameof(WorkloadId));
         if (IntervalMinutes is < 5 or > 10_080)
             throw new ArgumentOutOfRangeException(nameof(IntervalMinutes),
                 "O intervalo deve ficar entre 5 minutos e 7 dias.");

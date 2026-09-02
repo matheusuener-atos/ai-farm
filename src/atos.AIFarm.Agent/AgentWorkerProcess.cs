@@ -10,7 +10,8 @@ internal sealed record AgentWorkerRequest(
     string Workload,
     string WorkloadVersion,
     string Nonce,
-    int Iterations);
+    int Iterations,
+    string? InputPayload = null);
 
 internal sealed record AgentWorkerResult(
     string Protocol,
@@ -18,16 +19,17 @@ internal sealed record AgentWorkerResult(
     long DurationMilliseconds,
     long PeakMemoryBytes = 0,
     long ProcessorTimeMilliseconds = 0,
-    string Enforcement = "UNREPORTED");
+    string Enforcement = "UNREPORTED",
+    string? OutputPayload = null);
 
 internal sealed record AgentWorkerLaunch(string FileName, IReadOnlyList<string> Arguments);
 
 internal static class AgentWorkerProtocol
 {
-    public const string Version = "atos-worker-ipc-v2";
+    public const string Version = "atos-worker-ipc-v3";
     public const string Workload = "SHA256_CHAIN";
     public const int Iterations = 100_000;
-    public const int MaximumMessageCharacters = 4_096;
+    public const int MaximumMessageCharacters = 96 * 1024;
 
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 }
@@ -49,16 +51,18 @@ internal static class AgentWorkerHost
                 "A solicitação do worker está vazia.");
             var definition = Validate(request);
             var stopwatch = Stopwatch.StartNew();
-            var digest = FarmDeterministicWorkloads.Compute(
+            var execution = FarmDeterministicWorkloads.Execute(
                 definition.Workload,
                 request.Nonce,
                 request.Iterations,
+                request.InputPayload,
                 cancellationToken);
             stopwatch.Stop();
             var result = new AgentWorkerResult(
                 AgentWorkerProtocol.Version,
-                digest,
-                Math.Max(1, stopwatch.ElapsedMilliseconds));
+                execution.Digest,
+                Math.Max(1, stopwatch.ElapsedMilliseconds),
+                OutputPayload: execution.OutputPayload);
             await output.WriteLineAsync(JsonSerializer.Serialize(
                 result,
                 AgentWorkerProtocol.JsonOptions));
@@ -110,6 +114,10 @@ internal static class AgentWorkerHost
         }
         if (nonce.Length != 16)
             throw new InvalidOperationException("O nonce do worker deve possuir 128 bits.");
+        if (definition.InputSchema is null && request.InputPayload is not null)
+            throw new InvalidOperationException("O workload não aceita entrada tipada.");
+        if (definition.InputSchema is not null)
+            _ = FarmDeterministicWorkloads.ComputeInputDigest(request.InputPayload!);
         return definition;
     }
 }
@@ -118,8 +126,13 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
 {
     public static AgentWorkerProcessRunner CreateCurrent() => new(ResolveCurrentLaunch());
 
+    public Task<AgentWorkerResult> RunAsync(
+        RemoteJobManifest manifest,
+        CancellationToken cancellationToken) => RunAsync(manifest, null, cancellationToken);
+
     public async Task<AgentWorkerResult> RunAsync(
         RemoteJobManifest manifest,
+        FarmRemoteJobInput? input,
         CancellationToken cancellationToken)
     {
         var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
@@ -147,7 +160,8 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
                 manifest.Workload,
                 manifest.WorkloadVersion,
                 manifest.Nonce,
-                manifest.Iterations);
+                manifest.Iterations,
+                input?.Payload);
             var payload = JsonSerializer.Serialize(
                 request,
                 AgentWorkerProtocol.JsonOptions);

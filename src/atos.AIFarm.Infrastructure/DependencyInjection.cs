@@ -103,6 +103,7 @@ public static class DependencyInjection
         services.RemoveAll<IChatAttachmentService>();
         services.RemoveAll<IFarmLabService>();
         services.RemoveAll<IFarmApiJobService>();
+        services.RemoveAll<IFarmUsefulJobService>();
         services.RemoveAll<IFarmAgentService>();
         services.RemoveAll<IFarmEconomicsScenarioStore>();
         services.RemoveAll<IFarmBalanceQuery>();
@@ -125,6 +126,7 @@ public static class DependencyInjection
         services.AddScoped<PostgresFarmLabService>();
         services.AddScoped<IFarmLabService>(provider => provider.GetRequiredService<PostgresFarmLabService>());
         services.AddScoped<IFarmApiJobService, PostgresFarmApiJobService>();
+        services.AddScoped<IFarmUsefulJobService, PostgresFarmUsefulJobService>();
         services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();
         services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
         services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
