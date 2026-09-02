@@ -29,7 +29,9 @@ public sealed record FarmEconomicsResult(
     decimal RiskReserve,
     decimal MaximumFundedReward,
     decimal MaximumRewardPerThousandCu,
-    decimal FundingGap)
+    decimal FundingGap,
+    decimal TotalNonRewardCosts,
+    decimal? BreakEvenGrossValuePerThousandCu)
 {
     public bool IsEconomicallyViable => MaximumFundedReward > 0 && FundingGap == 0;
 }
@@ -70,11 +72,47 @@ public static class FarmEconomicsCalculator
         var maximumReward = decimal.Max(0, availableForReward);
         var fundingGap = decimal.Max(0, -availableForReward);
         var rewardPerThousandCu = verifiedCu == 0 ? 0 : maximumReward * 1_000m / verifiedCu;
+        var percentageDeductions = Rate(
+            scenario.VerificationCostPercent +
+            scenario.PlatformCostPercent +
+            scenario.TaxesAndFeesPercent +
+            scenario.MarginPercent +
+            scenario.RiskReservePercent);
+        decimal? breakEvenValue = verifiedCu == 0 || percentageDeductions >= 1
+            ? null
+            : energyCost * 1_000m / (verifiedCu * (1 - percentageDeductions));
 
         return new FarmEconomicsResult(
             effectiveHours, attemptedCu, verifiedCu, energyKwh, grossEconomicValue,
             failureLoss, energyCost, verificationCost, platformCost, taxesAndFees,
-            requiredMargin, riskReserve, maximumReward, rewardPerThousandCu, fundingGap);
+            requiredMargin, riskReserve, maximumReward, rewardPerThousandCu, fundingGap,
+            deductions, breakEvenValue);
+    }
+
+    public static IReadOnlyList<FarmEconomicsProjection> Analyze(FarmEconomicsScenario baseline)
+    {
+        ArgumentNullException.ThrowIfNull(baseline);
+        var stress = baseline with
+        {
+            ElectricityCostPerKwh = baseline.ElectricityCostPerKwh * 1.20m,
+            GrossValuePerThousandCu = baseline.GrossValuePerThousandCu * 0.80m,
+            UtilizationPercent = decimal.Min(100m, baseline.UtilizationPercent * 0.75m),
+            SuccessPercent = decimal.Max(0m, baseline.SuccessPercent - 10m)
+        };
+        var favorable = baseline with
+        {
+            ElectricityCostPerKwh = baseline.ElectricityCostPerKwh * 0.90m,
+            GrossValuePerThousandCu = baseline.GrossValuePerThousandCu * 1.10m,
+            UtilizationPercent = decimal.Min(100m, baseline.UtilizationPercent * 1.15m),
+            SuccessPercent = decimal.Min(100m, baseline.SuccessPercent + 3m)
+        };
+
+        return
+        [
+            new(FarmEconomicsProjectionKind.Stress, stress, Calculate(stress)),
+            new(FarmEconomicsProjectionKind.Baseline, baseline, Calculate(baseline)),
+            new(FarmEconomicsProjectionKind.Favorable, favorable, Calculate(favorable))
+        ];
     }
 
     private static decimal Rate(decimal percent) => percent / 100m;
@@ -96,3 +134,10 @@ public static class FarmEconomicsCalculator
             throw new ArgumentOutOfRangeException(name, "O percentual deve estar entre 0 e 100.");
     }
 }
+
+public enum FarmEconomicsProjectionKind { Stress, Baseline, Favorable }
+
+public sealed record FarmEconomicsProjection(
+    FarmEconomicsProjectionKind Kind,
+    FarmEconomicsScenario Scenario,
+    FarmEconomicsResult Result);

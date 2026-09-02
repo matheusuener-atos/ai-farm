@@ -33,3 +33,13 @@ reward máximo = valor do compute verificado
 
 Quando as deduções excedem o valor verificado, o reward é limitado a zero e a
 diferença é mostrada como déficit.
+
+O simulador pode adotar a vazão do último benchmark concluído da conta como
+capacidade medida em CU/h. A referência mostra Job, duração, Node e estado da
+evidência; os demais parâmetros continuam sendo hipóteses informadas pelo
+usuário.
+
+O ponto de equilíbrio calcula o menor valor bruto por 1.000 CU que cobre
+energia e deduções percentuais. A análise de sensibilidade exibe três cenários
+transparentes — stress, base e favorável — para impedir que uma única projeção
+seja interpretada como promessa.

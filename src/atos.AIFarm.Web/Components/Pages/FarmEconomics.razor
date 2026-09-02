@@ -1,6 +1,7 @@
 @page "/farm/economy"
 @rendermode InteractiveServer
 @attribute [Authorize]
+@inject IFarmLabService FarmLab
 
 <PageTitle>Economia da Farm // atos AI Farm</PageTitle>
 
@@ -14,6 +15,25 @@
     <strong>[ SIMULAÇÃO // NÃO FINANCEIRO ]</strong>
     <span>Nenhum cenário cria AIC, altera a Wallet ou define uma conversão CU → AIC.</span>
 </section>
+
+@if (_benchmark is null)
+{
+    <section class="benchmark-source unavailable">
+        <strong>[ MEDIÇÃO INDISPONÍVEL ]</strong>
+        <span>Execute um benchmark concluído no Compute Lab para substituir a capacidade informada manualmente.</span>
+    </section>
+}
+else
+{
+    <section class="benchmark-source">
+        <div>
+            <strong>[ ÚLTIMO BENCHMARK // @ShortId(_benchmark.JobId) ]</strong>
+            <span>@Number(_benchmark.ComputeUnitsPerHour) CU/H // @_benchmark.DurationMilliseconds MS // @_benchmark.FinishedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
+            <small>EVIDÊNCIA @(_benchmark.HasValidEvidence ? "VÁLIDA" : "LEGADA OU INDISPONÍVEL") // NODE @_benchmark.NodeName</small>
+        </div>
+        <button type="button" class="button-secondary" @onclick="UseLatestBenchmark">[ USAR MEDIÇÃO ]</button>
+    </section>
+}
 
 <section class="terminal economics-inputs">
     <div class="terminal-title">PARÂMETROS DO CENÁRIO</div>
@@ -60,6 +80,7 @@ else if (_result is not null)
             <article><span>REWARD MÁXIMO FINANCIADO</span><strong>@Money(_result.MaximumFundedReward)</strong></article>
             <article><span>TETO / 1.000 CU</span><strong>@Money(_result.MaximumRewardPerThousandCu)</strong></article>
             <article><span>DÉFICIT</span><strong>@Money(_result.FundingGap)</strong></article>
+            <article><span>PONTO DE EQUILÍBRIO / 1.000 CU</span><strong>@BreakEven(_result.BreakEvenGrossValuePerThousandCu)</strong></article>
         </div>
     </section>
 
@@ -77,6 +98,34 @@ else if (_result is not null)
         </dl>
         <p>REWARD MÁXIMO = VALOR VERIFICADO − ENERGIA − VERIFICAÇÃO − PLATAFORMA − TAXAS − MARGEM − RISCO</p>
     </section>
+
+    <section class="terminal economics-sensitivity">
+        <div class="terminal-title">SENSIBILIDADE // NÃO É PREVISÃO</div>
+        <div class="sensitivity-notice">
+            STRESS: energia +20%, valor −20%, utilização ×0,75 e sucesso −10 p.p. //
+            FAVORÁVEL: energia −10%, valor +10%, utilização ×1,15 e sucesso +3 p.p.
+        </div>
+        <div class="sensitivity-grid">
+            @foreach (var projection in _projections)
+            {
+                <article>
+                    <header>
+                        <strong>@ProjectionLabel(projection.Kind)</strong>
+                        <span class="@(projection.Result.IsEconomicallyViable ? "green" : "error-text")">
+                            @(projection.Result.IsEconomicallyViable ? "VIÁVEL" : "DÉFICIT")
+                        </span>
+                    </header>
+                    <dl>
+                        <div><dt>UTILIZAÇÃO</dt><dd>@Number(projection.Scenario.UtilizationPercent)%</dd></div>
+                        <div><dt>SUCESSO</dt><dd>@Number(projection.Scenario.SuccessPercent)%</dd></div>
+                        <div><dt>VALOR / 1K CU</dt><dd>@Money(projection.Scenario.GrossValuePerThousandCu)</dd></div>
+                        <div><dt>REWARD MÁX.</dt><dd>@Money(projection.Result.MaximumFundedReward)</dd></div>
+                        <div><dt>DÉFICIT</dt><dd>@Money(projection.Result.FundingGap)</dd></div>
+                    </dl>
+                </article>
+            }
+        </div>
+    </section>
 }
 
 <a class="text-link" href="/farm">← VOLTAR AO COMPUTE LAB</a>
@@ -84,17 +133,49 @@ else if (_result is not null)
 @code {
     private FarmEconomicsInput _scenario = FarmEconomicsInput.Example();
     private FarmEconomicsResult? _result;
+    private IReadOnlyList<FarmEconomicsProjection> _projections = [];
+    private BenchmarkMeasurement? _benchmark;
     private string? _error;
 
-    protected override void OnInitialized() => Calculate();
+    protected override async Task OnInitializedAsync()
+    {
+        Calculate();
+        try
+        {
+            var dashboard = await FarmLab.GetDashboardAsync();
+            var job = dashboard.RecentJobs
+                .Where(job => job.Status == FarmJobStatus.Completed &&
+                              job.DurationMilliseconds > 0 &&
+                              job.ComputeUnitsMilli > 0)
+                .OrderByDescending(job => job.FinishedAtUtc)
+                .FirstOrDefault();
+            if (job is not null)
+            {
+                var cuPerHour = job.ComputeUnitsMilli / 1_000m * 3_600_000m / job.DurationMilliseconds!.Value;
+                _benchmark = new BenchmarkMeasurement(
+                    job.Id, dashboard.Node.Name, cuPerHour,
+                    job.DurationMilliseconds.Value, job.FinishedAtUtc ?? job.CreatedAtUtc,
+                    job.Evidence?.IsValid == true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            _benchmark = null;
+        }
+    }
 
     private void Calculate()
     {
         _error = null;
-        try { _result = FarmEconomicsCalculator.Calculate(_scenario.ToScenario()); }
+        try
+        {
+            _projections = FarmEconomicsCalculator.Analyze(_scenario.ToScenario());
+            _result = _projections.Single(x => x.Kind == FarmEconomicsProjectionKind.Baseline).Result;
+        }
         catch (ArgumentOutOfRangeException exception)
         {
             _result = null;
+            _projections = [];
             _error = exception.Message.Split(" (Parameter", StringSplitOptions.None)[0];
         }
     }
@@ -105,8 +186,32 @@ else if (_result is not null)
         Calculate();
     }
 
+    private void UseLatestBenchmark()
+    {
+        if (_benchmark is null) return;
+        _scenario.ComputeUnitsPerHour = decimal.Round(_benchmark.ComputeUnitsPerHour, 2);
+        Calculate();
+    }
+
     private static string Money(decimal value) => $"R$ {value:N2}";
     private static string Number(decimal value) => value.ToString("N2");
+    private static string BreakEven(decimal? value) => value is null ? "INDETERMINADO" : Money(value.Value);
+    private static string ShortId(Guid id) => id.ToString("N")[..8];
+    private static string ProjectionLabel(FarmEconomicsProjectionKind kind) => kind switch
+    {
+        FarmEconomicsProjectionKind.Stress => "STRESS",
+        FarmEconomicsProjectionKind.Baseline => "BASE",
+        FarmEconomicsProjectionKind.Favorable => "FAVORÁVEL",
+        _ => kind.ToString().ToUpperInvariant()
+    };
+
+    private sealed record BenchmarkMeasurement(
+        Guid JobId,
+        string NodeName,
+        decimal ComputeUnitsPerHour,
+        long DurationMilliseconds,
+        DateTimeOffset FinishedAtUtc,
+        bool HasValidEvidence);
 
     private sealed class FarmEconomicsInput
     {

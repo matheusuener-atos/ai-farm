@@ -17,8 +17,35 @@ public sealed class FarmEconomicsCalculatorTests
         Assert.Equal(0.875m, result.FailureLoss);
         Assert.Equal(3.99m, result.EnergyCost);
         Assert.Equal(4.655m, result.MaximumFundedReward);
+        Assert.Equal(11.97m, result.TotalNonRewardCosts);
+        Assert.Equal(0.2307692307692307692307692308m, result.BreakEvenGrossValuePerThousandCu);
         Assert.Equal(0m, result.FundingGap);
         Assert.True(result.IsEconomicallyViable);
+    }
+
+    [Fact]
+    public void Analyze_ProducesOrderedStressBaselineAndFavorableProjections()
+    {
+        var projections = FarmEconomicsCalculator.Analyze(Scenario());
+
+        Assert.Collection(
+            projections,
+            stress => Assert.Equal(FarmEconomicsProjectionKind.Stress, stress.Kind),
+            baseline => Assert.Equal(FarmEconomicsProjectionKind.Baseline, baseline.Kind),
+            favorable => Assert.Equal(FarmEconomicsProjectionKind.Favorable, favorable.Kind));
+        Assert.True(projections[0].Result.MaximumFundedReward < projections[1].Result.MaximumFundedReward);
+        Assert.True(projections[1].Result.MaximumFundedReward < projections[2].Result.MaximumFundedReward);
+    }
+
+    [Fact]
+    public void Calculate_HasNoBreakEvenWhenPercentageDeductionsConsumeAllRevenue()
+    {
+        var result = FarmEconomicsCalculator.Calculate(Scenario() with
+        {
+            VerificationCostPercent = 100m
+        });
+
+        Assert.Null(result.BreakEvenGrossValuePerThousandCu);
     }
 
     [Fact]

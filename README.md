@@ -410,7 +410,10 @@ A rota autenticada `/farm/economy` inicia a prova econômica sem alterar a
 Wallet. O cenário combina capacidade em CU/h, utilização, taxa de sucesso,
 energia, valor bruto do workload, verificação, plataforma, impostos, margem e
 reserva de risco. O resultado mostra o reward máximo financiável em BRL e o
-eventual déficit.
+eventual déficit. A capacidade pode ser preenchida pela vazão do último
+benchmark concluído, mantendo a referência ao Job e à validade da evidência.
+Ponto de equilíbrio e cenários de stress, base e favorável expõem a
+sensibilidade das hipóteses.
 
 Os valores iniciais são apenas um exemplo editável. O simulador não define
 preço real, não converte CU em AIC e não registra Reward no Ledger. Uma futura
