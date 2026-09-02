@@ -80,6 +80,37 @@ public sealed class PostgresFarmLabTests
                 new FarmApiJobRequest("merkle-root-sha256-v1"),
                 tokenId,
                 "farm-api-job-0001"));
+
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var firstEvent = await db.FarmJobEvents.SingleAsync(
+                    x => x.JobId == completed.Id && x.Sequence == 1);
+                firstEvent.Detail = "Lifecycle adulterado após a emissão do bundle.";
+                await db.SaveChangesAsync();
+            }
+
+            var tampered = Assert.IsType<FarmJobSnapshot>(await lab.GetJobAsync(completed.Id));
+            var tamperedEvidence = Assert.IsType<FarmJobEvidenceSnapshot>(tampered.Evidence);
+            Assert.False(tamperedEvidence.IsValid);
+            Assert.True(tamperedEvidence.Verification.SignatureValid);
+            Assert.True(tamperedEvidence.Verification.ManifestValid);
+            Assert.True(tamperedEvidence.Verification.JobBindingValid);
+            Assert.False(tamperedEvidence.Verification.LifecycleValid);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                lab.DownloadEvidenceAsync(completed.Id));
+            var audit = await provider.GetRequiredService<IAuditTrail>()
+                .SearchAsync(new AuditQuery(Category: AuditCategory.Farm, PageSize: 100));
+            Assert.Equal(
+                AuditIntegrityStatus.Invalid,
+                audit.Events.Single(x => x.Id == completed.Id).Integrity);
+            var analytics = await provider.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);
+            Assert.Equal(1, analytics.IntegrityFailureCount);
+            Assert.Equal(2, analytics.CompletedJobCount);
+            Assert.Equal(2_000, analytics.VerifiedProcessingPointsMilli);
+            var balance = await provider.GetRequiredService<IFarmBalanceQuery>().GetAsync();
+            Assert.Equal(2, balance.CompletedJobs);
+            Assert.Equal(2_000, balance.VerifiedComputeUnitsMilli);
         }
         finally
         {

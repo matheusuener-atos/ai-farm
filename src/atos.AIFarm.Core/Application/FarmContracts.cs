@@ -153,7 +153,20 @@ public sealed record FarmJobEvidenceSnapshot(
     string Digest,
     string Signature,
     DateTimeOffset CreatedAtUtc,
-    bool IsValid);
+    FarmJobEvidenceVerificationSnapshot Verification)
+{
+    public bool IsValid => Verification.IsValid;
+}
+
+public sealed record FarmJobEvidenceVerificationSnapshot(
+    bool SignatureValid,
+    bool ManifestValid,
+    bool JobBindingValid,
+    bool LifecycleValid)
+{
+    public bool IsValid =>
+        SignatureValid && ManifestValid && JobBindingValid && LifecycleValid;
+}
 
 public sealed record FarmJobEvidenceDownload(
     string FileName,

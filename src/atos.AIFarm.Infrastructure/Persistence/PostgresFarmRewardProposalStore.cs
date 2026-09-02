@@ -45,9 +45,18 @@ public sealed class PostgresFarmRewardProposalStore(
         var job = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
             x => x.Id == jobId && x.AccountId == identity.AccountId,
             cancellationToken) ?? throw new InvalidOperationException("O Job não pertence à conta.");
+        var jobEvents = await db.FarmJobEvents.AsNoTracking()
+            .Where(x => x.JobId == job.Id)
+            .OrderBy(x => x.Sequence)
+            .ToArrayAsync(cancellationToken);
+        var evidenceVerification = FarmEvidenceSecurity.Verify(
+            job,
+            jobEvents,
+            signingOptions,
+            out _);
         if (job.Status != FarmJobStatus.Completed.ToString() ||
             job.ComputeUnitsMilli <= 0 ||
-            !FarmEvidenceSecurity.TryVerify(job, signingOptions, out _))
+            !evidenceVerification.IsValid)
             throw new InvalidOperationException("O Job precisa estar concluído e possuir evidência válida.");
 
         var scenarioRecord = await db.FarmEconomicsScenarios.AsNoTracking().SingleOrDefaultAsync(

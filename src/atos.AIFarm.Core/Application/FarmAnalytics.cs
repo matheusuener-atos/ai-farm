@@ -11,7 +11,8 @@ public sealed record FarmAnalyticsJob(
     long? ProcessorTimeMilliseconds,
     string? Enforcement,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset? FinishedAtUtc);
+    DateTimeOffset? FinishedAtUtc,
+    bool EvidenceValid = true);
 
 public sealed record FarmAnalyticsNode(
     Guid Id,
@@ -63,6 +64,7 @@ public sealed record FarmAnalytics(
     int ActiveJobCount,
     int CompletedJobCount,
     int FailedJobCount,
+    int IntegrityFailureCount,
     decimal SuccessRatePercent,
     long VerifiedProcessingPointsMilli,
     decimal? AverageDurationMilliseconds,
@@ -102,13 +104,18 @@ public static class FarmAnalyticsBuilder
         var previousFrom = from.AddDays(-days);
         var current = jobs.Where(x => x.CreatedAtUtc >= from && x.CreatedAtUtc <= now).ToArray();
         var previous = jobs.Where(x => x.CreatedAtUtc >= previousFrom && x.CreatedAtUtc < from).ToArray();
-        var completed = current.Where(x => x.Status == FarmJobStatus.Completed).ToArray();
+        var completed = current.Where(x =>
+            x.Status == FarmJobStatus.Completed && x.EvidenceValid).ToArray();
+        var integrityFailures = current.Count(x =>
+            x.Status == FarmJobStatus.Completed && !x.EvidenceValid);
+        var trustedCurrent = current.Where(x =>
+            x.Status != FarmJobStatus.Completed || x.EvidenceValid).ToArray();
         var failed = current.Where(x => IsFailed(x.Status)).ToArray();
-        var terminalCount = completed.Length + failed.Length;
+        var terminalCount = completed.Length + failed.Length + integrityFailures;
         var successRate = terminalCount == 0
             ? 0
             : decimal.Round(completed.Length * 100m / terminalCount, 1);
-        var durations = current.Where(x => x.DurationMilliseconds > 0)
+        var durations = trustedCurrent.Where(x => x.DurationMilliseconds > 0)
             .Select(x => x.DurationMilliseconds!.Value).ToArray();
         decimal? averageDuration = durations.Length == 0
             ? null
@@ -121,7 +128,8 @@ public static class FarmAnalyticsBuilder
             : decimal.Round(
                 verifiedPoints / 1_000m / (completedDuration / 3_600_000m),
                 3);
-        var previousPoints = previous.Where(x => x.Status == FarmJobStatus.Completed)
+        var previousPoints = previous.Where(x =>
+                x.Status == FarmJobStatus.Completed && x.EvidenceValid)
             .Sum(x => x.ProcessingPointsMilli);
         decimal? pointsChange = previousPoints == 0
             ? null
@@ -136,18 +144,23 @@ public static class FarmAnalyticsBuilder
                 return new FarmAnalyticsDailyPoint(
                     date,
                     rows.Length,
-                    rows.Count(x => x.Status == FarmJobStatus.Completed),
-                    rows.Count(x => IsFailed(x.Status)),
-                    rows.Where(x => x.Status == FarmJobStatus.Completed).Sum(x => x.ProcessingPointsMilli),
-                    rows.Where(x => x.DurationMilliseconds > 0).Sum(x => x.DurationMilliseconds!.Value));
+                    rows.Count(x => x.Status == FarmJobStatus.Completed && x.EvidenceValid),
+                    rows.Count(x => IsFailed(x.Status) || x.Status == FarmJobStatus.Completed && !x.EvidenceValid),
+                    rows.Where(x => x.Status == FarmJobStatus.Completed && x.EvidenceValid).Sum(x => x.ProcessingPointsMilli),
+                    rows.Where(x =>
+                        (x.Status != FarmJobStatus.Completed || x.EvidenceValid) &&
+                        x.DurationMilliseconds > 0).Sum(x => x.DurationMilliseconds!.Value));
             }).ToArray();
         var workloads = current.GroupBy(x => new { x.Workload, x.WorkloadVersion })
             .Select(group =>
             {
-                var done = group.Count(x => x.Status == FarmJobStatus.Completed);
-                var failures = group.Count(x => IsFailed(x.Status));
+                var done = group.Count(x => x.Status == FarmJobStatus.Completed && x.EvidenceValid);
+                var failures = group.Count(x =>
+                    IsFailed(x.Status) || x.Status == FarmJobStatus.Completed && !x.EvidenceValid);
                 var terminal = done + failures;
-                var workloadDurations = group.Where(x => x.DurationMilliseconds > 0)
+                var workloadDurations = group.Where(x =>
+                        (x.Status != FarmJobStatus.Completed || x.EvidenceValid) &&
+                        x.DurationMilliseconds > 0)
                     .Select(x => x.DurationMilliseconds!.Value).ToArray();
                 return new FarmAnalyticsWorkloadBreakdown(
                     group.Key.Workload,
@@ -155,7 +168,7 @@ public static class FarmAnalyticsBuilder
                     group.Count(),
                     done,
                     failures,
-                    group.Where(x => x.Status == FarmJobStatus.Completed).Sum(x => x.ProcessingPointsMilli),
+                    group.Where(x => x.Status == FarmJobStatus.Completed && x.EvidenceValid).Sum(x => x.ProcessingPointsMilli),
                     terminal == 0 ? 0 : decimal.Round(done * 100m / terminal, 1),
                     workloadDurations.Length == 0 ? null : decimal.Round((decimal)workloadDurations.Average(), 1));
             })
@@ -179,12 +192,13 @@ public static class FarmAnalyticsBuilder
             current.Count(x => !IsTerminal(x.Status)),
             completed.Length,
             failed.Length,
+            integrityFailures,
             successRate,
             verifiedPoints,
             averageDuration,
             pointsPerHour,
-            current.Select(x => x.PeakMemoryBytes ?? 0).DefaultIfEmpty().Max(),
-            current.Sum(x => x.ProcessorTimeMilliseconds ?? 0),
+            trustedCurrent.Select(x => x.PeakMemoryBytes ?? 0).DefaultIfEmpty().Max(),
+            trustedCurrent.Sum(x => x.ProcessorTimeMilliseconds ?? 0),
             previousPoints,
             pointsChange,
             node,

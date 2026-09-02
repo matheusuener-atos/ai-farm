@@ -6,7 +6,8 @@ namespace atos.AIFarm.Infrastructure.Persistence;
 public sealed class PostgresFarmAnalyticsQuery(
     IDbContextFactory<AIFarmDbContext> factory,
     IAIFarmIdentityAccessor identityAccessor,
-    TimeProvider timeProvider) : IFarmAnalyticsQuery
+    TimeProvider timeProvider,
+    FarmManifestSigningOptions signingOptions) : IFarmAnalyticsQuery
 {
     private static readonly TimeSpan HeartbeatTolerance = TimeSpan.FromSeconds(90);
 
@@ -25,33 +26,37 @@ public sealed class PostgresFarmAnalyticsQuery(
 
         var records = await db.FarmJobs.AsNoTracking()
             .Where(x => x.AccountId == identity.AccountId && x.CreatedAtUtc >= earliest)
-            .Select(x => new
-            {
+            .ToArrayAsync(cancellationToken);
+        var jobIds = records.Select(x => x.Id).ToArray();
+        var eventsByJob = (await db.FarmJobEvents.AsNoTracking()
+                .Where(x => jobIds.Contains(x.JobId))
+                .OrderBy(x => x.Sequence)
+                .ToArrayAsync(cancellationToken))
+            .GroupBy(x => x.JobId)
+            .ToDictionary(x => x.Key, x => (IReadOnlyCollection<FarmJobEventRecord>)x.ToArray());
+        var jobs = records.Select(x =>
+        {
+            var status = Enum.Parse<FarmJobStatus>(x.Status);
+            var evidenceValid = status != FarmJobStatus.Completed ||
+                FarmEvidenceSecurity.Verify(
+                    x,
+                    eventsByJob.GetValueOrDefault(x.Id) ?? [],
+                    signingOptions,
+                    out _).IsValid;
+            return new FarmAnalyticsJob(
                 x.Id,
                 x.Workload,
                 x.WorkloadVersion,
-                x.Status,
+                status,
                 x.ComputeUnitsMilli,
                 x.DurationMilliseconds,
                 x.WorkerPeakMemoryBytes,
                 x.WorkerProcessorTimeMilliseconds,
                 x.WorkerEnforcement,
                 x.CreatedAtUtc,
-                x.FinishedAtUtc
-            })
-            .ToArrayAsync(cancellationToken);
-        var jobs = records.Select(x => new FarmAnalyticsJob(
-            x.Id,
-            x.Workload,
-            x.WorkloadVersion,
-            Enum.Parse<FarmJobStatus>(x.Status),
-            x.ComputeUnitsMilli,
-            x.DurationMilliseconds,
-            x.WorkerPeakMemoryBytes,
-            x.WorkerProcessorTimeMilliseconds,
-            x.WorkerEnforcement,
-            x.CreatedAtUtc,
-            x.FinishedAtUtc)).ToArray();
+                x.FinishedAtUtc,
+                evidenceValid);
+        }).ToArray();
 
         var nodeRecord = await db.FarmNodes.AsNoTracking()
             .SingleOrDefaultAsync(x => x.AccountId == identity.AccountId, cancellationToken);

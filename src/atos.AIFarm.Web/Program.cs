@@ -544,13 +544,23 @@ personalApi.MapPost("/farm/jobs/{jobId:guid}/cancel", async (
 
 personalApi.MapGet("/farm/jobs/{jobId:guid}/evidence", async (
     Guid jobId,
+    HttpResponse response,
     IFarmApiJobService jobs,
     CancellationToken cancellationToken) =>
 {
-    var evidence = await jobs.DownloadEvidenceAsync(jobId, cancellationToken);
-    return evidence is null
-        ? Results.NotFound()
-        : Results.File(evidence.Content, "application/json", evidence.FileName);
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var evidence = await jobs.DownloadEvidenceAsync(jobId, cancellationToken);
+        return evidence is null
+            ? Results.NotFound()
+            : Results.File(evidence.Content, "application/json; charset=utf-8", evidence.FileName);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
 }).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
 personalApi.MapGet("/incidents", async (

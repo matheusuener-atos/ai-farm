@@ -18,16 +18,18 @@ public sealed class FarmAnalyticsTests
             Job(FarmJobStatus.Completed, 1_000, 3_600_000, Now.AddHours(-2), "sha256"),
             Job(FarmJobStatus.TimedOut, 0, 1_000, Now.AddHours(-1), "sha256"),
             Job(FarmJobStatus.Running, 0, null, Now.AddMinutes(-10), "inference"),
+            Job(FarmJobStatus.Completed, 9_999_000, 9_999_000, Now.AddMinutes(-5), "sha256", false),
             Job(FarmJobStatus.Completed, 500, 500, Now.AddDays(-8), "sha256")
         };
 
         var analytics = FarmAnalyticsBuilder.Build(jobs, node, economics, 7, Now);
 
-        Assert.Equal(3, analytics.JobCount);
+        Assert.Equal(4, analytics.JobCount);
         Assert.Equal(1, analytics.ActiveJobCount);
         Assert.Equal(1, analytics.CompletedJobCount);
         Assert.Equal(1, analytics.FailedJobCount);
-        Assert.Equal(50m, analytics.SuccessRatePercent);
+        Assert.Equal(1, analytics.IntegrityFailureCount);
+        Assert.Equal(33.3m, analytics.SuccessRatePercent);
         Assert.Equal(1_000, analytics.VerifiedProcessingPointsMilli);
         Assert.Equal(1m, analytics.ProcessingPointsPerHour);
         Assert.Equal(1_800_500m, analytics.AverageDurationMilliseconds);
@@ -36,9 +38,9 @@ public sealed class FarmAnalyticsTests
         Assert.Equal(500, analytics.PreviousPeriodProcessingPointsMilli);
         Assert.Equal(100m, analytics.ProcessingPointsChangePercent);
         Assert.Equal(7, analytics.Daily.Count);
-        Assert.Equal(3, analytics.Daily.Sum(x => x.JobCount));
+        Assert.Equal(4, analytics.Daily.Sum(x => x.JobCount));
         Assert.Equal(2, analytics.Workloads.Count);
-        Assert.Equal(3, analytics.Statuses.Sum(x => x.JobCount));
+        Assert.Equal(4, analytics.Statuses.Sum(x => x.JobCount));
         Assert.Equal(node, analytics.Node);
         Assert.Equal(economics, analytics.Economics);
     }
@@ -72,8 +74,10 @@ public sealed class FarmAnalyticsTests
         long points,
         long? duration,
         DateTimeOffset createdAt,
-        string workload) => new(
+        string workload,
+        bool evidenceValid = true) => new(
             Guid.NewGuid(), workload, "v1", status, points, duration,
             256L << 20, duration, "TEST", createdAt,
-            duration is null ? null : createdAt.AddMilliseconds(duration.Value));
+            duration is null ? null : createdAt.AddMilliseconds(duration.Value),
+            evidenceValid);
 }

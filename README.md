@@ -310,6 +310,16 @@ completo de telemetria e o painel `/farm` o exibe em cada Job. Esses valores sã
 observações do Agent autenticado e entram na evidência operacional do Job; não
 constituem attestation independente do hardware.
 
+A verificação do bundle não termina na assinatura HMAC. O servidor também
+revalida o manifesto, confere o vínculo de todos os campos econômicos e técnicos
+com o Job atual e compara, evento a evento, o lifecycle selado com a trilha
+persistida. O painel expõe esses quatro diagnósticos separadamente. Qualquer
+divergência invalida a evidência no Centro de Auditoria, bloqueia seu download e
+impede que ela origine uma nova fotografia econômica ou proposta de reward,
+mesmo quando a assinatura do payload original continua matematicamente válida.
+Saldo e analytics contam CP apenas de bundles aprovados nas quatro verificações;
+o painel analítico destaca separadamente as falhas de integridade.
+
 O Agent `0.6.0` substitui a regra fixa de um único benchmark pelo catálogo
 compartilhado. O IPC `atos-worker-ipc-v2` inclui workload e versão, e o worker
 continua sem aceitar comandos, caminhos, URLs ou código fornecido pelo usuário.
@@ -420,6 +430,7 @@ Implementado:
 - Centro Analítico da Farm em `/farm/analytics`, com CP verificado, vazão, sucesso, falhas, workloads, saúde do Node/Agent e pipeline econômico não liquidado.
 - catálogo compartilhado de workloads com seleção na Farm, benchmark SHA-256 e construção verificável de raiz Merkle no worker isolado.
 - API pessoal de Jobs da Farm com escopo privilegiado independente, submissão idempotente, consulta, cancelamento cooperativo e download de evidência assinada.
+- verificação profunda de evidências contra manifesto, Job e lifecycle persistido, integrada à UI, API, Auditoria, downloads e gate de rewards.
 
 ### API pessoal da Iris
 
@@ -509,7 +520,10 @@ Invoke-WebRequest "http://localhost:5159/api/v1/farm/jobs/$($job.id)/evidence" `
 `POST /api/v1/farm/jobs/{jobId}/cancel` solicita cancelamento cooperativo ao
 Agent quando o Job já está em execução. Consultas exigem `FarmRead`; submissão
 e cancelamento exigem `FarmExecute` e têm limite de 20 chamadas por minuto por
-token. Todos os acessos são filtrados pela conta vinculada ao token.
+token. Todos os acessos são filtrados pela conta vinculada ao token. A consulta
+do Job devolve `evidence.verification` com os estados independentes de HMAC,
+manifesto, vínculo do Job e lifecycle; `evidence.isValid` só é verdadeiro quando
+as quatro verificações são aprovadas.
 
 ### Centro Analítico da Iris
 

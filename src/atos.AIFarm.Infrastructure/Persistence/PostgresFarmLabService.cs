@@ -13,9 +13,8 @@ internal sealed class PostgresFarmLabService(
     TimeProvider timeProvider,
     FarmManifestSigningOptions signingOptions) : IFarmLabService
 {
-    private const string ManifestVersion = "atos-farm-manifest-v1";
-    private const string LegacyRemoteManifestVersion = "atos-farm-manifest-v2-agent";
-    internal const string RemoteManifestVersion = "atos-farm-manifest-v3-agent-profile";
+    private const string ManifestVersion = FarmManifestSecurity.EmbeddedVersion;
+    internal const string RemoteManifestVersion = FarmManifestSecurity.AgentProfileVersion;
     private static readonly TimeSpan AgentHeartbeatTolerance = TimeSpan.FromSeconds(90);
 
     public async Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)
@@ -388,7 +387,12 @@ internal sealed class PostgresFarmLabService(
             x => x.Id == jobId && x.AccountId == identity.AccountId,
             cancellationToken);
         if (job is null || job.EvidencePayload is null) return null;
-        if (!FarmEvidenceSecurity.TryVerify(job, signingOptions, out var evidence) || evidence is null)
+        var events = await db.FarmJobEvents.AsNoTracking()
+            .Where(x => x.JobId == job.Id)
+            .OrderBy(x => x.Sequence)
+            .ToArrayAsync(cancellationToken);
+        var verification = FarmEvidenceSecurity.Verify(job, events, signingOptions, out var evidence);
+        if (!verification.IsValid || evidence is null)
             throw new InvalidOperationException("A integridade do bundle de evidências não pôde ser validada.");
         var content = FarmEvidenceSecurity.Export(
             evidence,
@@ -485,31 +489,8 @@ internal sealed class PostgresFarmLabService(
         FarmJobRecord job,
         out FarmJobManifest? manifest)
     {
-        var verification = job.ManifestVersion is RemoteManifestVersion or LegacyRemoteManifestVersion
-            ? signingOptions.DeriveForAgent(job.NodeId).Signing
-            : signingOptions;
-        if (!FarmManifestSecurity.TryVerify(
-                job.ManifestPayload,
-                job.ManifestDigest,
-                job.ManifestSignature,
-                verification,
-                out manifest) ||
-            manifest is null)
-            return false;
-        return manifest.Version is ManifestVersion or RemoteManifestVersion or LegacyRemoteManifestVersion &&
-            manifest.JobId == job.Id &&
-            manifest.AttemptId == job.AttemptId &&
-            manifest.NodeId == job.NodeId &&
-            manifest.Workload == job.Workload &&
-            manifest.WorkloadVersion == job.WorkloadVersion &&
-            manifest.VerificationPolicy == job.VerificationPolicy &&
-            manifest.Nonce == job.Nonce &&
-            SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
-            SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
+        return FarmManifestSecurity.TryVerifyJobBinding(job, signingOptions, out manifest);
     }
-
-    private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
-        right is not null && Math.Abs((left - right.Value).Ticks) < 10;
 
     private async Task MarkTerminalAsync(
         AIFarmDbContext db,
@@ -584,6 +565,7 @@ internal sealed class PostgresFarmLabService(
         FarmJobRecord job,
         IEnumerable<FarmJobEventRecord> events)
     {
+        var eventRecords = events.OrderBy(x => x.Sequence).ToArray();
         FarmJobManifestSnapshot? manifestSnapshot = null;
         var isValid = TryReadVerifiedManifest(job, out var manifest);
         if (manifest is not null &&
@@ -625,8 +607,8 @@ internal sealed class PostgresFarmLabService(
             job.WorkerProcessorTimeMilliseconds,
             job.WorkerEnforcement,
             manifestSnapshot,
-            FarmEvidenceSecurity.ToSnapshot(job, signingOptions),
-            events.Select(x => new FarmJobEventSnapshot(
+            FarmEvidenceSecurity.ToSnapshot(job, eventRecords, signingOptions),
+            eventRecords.Select(x => new FarmJobEventSnapshot(
                 x.Sequence,
                 Enum.Parse<FarmJobStatus>(x.Status),
                 x.OccurredAtUtc,

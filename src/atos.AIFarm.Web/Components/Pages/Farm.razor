@@ -259,6 +259,10 @@ else
                                 <div><dt>EMITIDO</dt><dd>@job.Evidence.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</dd></div>
                                 <div><dt>PAYLOAD DIGEST</dt><dd title="@job.Evidence.Digest">@ShortHash(job.Evidence.Digest)</dd></div>
                                 <div><dt>ASSINATURA</dt><dd title="@job.Evidence.Signature">@ShortHash(job.Evidence.Signature)</dd></div>
+                                <div><dt>HMAC DO BUNDLE</dt><dd class="@IntegrityClass(job.Evidence.Verification.SignatureValid)">@IntegrityLabel(job.Evidence.Verification.SignatureValid)</dd></div>
+                                <div><dt>MANIFESTO</dt><dd class="@IntegrityClass(job.Evidence.Verification.ManifestValid)">@IntegrityLabel(job.Evidence.Verification.ManifestValid)</dd></div>
+                                <div><dt>VÍNCULO DO JOB</dt><dd class="@IntegrityClass(job.Evidence.Verification.JobBindingValid)">@IntegrityLabel(job.Evidence.Verification.JobBindingValid)</dd></div>
+                                <div><dt>LIFECYCLE</dt><dd class="@IntegrityClass(job.Evidence.Verification.LifecycleValid)">@IntegrityLabel(job.Evidence.Verification.LifecycleValid)</dd></div>
                             </dl>
                         </details>
                     }
@@ -422,6 +426,9 @@ else
     private static string JobStatusClass(FarmJobStatus status) =>
         status == FarmJobStatus.Completed ? "green" :
         status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? "error-text" : "amber";
+
+    private static string IntegrityLabel(bool valid) => valid ? "VÁLIDO" : "INVÁLIDO";
+    private static string IntegrityClass(bool valid) => valid ? "green" : "error-text";
 
     private static bool CanCancel(FarmJobSnapshot job) =>
         job.CancellationRequestedAtUtc is null && CanCancelStatus(job.Status);

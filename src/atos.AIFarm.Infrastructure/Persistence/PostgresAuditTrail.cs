@@ -152,12 +152,24 @@ public sealed class PostgresAuditTrail(
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(MaximumScan + 1)
                 .ToArrayAsync(cancellationToken);
+            var farmJobIds = records.Select(x => x.Id).ToArray();
+            var farmEvents = await db.FarmJobEvents.AsNoTracking()
+                .Where(x => farmJobIds.Contains(x.JobId))
+                .OrderBy(x => x.Sequence)
+                .ToArrayAsync(cancellationToken);
+            var farmEventsByJob = farmEvents
+                .GroupBy(x => x.JobId)
+                .ToDictionary(x => x.Key, x => (IReadOnlyCollection<FarmJobEventRecord>)x.ToArray());
             truncated |= records.Length > MaximumScan;
             events.AddRange(records.Take(MaximumScan).Select(record =>
             {
                 var integrity = record.EvidenceDigest is null
                     ? record.Status == "Completed" ? AuditIntegrityStatus.Invalid : AuditIntegrityStatus.NotApplicable
-                    : FarmEvidenceSecurity.TryVerify(record, signingOptions, out _)
+                    : FarmEvidenceSecurity.Verify(
+                            record,
+                            farmEventsByJob.GetValueOrDefault(record.Id) ?? [],
+                            signingOptions,
+                            out _).IsValid
                         ? AuditIntegrityStatus.Valid : AuditIntegrityStatus.Invalid;
                 return new AuditEventSnapshot(
                     record.Id, record.CreatedAtUtc, AuditCategory.Farm,

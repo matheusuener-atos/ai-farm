@@ -33,6 +33,7 @@ else
     <div class="analytics-kpis farm-analytics-kpis">
         <section class="kpi kpi-amber"><span>JOBS</span><strong>@_analytics.JobCount</strong><small>@_analytics.ActiveJobCount ATIVO(S)</small></section>
         <section class="kpi kpi-green"><span>CONCLUSÃO</span><strong>@_analytics.SuccessRatePercent.ToString("0.0")%</strong><small>@_analytics.CompletedJobCount OK // @_analytics.FailedJobCount FALHA</small></section>
+        <section class="kpi @(_analytics.IntegrityFailureCount == 0 ? "kpi-green" : "kpi-amber")"><span>INTEGRIDADE</span><strong>@_analytics.IntegrityFailureCount</strong><small>BUNDLES DIVERGENTES</small></section>
         <section class="kpi kpi-amber"><span>CP VERIFICADO</span><strong>@FormatCp(_analytics.VerifiedProcessingPointsMilli)</strong><small>SOMENTE JOBS CONCLUÍDOS</small></section>
         <section class="kpi"><span>VAZÃO</span><strong>@_analytics.ProcessingPointsPerHour.ToString("N3") CP/H</strong><small>POR TEMPO DE EXECUÇÃO</small></section>
         <section class="kpi"><span>DURAÇÃO MÉDIA</span><strong>@FormatDuration(_analytics.AverageDurationMilliseconds)</strong><small>PICO MEM. @FormatBytes(_analytics.PeakMemoryBytes)</small></section>

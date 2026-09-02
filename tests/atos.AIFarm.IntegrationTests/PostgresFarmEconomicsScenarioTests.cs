@@ -121,15 +121,28 @@ public sealed class PostgresFarmEconomicsScenarioTests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 storeB.SaveAsync("origem alheia", Scenario(), job.Id));
 
+            var blockedScenario = await storeA.SaveAsync(
+                "Evidência adulterada",
+                Scenario(),
+                job.Id);
+
             var factory = providerA.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
             await using (var db = await factory.CreateDbContextAsync())
             {
+                var jobEvent = await db.FarmJobEvents.SingleAsync(
+                    x => x.JobId == job.Id && x.Sequence == 1);
+                jobEvent.Detail = "Evento adulterado depois da selagem.";
                 var proposalRecord = await db.FarmRewardProposals.SingleAsync(x => x.Id == proposal.Id);
                 proposalRecord.Digest = new string('0', 64);
                 var record = await db.FarmEconomicsScenarios.SingleAsync(x => x.Id == saved.Id);
                 record.Digest = new string('0', 64);
                 await db.SaveChangesAsync();
             }
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                proposalsA.CreateAsync(job.Id, blockedScenario.Id));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                storeA.SaveAsync("Nova origem adulterada", Scenario(), job.Id));
 
             Assert.False((await proposalsA.ListAsync()).Single(x => x.Id == proposal.Id).IsIntegrityValid);
             var tampered = (await storeA.ListAsync()).Single(x => x.Id == saved.Id);
