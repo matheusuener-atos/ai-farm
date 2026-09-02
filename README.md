@@ -432,6 +432,7 @@ Implementado:
 - API pessoal de Jobs da Farm com escopo privilegiado independente, submissão idempotente, consulta, cancelamento cooperativo e download de evidência assinada.
 - verificação profunda de evidências contra manifesto, Job e lifecycle persistido, integrada à UI, API, Auditoria, downloads e gate de rewards.
 - Centro de Jobs em `/farm/jobs`, com histórico paginado, filtros operacionais, origem API/painel, inspeção do lifecycle e exportação JSON digestada.
+- Centro de Agendamentos em `/farm/schedules`, com recorrência UTC persistente, pausa/retomada, despacho idempotente entre instâncias e histórico de ocorrências.
 
 ### API pessoal da Iris
 
@@ -449,9 +450,14 @@ GET /api/v1/conversations?page=1&pageSize=25
 GET /api/v1/conversations/{conversationId}
 GET /api/v1/farm/analytics?days=30
 GET /api/v1/farm/workloads
+GET /api/v1/farm/schedules
 GET /api/v1/farm/jobs?page=1&pageSize=20
 GET /api/v1/farm/jobs/export
 POST /api/v1/farm/jobs
+POST /api/v1/farm/schedules
+POST /api/v1/farm/schedules/{scheduleId}/pause
+POST /api/v1/farm/schedules/{scheduleId}/resume
+POST /api/v1/farm/schedules/{scheduleId}/trigger
 GET /api/v1/farm/jobs/{jobId}
 POST /api/v1/farm/jobs/{jobId}/cancel
 GET /api/v1/farm/jobs/{jobId}/evidence
@@ -543,6 +549,27 @@ varredura a 5.000 registros e sinaliza truncamento para que o operador refine o
 período. Clientes com `FarmRead` usam as mesmas projeções em
 `GET /api/v1/farm/jobs` e `GET /api/v1/farm/jobs/export`; paginação aceita de 1
 a 100 itens por página.
+
+### Centro de Agendamentos da Farm
+
+A rota autenticada `/farm/schedules` automatiza workloads do catálogo em
+intervalos fixos de 5 minutos a 7 dias. O primeiro disparo é imediato; cada
+ocorrência é persistida, recebe atribuição ao agendamento e pode ser
+`Submitted`, `Deferred` ou `Failed`. Pausar e retomar preservam o histórico.
+
+O dispatcher consulta o relógio UTC a cada 15 segundos. A reivindicação da
+ocorrência e o avanço de `NextRunAtUtc` são transacionais, com índices únicos
+para impedir duplicidade mesmo com mais de uma instância. Janelas perdidas são
+saltadas sem rajadas. O Job segue pelo mesmo manifesto assinado, execução
+allowlisted e verificação profunda do Compute Lab; somente evidência válida
+contribui CP e o agendamento nunca emite AIC.
+
+Tokens com `FarmRead` consultam `GET /api/v1/farm/schedules`. Criação,
+pausa, retomada e disparo imediato exigem `FarmExecute` e usam, respectivamente,
+`POST /api/v1/farm/schedules`,
+`POST /api/v1/farm/schedules/{id}/pause`,
+`POST /api/v1/farm/schedules/{id}/resume` e
+`POST /api/v1/farm/schedules/{id}/trigger`.
 
 ### Centro Analítico da Iris
 

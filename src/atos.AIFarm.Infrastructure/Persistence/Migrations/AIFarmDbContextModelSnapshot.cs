@@ -962,6 +962,12 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ScheduledForUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset?>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1012,6 +1018,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasIndex("ApiTokenId", "ApiIdempotencyKey")
                         .IsUnique();
 
+                    b.HasIndex("ScheduleId", "ScheduledForUtc")
+                        .IsUnique();
+
                     b.ToTable("farm_jobs", "aifarm", t =>
                         {
                             t.HasCheckConstraint("CK_farm_jobs_agent_lease", "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR (\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
@@ -1023,6 +1032,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_jobs_evidence_complete", "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR (\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_jobs_manifest_complete", "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR (\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_farm_jobs_schedule_attribution_complete", "(\"ScheduleId\" IS NULL AND \"ScheduledForUtc\" IS NULL) OR (\"ScheduleId\" IS NOT NULL AND \"ScheduledForUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_farm_jobs_single_automation_origin", "\"ApiTokenId\" IS NULL OR \"ScheduleId\" IS NULL");
 
                             t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
 
@@ -1201,6 +1214,113 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_reward_proposals_reward", "\"RecommendedRewardBrl\" >= 0");
 
                             t.HasCheckConstraint("CK_farm_reward_proposals_status", "\"Status\" IN ('AwaitingPolicyAndFunding')");
+                        });
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmScheduleRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("IntervalMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("LastTriggeredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("NextRunAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WorkloadId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "NormalizedName")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "NextRunAtUtc");
+
+                    b.ToTable("farm_schedules", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_farm_schedules_interval", "\"IntervalMinutes\" >= 5 AND \"IntervalMinutes\" <= 10080");
+
+                            t.HasCheckConstraint("CK_farm_schedules_status", "\"Status\" IN ('Active', 'Paused')");
+                        });
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmScheduleTriggerRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("ScheduledForUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("AccountId", "CreatedAtUtc");
+
+                    b.HasIndex("ScheduleId", "ScheduledForUtc")
+                        .IsUnique();
+
+                    b.ToTable("farm_schedule_triggers", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_farm_schedule_triggers_status", "\"Status\" IN ('Dispatching', 'Submitted', 'Deferred', 'Failed')");
                         });
                 });
 
@@ -1620,6 +1740,11 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasForeignKey("NodeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmScheduleRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ScheduleId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmNodeRecord", b =>
@@ -1648,6 +1773,35 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmEconomicsScenarioRecord", null)
                         .WithMany()
                         .HasForeignKey("ScenarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmScheduleRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmScheduleTriggerRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmJobRecord", null)
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmScheduleRecord", null)
+                        .WithMany()
+                        .HasForeignKey("ScheduleId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

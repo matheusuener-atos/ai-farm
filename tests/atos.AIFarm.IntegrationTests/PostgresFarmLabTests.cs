@@ -151,6 +151,73 @@ public sealed class PostgresFarmLabTests
 
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task FarmSchedulesDispatchExactlyOnceAndPreserveAttribution()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos schedule test");
+        var clock = new AdjustableTimeProvider(
+            new DateTimeOffset(2026, 9, 2, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var schedules = provider.GetRequiredService<IFarmScheduleService>();
+            var dispatcher = provider.GetRequiredService<IFarmScheduleDispatcher>();
+
+            var created = await schedules.CreateAsync(new(
+                "verificação recorrente",
+                FarmWorkloadCatalog.DefaultId,
+                15));
+            Assert.Equal(FarmScheduleStatus.Active, created.Status);
+            Assert.Equal(clock.GetUtcNow(), created.NextRunAtUtc);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                schedules.CreateAsync(new(
+                    "VERIFICAÇÃO RECORRENTE",
+                    FarmWorkloadCatalog.DefaultId,
+                    30)));
+
+            await schedules.SetStatusAsync(created.Id, FarmScheduleStatus.Paused);
+            Assert.Equal(0, await dispatcher.DispatchDueAsync());
+            await schedules.SetStatusAsync(created.Id, FarmScheduleStatus.Active);
+
+            var dispatches = await Task.WhenAll(
+                dispatcher.DispatchDueAsync(),
+                dispatcher.DispatchDueAsync());
+            Assert.Equal(1, dispatches.Sum());
+            Assert.Equal(0, await dispatcher.DispatchDueAsync());
+
+            var dashboard = await schedules.GetDashboardAsync();
+            var trigger = Assert.Single(dashboard.RecentTriggers);
+            Assert.Equal(FarmScheduleTriggerStatus.Submitted, trigger.Status);
+            Assert.NotNull(trigger.JobId);
+            Assert.Equal(clock.GetUtcNow().AddMinutes(15), dashboard.Schedules[0].NextRunAtUtc);
+
+            var history = await provider.GetRequiredService<IFarmJobHistoryService>()
+                .SearchAsync(new FarmJobHistoryQuery(Origin: FarmJobOrigin.Scheduled));
+            var scheduled = Assert.Single(history.Items);
+            Assert.Equal(trigger.JobId, scheduled.Job.Id);
+            Assert.Equal(FarmJobOrigin.Scheduled, scheduled.Origin);
+            Assert.True(scheduled.Job.Evidence?.IsValid);
+
+            clock.Advance(TimeSpan.FromMinutes(46));
+            Assert.Equal(1, await dispatcher.DispatchDueAsync());
+            dashboard = await schedules.GetDashboardAsync();
+            Assert.Equal(2, dashboard.RecentTriggers.Count);
+            Assert.Equal(
+                new DateTimeOffset(2026, 9, 2, 13, 0, 0, TimeSpan.Zero),
+                dashboard.Schedules[0].NextRunAtUtc);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, accountId);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task PausedNodeRejectsNewJobs()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
@@ -560,9 +627,13 @@ public sealed class PostgresFarmLabTests
         var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         db.FarmAgentEnrollments.RemoveRange(db.FarmAgentEnrollments.Where(x => x.AccountId == accountId));
+        db.FarmScheduleTriggers.RemoveRange(db.FarmScheduleTriggers.Where(x => x.AccountId == accountId));
+        await db.SaveChangesAsync();
         var jobIds = await db.FarmJobs.Where(x => x.AccountId == accountId).Select(x => x.Id).ToArrayAsync();
         db.FarmJobEvents.RemoveRange(db.FarmJobEvents.Where(x => jobIds.Contains(x.JobId)));
         db.FarmJobs.RemoveRange(db.FarmJobs.Where(x => x.AccountId == accountId));
+        await db.SaveChangesAsync();
+        db.FarmSchedules.RemoveRange(db.FarmSchedules.Where(x => x.AccountId == accountId));
         db.FarmNodes.RemoveRange(db.FarmNodes.Where(x => x.AccountId == accountId));
         await db.SaveChangesAsync();
         var walletIds = await db.Wallets

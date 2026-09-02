@@ -1,0 +1,188 @@
+@page "/farm/schedules"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmScheduleService Schedules
+
+<PageTitle>Agendamentos // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow amber">atos:/FARM/SCHEDULES</p>
+    <h1>AUTOMAÇÃO DA FARM</h1>
+    <p>Execução recorrente de workloads allowlisted, com disparos idempotentes e rastreáveis em UTC.</p>
+    <a class="schedule-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
+</div>
+
+@if (_message is not null)
+{
+    <p class="@(_isError ? "error" : "schedule-success")" role="status">@_message</p>
+}
+
+<section class="panel schedule-create">
+    <div class="panel-head"><h2>NOVO AGENDAMENTO</h2><span>INTERVALO FIXO // UTC</span></div>
+    <div class="schedule-form">
+        <label>NOME
+            <input @bind="_name" maxlength="80" placeholder="benchmark periódico" disabled="@_working" />
+        </label>
+        <label>WORKLOAD
+            <select @bind="_workloadId" disabled="@_working">
+                @foreach (var workload in FarmWorkloadCatalog.Definitions)
+                {
+                    <option value="@workload.Id">@workload.DisplayName // @workload.Version</option>
+                }
+            </select>
+        </label>
+        <label>INTERVALO
+            <select @bind="_intervalMinutes" disabled="@_working">
+                <option value="5">5 MINUTOS</option>
+                <option value="15">15 MINUTOS</option>
+                <option value="30">30 MINUTOS</option>
+                <option value="60">1 HORA</option>
+                <option value="360">6 HORAS</option>
+                <option value="1440">1 DIA</option>
+                <option value="10080">7 DIAS</option>
+            </select>
+        </label>
+        <button type="button" @onclick="CreateAsync" disabled="@_working">
+            @(_working ? "[ SALVANDO... ]" : "[ CRIAR E ATIVAR ]")
+        </button>
+    </div>
+    <small>O primeiro disparo ocorre imediatamente. Pausa, indisponibilidade e contenção nunca emitem CP ou AIC.</small>
+</section>
+
+@if (_dashboard is null)
+{
+    <p>CARREGANDO AGENDAMENTOS...</p>
+}
+else
+{
+    <div class="schedule-kpis">
+        <section><span>TOTAL</span><strong>@_dashboard.Schedules.Count</strong></section>
+        <section class="green"><span>ATIVOS</span><strong>@_dashboard.ActiveCount</strong></section>
+        <section class="amber"><span>PAUSADOS</span><strong>@_dashboard.PausedCount</strong></section>
+        <section class="@(_dashboard.FailureCount == 0 ? "green" : "error-text")"><span>ADIADOS/FALHOS</span><strong>@_dashboard.FailureCount</strong></section>
+    </div>
+
+    <section class="panel">
+        <div class="panel-head"><h2>AGENDAMENTOS</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button></div>
+        @if (_dashboard.Schedules.Count == 0)
+        {
+            <p class="schedule-empty">NENHUM AGENDAMENTO CONFIGURADO.</p>
+        }
+        <div class="schedule-grid">
+            @foreach (var schedule in _dashboard.Schedules)
+            {
+                <article>
+                    <header><div><strong>@schedule.Name</strong><small>@schedule.WorkloadVersion</small></div><span class="@(schedule.Status == FarmScheduleStatus.Active ? "green" : "amber")">[ @schedule.Status.ToString().ToUpperInvariant() ]</span></header>
+                    <dl>
+                        <div><dt>INTERVALO</dt><dd>@FormatInterval(schedule.IntervalMinutes)</dd></div>
+                        <div><dt>PRÓXIMO UTC</dt><dd>@schedule.NextRunAtUtc.ToString("dd/MM HH:mm:ss")</dd></div>
+                        <div><dt>ÚLTIMO UTC</dt><dd>@(schedule.LastTriggeredAtUtc?.ToString("dd/MM HH:mm:ss") ?? "---")</dd></div>
+                        <div><dt>ID</dt><dd>@schedule.Id.ToString("N")[..8]</dd></div>
+                    </dl>
+                    <footer>
+                        <button type="button" @onclick="() => TriggerAsync(schedule.Id)" disabled="@_working">[ EXECUTAR AGORA ]</button>
+                        <button type="button" class="button-secondary" @onclick="() => ToggleAsync(schedule)" disabled="@_working">
+                            [ @(schedule.Status == FarmScheduleStatus.Active ? "PAUSAR" : "RETOMAR") ]
+                        </button>
+                    </footer>
+                </article>
+            }
+        </div>
+    </section>
+
+    <section class="panel schedule-triggers">
+        <div class="panel-head"><h2>DISPAROS RECENTES // ÚLTIMOS 50</h2><span>ATRIBUIÇÃO EXPLÍCITA</span></div>
+        @if (_dashboard.RecentTriggers.Count == 0)
+        {
+            <p class="schedule-empty">NENHUM DISPARO REGISTRADO.</p>
+        }
+        @foreach (var trigger in _dashboard.RecentTriggers)
+        {
+            var schedule = _dashboard.Schedules.SingleOrDefault(x => x.Id == trigger.ScheduleId);
+            <article>
+                <time>@trigger.ScheduledForUtc.ToString("dd/MM HH:mm:ss") UTC</time>
+                <div><strong>@(schedule?.Name ?? "AGENDAMENTO REMOVIDO")</strong><small>@(trigger.Detail ?? "Processando ocorrência.")</small></div>
+                @if (trigger.JobId is Guid jobId)
+                {
+                    <a href="/farm/jobs?jobId=@jobId">JOB @jobId.ToString("N")[..8]</a>
+                }
+                <span class="@TriggerClass(trigger.Status)">[ @TriggerLabel(trigger.Status) ]</span>
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private FarmScheduleDashboard? _dashboard;
+    private string _name = string.Empty;
+    private string _workloadId = FarmWorkloadCatalog.DefaultId;
+    private int _intervalMinutes = 60;
+    private bool _working;
+    private bool _isError;
+    private string? _message;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try { _dashboard = await Schedules.GetDashboardAsync(); }
+        catch (Exception) { Show("Não foi possível carregar os agendamentos.", true); }
+    }
+
+    private async Task CreateAsync()
+    {
+        await ExecuteAsync(async () =>
+        {
+            var created = await Schedules.CreateAsync(new(
+                _name, _workloadId, _intervalMinutes));
+            _name = string.Empty;
+            Show($"Agendamento {created.Name} criado e ativado.", false);
+        });
+    }
+
+    private Task ToggleAsync(FarmScheduleSnapshot schedule) => ExecuteAsync(async () =>
+    {
+        var next = schedule.Status == FarmScheduleStatus.Active
+            ? FarmScheduleStatus.Paused : FarmScheduleStatus.Active;
+        await Schedules.SetStatusAsync(schedule.Id, next);
+        Show($"Agendamento {schedule.Name}: {next.ToString().ToUpperInvariant()}.", false);
+    });
+
+    private Task TriggerAsync(Guid scheduleId) => ExecuteAsync(async () =>
+    {
+        var trigger = await Schedules.TriggerNowAsync(scheduleId);
+        Show(trigger.Status == FarmScheduleTriggerStatus.Submitted
+            ? "Workload submetido ao pipeline verificável."
+            : trigger.Detail ?? "O disparo não pôde ser submetido.",
+            trigger.Status != FarmScheduleTriggerStatus.Submitted);
+    });
+
+    private async Task ExecuteAsync(Func<Task> action)
+    {
+        _working = true;
+        _message = null;
+        try { await action(); await LoadAsync(); }
+        catch (ArgumentException exception) { Show(exception.Message, true); }
+        catch (InvalidOperationException exception) { Show(exception.Message, true); }
+        catch (Exception) { Show("A operação de agendamento falhou.", true); }
+        finally { _working = false; }
+    }
+
+    private void Show(string value, bool error) { _message = value; _isError = error; }
+    private static string FormatInterval(int minutes) => minutes switch
+    {
+        10080 => "7 DIAS", 1440 => "1 DIA", 60 => "1 HORA",
+        _ when minutes % 60 == 0 => $"{minutes / 60} HORAS",
+        _ => $"{minutes} MINUTOS"
+    };
+    private static string TriggerLabel(FarmScheduleTriggerStatus status) => status switch
+    {
+        FarmScheduleTriggerStatus.Submitted => "SUBMETIDO",
+        FarmScheduleTriggerStatus.Deferred => "ADIADO",
+        FarmScheduleTriggerStatus.Failed => "FALHOU",
+        _ => "DESPACHANDO"
+    };
+    private static string TriggerClass(FarmScheduleTriggerStatus status) =>
+        status == FarmScheduleTriggerStatus.Submitted ? "green" :
+        status == FarmScheduleTriggerStatus.Dispatching ? "amber" : "error-text";
+}

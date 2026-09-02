@@ -3,7 +3,8 @@ namespace atos.AIFarm.Core.Application;
 public enum FarmJobOrigin
 {
     Interactive,
-    PersonalApi
+    PersonalApi,
+    Scheduled
 }
 
 public sealed record FarmJobHistoryQuery(

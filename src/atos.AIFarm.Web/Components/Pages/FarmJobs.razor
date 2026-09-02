@@ -43,6 +43,7 @@
                 <option value="">TODAS</option>
                 <option value="Interactive">PAINEL</option>
                 <option value="PersonalApi">API PESSOAL</option>
+                <option value="Scheduled">AGENDAMENTO</option>
             </select>
         </label>
         <label>DE // UTC<input type="date" @bind="_fromDate" /></label>
@@ -137,6 +138,10 @@ else
 }
 
 @code {
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "jobId")]
+    public Guid? JobId { get; set; }
+
     private FarmJobHistoryPage? _result;
     private string _search = string.Empty;
     private string _workloadId = string.Empty;
@@ -149,7 +154,11 @@ else
     private int _page = 1;
     private string? _error;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override Task OnInitializedAsync()
+    {
+        if (JobId is Guid jobId) _search = jobId.ToString();
+        return LoadAsync();
+    }
     private async Task ApplyAsync() { _page = 1; await LoadAsync(); }
     private async Task PreviousAsync() { if (_page > 1) { _page--; await LoadAsync(); } }
     private async Task NextAsync() { if (_result?.HasNextPage == true) { _page++; await LoadAsync(); } }
@@ -213,7 +222,12 @@ else
                 .AddDays(endOfDay ? 1 : 0).AddTicks(endOfDay ? -1 : 0);
     private static string FormatCp(long milli) => $"{milli / 1_000m:N3} CP";
     private static string Short(Guid id) => id.ToString("N")[..8];
-    private static string OriginLabel(FarmJobOrigin origin) => origin == FarmJobOrigin.PersonalApi ? "API" : "PAINEL";
+    private static string OriginLabel(FarmJobOrigin origin) => origin switch
+    {
+        FarmJobOrigin.PersonalApi => "API",
+        FarmJobOrigin.Scheduled => "AGENDA",
+        _ => "PAINEL"
+    };
     private static string StatusLabel(FarmJobStatus status) => status.ToString().ToUpperInvariant();
     private static string StatusClass(FarmJobStatus status) => status == FarmJobStatus.Completed ? "green" : status is FarmJobStatus.Failed or FarmJobStatus.Cancelled or FarmJobStatus.TimedOut or FarmJobStatus.Rejected ? "error-text" : "amber";
     private static string EvidenceLabel(FarmJobSnapshot job) => job.Evidence is null ? "SEM BUNDLE" : job.Evidence.IsValid ? "VÁLIDA" : "INVÁLIDA";

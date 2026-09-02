@@ -59,28 +59,47 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, tokenId, idempotencyKey, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
+        Guid accountId,
+        string workloadId,
+        Guid scheduleId,
+        DateTimeOffset scheduledForUtc,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            workloadId,
+            accountId,
+            null,
+            null,
+            scheduleId,
+            scheduledForUtc.ToUniversalTime(),
+            cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
         string workloadId,
+        Guid? explicitAccountId,
         Guid? apiTokenId,
         string? apiIdempotencyKey,
+        Guid? scheduleId,
+        DateTimeOffset? scheduledForUtc,
         CancellationToken cancellationToken)
     {
         var definition = FarmWorkloadCatalog.GetRequired(workloadId);
-        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        var accountId = explicitAccountId ??
+            (await identityAccessor.GetRequiredIdentityAsync(cancellationToken)).AccountId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         if (apiTokenId is Guid tokenId && apiIdempotencyKey is not null)
         {
             var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                x => x.AccountId == identity.AccountId &&
+                x => x.AccountId == accountId &&
                      x.ApiTokenId == tokenId &&
                      x.ApiIdempotencyKey == apiIdempotencyKey,
                 cancellationToken);
@@ -92,12 +111,22 @@ internal sealed class PostgresFarmLabService(
                 return await LoadJobAsync(db, replay.Id, cancellationToken);
             }
         }
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        if (scheduleId is Guid recurringScheduleId && scheduledForUtc is DateTimeOffset occurrence)
+        {
+            var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                x => x.AccountId == accountId &&
+                     x.ScheduleId == recurringScheduleId &&
+                     x.ScheduledForUtc == occurrence,
+                cancellationToken);
+            if (replay is not null)
+                return await LoadJobAsync(db, replay.Id, cancellationToken);
+        }
+        var node = await EnsureNodeAsync(db, accountId, cancellationToken);
         await FarmJobLifecycle.ExpireAsync(
             db,
             timeProvider.GetUtcNow(),
             cancellationToken,
-            accountId: identity.AccountId);
+            accountId: accountId);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
         if (!Enum.TryParse<FarmNodeStatus>(node.Status, out var nodeStatus) ||
             nodeStatus != FarmNodeStatus.Online)
@@ -111,14 +140,14 @@ internal sealed class PostgresFarmLabService(
                 $"Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion} antes de despachar.");
 
         if (await db.FarmJobs.AnyAsync(
-                x => x.AccountId == identity.AccountId &&
+                x => x.AccountId == accountId &&
                      FarmJobLifecycle.ActiveStatuses.Contains(x.Status),
                 cancellationToken))
         {
             if (apiTokenId is Guid activeTokenId && apiIdempotencyKey is not null)
             {
                 var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                    x => x.AccountId == identity.AccountId &&
+                    x => x.AccountId == accountId &&
                          x.ApiTokenId == activeTokenId &&
                          x.ApiIdempotencyKey == apiIdempotencyKey,
                     cancellationToken);
@@ -169,10 +198,12 @@ internal sealed class PostgresFarmLabService(
         var job = new FarmJobRecord
         {
             Id = jobId,
-            AccountId = identity.AccountId,
+            AccountId = accountId,
             NodeId = node.Id,
             ApiTokenId = apiTokenId,
             ApiIdempotencyKey = apiIdempotencyKey,
+            ScheduleId = scheduleId,
+            ScheduledForUtc = scheduledForUtc,
             Workload = definition.Workload,
             WorkloadVersion = definition.Version,
             VerificationPolicy = definition.VerificationPolicy,
@@ -188,7 +219,10 @@ internal sealed class PostgresFarmLabService(
             CreatedAtUtc = now
         };
         db.FarmJobs.Add(job);
-        AddEvent(db, job, FarmJobStatus.Queued, now, $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler.");
+        AddEvent(db, job, FarmJobStatus.Queued, now,
+            scheduleId is null
+                ? $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler."
+                : $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo agendamento {scheduleId:N}.");
         if (isAgent)
         {
             job.Status = FarmJobStatus.Offered.ToString();
@@ -201,7 +235,7 @@ internal sealed class PostgresFarmLabService(
             {
                 await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
                 var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                    x => x.AccountId == identity.AccountId &&
+                    x => x.AccountId == accountId &&
                          x.ApiTokenId == replayTokenId &&
                          x.ApiIdempotencyKey == apiIdempotencyKey,
                     cancellationToken);
@@ -212,6 +246,18 @@ internal sealed class PostgresFarmLabService(
                             "A chave de idempotência já foi usada com outro workload.", exception);
                     return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
                 }
+            }
+            if (scheduleId is Guid replayScheduleId &&
+                scheduledForUtc is DateTimeOffset replayOccurrence)
+            {
+                await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
+                var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == accountId &&
+                         x.ScheduleId == replayScheduleId &&
+                         x.ScheduledForUtc == replayOccurrence,
+                    cancellationToken);
+                if (replay is not null)
+                    return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
             }
             throw new InvalidOperationException(
                 "Não foi possível enfileirar o Job; pode existir outra execução ativa.",

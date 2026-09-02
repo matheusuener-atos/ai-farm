@@ -306,6 +306,38 @@ public sealed class PostgresAccountIsolationTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task FarmSchedulesAreIsolatedByAccount()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var firstIdentity = NewIdentity("schedule-first");
+        var secondIdentity = NewIdentity("schedule-second");
+        try
+        {
+            await using var first = BuildProvider(connectionString, firstIdentity);
+            await using var second = BuildProvider(connectionString, secondIdentity);
+            await first.InitializeAIFarmAsync();
+            await second.InitializeAIFarmAsync();
+            var firstSchedules = first.GetRequiredService<IFarmScheduleService>();
+            var secondSchedules = second.GetRequiredService<IFarmScheduleService>();
+            var created = await firstSchedules.CreateAsync(new(
+                "agenda privada", FarmWorkloadCatalog.DefaultId, 60));
+
+            Assert.Single((await firstSchedules.GetDashboardAsync()).Schedules);
+            Assert.Empty((await secondSchedules.GetDashboardAsync()).Schedules);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                secondSchedules.SetStatusAsync(created.Id, FarmScheduleStatus.Paused));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                secondSchedules.TriggerNowAsync(created.Id));
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, firstIdentity, secondIdentity);
+        }
+    }
+
     private static AIFarmIdentity NewIdentity(string suffix)
     {
         var id = Guid.NewGuid();
@@ -373,6 +405,11 @@ public sealed class PostgresAccountIsolationTests
         db.AiUsageBudgetPolicies.RemoveRange(db.AiUsageBudgetPolicies.Where(
             x => accountIds.Contains(x.AccountId)));
         db.ApiTokens.RemoveRange(db.ApiTokens.Where(
+            x => accountIds.Contains(x.AccountId)));
+        db.FarmScheduleTriggers.RemoveRange(db.FarmScheduleTriggers.Where(
+            x => accountIds.Contains(x.AccountId)));
+        await db.SaveChangesAsync();
+        db.FarmSchedules.RemoveRange(db.FarmSchedules.Where(
             x => accountIds.Contains(x.AccountId)));
         await db.SaveChangesAsync();
         db.Messages.RemoveRange(db.Messages.Where(

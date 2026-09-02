@@ -23,6 +23,8 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmAgentEnrollmentRecord> FarmAgentEnrollments => Set<FarmAgentEnrollmentRecord>();
     public DbSet<FarmJobRecord> FarmJobs => Set<FarmJobRecord>();
     public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
+    public DbSet<FarmScheduleRecord> FarmSchedules => Set<FarmScheduleRecord>();
+    public DbSet<FarmScheduleTriggerRecord> FarmScheduleTriggers => Set<FarmScheduleTriggerRecord>();
     public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
     public DbSet<FarmRewardProposalRecord> FarmRewardProposals => Set<FarmRewardProposalRecord>();
     public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
@@ -295,6 +297,13 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "(\"ApiTokenId\" IS NULL AND \"ApiIdempotencyKey\" IS NULL) OR " +
                     "(\"ApiTokenId\" IS NOT NULL AND \"ApiIdempotencyKey\" IS NOT NULL)");
                 table.HasCheckConstraint(
+                    "CK_farm_jobs_schedule_attribution_complete",
+                    "(\"ScheduleId\" IS NULL AND \"ScheduledForUtc\" IS NULL) OR " +
+                    "(\"ScheduleId\" IS NOT NULL AND \"ScheduledForUtc\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_single_automation_origin",
+                    "\"ApiTokenId\" IS NULL OR \"ScheduleId\" IS NULL");
+                table.HasCheckConstraint(
                     "CK_farm_jobs_worker_telemetry",
                     "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR " +
                     "(\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
@@ -314,6 +323,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
             entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
+            entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
             entity.HasIndex(x => x.AccountId)
                 .HasDatabaseName("UX_farm_jobs_account_active")
                 .IsUnique()
@@ -339,6 +349,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.EvidenceKeyId).HasMaxLength(32);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmScheduleRecord>().WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<FarmJobEventRecord>(entity =>
@@ -348,6 +359,37 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasIndex(x => new { x.JobId, x.Sequence }).IsUnique();
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.Detail).HasMaxLength(300);
+            entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmScheduleRecord>(entity =>
+        {
+            entity.ToTable("farm_schedules", table =>
+            {
+                table.HasCheckConstraint("CK_farm_schedules_interval", "\"IntervalMinutes\" >= 5 AND \"IntervalMinutes\" <= 10080");
+                table.HasCheckConstraint("CK_farm_schedules_status", "\"Status\" IN ('Active', 'Paused')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.NormalizedName }).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.NextRunAtUtc });
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.NormalizedName).HasMaxLength(80);
+            entity.Property(x => x.WorkloadId).HasMaxLength(80);
+            entity.Property(x => x.Status).HasMaxLength(16);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmScheduleTriggerRecord>(entity =>
+        {
+            entity.ToTable("farm_schedule_triggers", table =>
+                table.HasCheckConstraint("CK_farm_schedule_triggers_status", "\"Status\" IN ('Dispatching', 'Submitted', 'Deferred', 'Failed')"));
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.Property(x => x.Status).HasMaxLength(16);
+            entity.Property(x => x.Detail).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmScheduleRecord>().WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -508,6 +550,8 @@ public sealed class FarmJobRecord
     public Guid NodeId { get; set; }
     public Guid? ApiTokenId { get; set; }
     public string? ApiIdempotencyKey { get; set; }
+    public Guid? ScheduleId { get; set; }
+    public DateTimeOffset? ScheduledForUtc { get; set; }
     public string Workload { get; set; } = string.Empty;
     public string WorkloadVersion { get; set; } = string.Empty;
     public string VerificationPolicy { get; set; } = string.Empty;
@@ -550,6 +594,34 @@ public sealed class FarmJobEventRecord
     public string Status { get; set; } = string.Empty;
     public string Detail { get; set; } = string.Empty;
     public DateTimeOffset OccurredAtUtc { get; set; }
+}
+
+public sealed class FarmScheduleRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string NormalizedName { get; set; } = string.Empty;
+    public string WorkloadId { get; set; } = string.Empty;
+    public int IntervalMinutes { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTimeOffset NextRunAtUtc { get; set; }
+    public DateTimeOffset? LastTriggeredAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class FarmScheduleTriggerRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid ScheduleId { get; set; }
+    public DateTimeOffset ScheduledForUtc { get; set; }
+    public string Status { get; set; } = "Dispatching";
+    public Guid? JobId { get; set; }
+    public string? Detail { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? FinishedAtUtc { get; set; }
 }
 
 public sealed class FarmEconomicsScenarioRecord

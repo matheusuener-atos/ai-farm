@@ -72,7 +72,9 @@ internal sealed class PostgresFarmJobHistoryService(
         if (query.Origin == FarmJobOrigin.PersonalApi)
             recordsQuery = recordsQuery.Where(x => x.ApiTokenId != null);
         else if (query.Origin == FarmJobOrigin.Interactive)
-            recordsQuery = recordsQuery.Where(x => x.ApiTokenId == null);
+            recordsQuery = recordsQuery.Where(x => x.ApiTokenId == null && x.ScheduleId == null);
+        else if (query.Origin == FarmJobOrigin.Scheduled)
+            recordsQuery = recordsQuery.Where(x => x.ScheduleId != null);
         if (query.FromUtc is not null)
             recordsQuery = recordsQuery.Where(x => x.CreatedAtUtc >= query.FromUtc);
         if (query.ToUtc is not null)
@@ -114,9 +116,11 @@ internal sealed class PostgresFarmJobHistoryService(
                 farmLab.ToSnapshot(
                     record,
                     eventsByJob.GetValueOrDefault(record.Id) ?? []),
-                record.ApiTokenId is null
-                    ? FarmJobOrigin.Interactive
-                    : FarmJobOrigin.PersonalApi))
+                record.ScheduleId is not null
+                    ? FarmJobOrigin.Scheduled
+                    : record.ApiTokenId is not null
+                        ? FarmJobOrigin.PersonalApi
+                        : FarmJobOrigin.Interactive))
             .Where(x => !query.IntegrityFailuresOnly ||
                 x.Job.Status == FarmJobStatus.Completed && x.Job.Evidence?.IsValid != true)
             .ToArray();

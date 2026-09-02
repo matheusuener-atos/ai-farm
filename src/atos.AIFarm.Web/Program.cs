@@ -510,6 +510,60 @@ personalApi.MapGet("/farm/workloads", () => Results.Ok(new
     workloads = FarmWorkloadCatalog.Definitions
 })).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
+personalApi.MapGet("/farm/schedules", async (
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await schedules.GetDashboardAsync(cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/schedules", async (
+    FarmScheduleRequest request,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.CreateAsync(request, cancellationToken)); }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(4 * 1024));
+
+personalApi.MapPost("/farm/schedules/{scheduleId:guid}/pause", async (
+    Guid scheduleId,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.SetStatusAsync(
+        scheduleId, FarmScheduleStatus.Paused, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/schedules/{scheduleId:guid}/resume", async (
+    Guid scheduleId,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.SetStatusAsync(
+        scheduleId, FarmScheduleStatus.Active, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/schedules/{scheduleId:guid}/trigger", async (
+    Guid scheduleId,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.TriggerNowAsync(scheduleId, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
 personalApi.MapGet("/farm/jobs", async (
     string? search,
     string? workloadId,
