@@ -349,6 +349,33 @@ app.MapGet("/api/farm/economics/{scenarioId:guid}/report", async (
     }
 }).RequireAuthorization();
 
+app.MapGet("/api/audit/export", async (
+    string? search,
+    string? category,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    HttpResponse response,
+    IAuditTrail audit,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    if (!string.IsNullOrWhiteSpace(category) &&
+        !Enum.TryParse<AuditCategory>(category, true, out _))
+        return Results.BadRequest(new { error = "Categoria de auditoria inválida." });
+    try
+    {
+        var parsedCategory = Enum.TryParse<AuditCategory>(category, true, out var value) ? value : (AuditCategory?)null;
+        var export = await audit.ExportAsync(
+            new AuditQuery(search, parsedCategory, fromUtc, toUtc), cancellationToken);
+        return Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,
     HttpResponse response,

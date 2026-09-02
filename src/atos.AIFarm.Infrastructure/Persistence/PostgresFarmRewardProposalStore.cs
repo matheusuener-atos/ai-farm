@@ -96,7 +96,7 @@ public sealed class PostgresFarmRewardProposalStore(
         }
     }
 
-    private static FarmRewardProposalSnapshot ToSnapshot(FarmRewardProposalRecord record)
+    internal static FarmRewardProposalSnapshot ToSnapshot(FarmRewardProposalRecord record)
     {
         var expected = ComputeDigest(record);
         var valid = record.Digest.Length == expected.Length &&

@@ -399,6 +399,7 @@ Implementado:
 - política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
 - fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
 - propostas imutáveis de reward vinculadas a Job, evidência e cenário econômico, sem emissão automática de AIC.
+- Centro de Auditoria unificado e isolado por conta para Ledger, Iris, Farm, economia e rewards, com filtros, validação de integridade e exportação JSON digestada.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
