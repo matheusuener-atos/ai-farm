@@ -206,21 +206,21 @@ pausar e retomar sua disponibilidade e executa somente o workload versionado
 atos-sha256-chain-v1.
 
 O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
-manifest no verificador e só registra 1,000 CU quando os digests coincidem.
+manifest no verificador e só registra 1,000 CP quando os digests coincidem.
 Cada novo Job congela um manifesto canônico assinado por HMAC-SHA256 com
 `attempt_id`, validade, timeout, limites de CPU/memória, classificação
 `STANDARD` e rede `DENY_ALL`. A assinatura e a allowlist são verificadas antes
 do runtime; Jobs históricos anteriores permanecem visíveis como legados.
 O PostgreSQL também impede mais de um Job ativo por conta, inclusive entre
 abas ou instâncias concorrentes, e cancelamentos terminalizam a tentativa sem
-emitir CU ou AIC.
+emitir CP ou AIC.
 No laboratório `EMBEDDED`, cada transição é persistida de forma ordenada:
 
     QUEUED → RUNNING → VERIFYING → COMPLETED
                                     ↘ FAILED
 
-Este CU é uma medição técnica experimental e específica dessa política; ainda
-não existe conversão CU → AIC. O laboratório não concede reward, não aceita
+Este CP (Ponto de Processamento) é uma medição técnica experimental e específica dessa política; ainda
+não existe conversão CP → AIC. O laboratório não concede reward, não aceita
 shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
 `EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
 executando — localmente, a máquina de desenvolvimento; no Render, o container
@@ -327,7 +327,7 @@ benchmark para aceitar ou rejeitar a evidência:
                                   └→ REJECTED
 
 Falhas de assinatura, manifesto expirado, resultado divergente ou estado
-inválido encerram a tentativa sem emitir CU ou AIC. Reenvios idempotentes só são
+inválido encerram a tentativa sem emitir CP ou AIC. Reenvios idempotentes só são
 aceitos quando apresentam exatamente a mesma evidência já concluída. O watchdog
 terminaliza ofertas abandonadas ao fim da validade assinada e runtimes que
 ultrapassam 30 segundos, liberando o índice de Job ativo para um novo despacho.
@@ -391,7 +391,7 @@ Implementado:
 - feedback persistente e atualizável por resposta, isolado por conta;
 - satisfação agregada por execução no painel operacional;
 - exportação autenticada e portável de conversas em Markdown e JSON.
-- Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
+- Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CP técnico e trilha de estados.
 - protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
 - executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
 - despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
@@ -407,7 +407,7 @@ distribuída continuam fora deste marco.
 ## Fase 4 — Simulador econômico
 
 A rota autenticada `/farm/economy` inicia a prova econômica sem alterar a
-Wallet. O cenário combina capacidade em CU/h, utilização, taxa de sucesso,
+Wallet. O cenário combina capacidade em CP/h, utilização, taxa de sucesso,
 energia, valor bruto do workload, verificação, plataforma, impostos, margem e
 reserva de risco. O resultado mostra o reward máximo financiável em BRL e o
 eventual déficit. A capacidade pode ser preenchida pela vazão do último
@@ -421,14 +421,14 @@ do payload exportado; ele permite verificar integridade e não representa uma
 assinatura criptográfica.
 
 Os valores iniciais são apenas um exemplo editável. O simulador não define
-preço real, não converte CU em AIC e não registra Reward no Ledger. Uma futura
+preço real, não converte CP em AIC e não registra Reward no Ledger. Uma futura
 política comercial somente poderá consumir seus resultados depois que fonte de
-receita, regra CU → AIC e orçamento forem decididos explicitamente.
+receita, regra CP → AIC e orçamento forem decididos explicitamente.
 
 ### Saldo da Farm
 
 A rota autenticada `/saldo-farm` relaciona, sem converter automaticamente,
-todo CU de Jobs concluídos com transações `Reward` e `Capture` do Ledger. Ela
+todo CP de Jobs concluídos com transações `Reward` e `Capture` do Ledger. Ela
 distingue AIC gerado, AIC consumido, `Earned` disponível e saldo total. Enquanto
 não existir Reward Pool financiado, compute verificado aparece com zero AIC
 gerado de forma explícita.

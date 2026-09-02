@@ -40,7 +40,7 @@ public sealed class ConversationExportService(IChatStore chat) : IConversationEx
     private static string ToMarkdown(ConversationSnapshot conversation)
     {
         var builder = new StringBuilder();
-        builder.Append("# ").AppendLine(conversation.Title ?? "Conversa atos AI Farm")
+        builder.Append("# ").AppendLine(conversation.Title ?? "Conversa com Iris")
             .AppendLine()
             .Append("- Conversa: `").Append(conversation.Id).AppendLine("`")
             .Append("- Criada em UTC: ").AppendLine(conversation.CreatedAtUtc.ToString("O"))
@@ -51,7 +51,7 @@ public sealed class ConversationExportService(IChatStore chat) : IConversationEx
         foreach (var message in conversation.Messages)
         {
             builder.AppendLine()
-                .Append("## ").AppendLine(message.Role == ChatMessageRole.User ? "Usuário" : "atos AI")
+                .Append("## ").AppendLine(message.Role == ChatMessageRole.User ? "Usuário" : "Iris")
                 .AppendLine()
                 .AppendLine(message.Content)
                 .AppendLine();

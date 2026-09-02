@@ -850,8 +850,10 @@ public sealed class ChatWorkflowTests
         var exports = new ConversationExportService(chat);
         var markdown = await exports.ExportAsync(conversation.Id, ConversationExportFormat.Markdown);
         var json = await exports.ExportAsync(conversation.Id, ConversationExportFormat.Json);
-        Assert.Contains("Avaliação: Não útil", Encoding.UTF8.GetString(markdown!.Content));
-        Assert.Contains("faltou um exemplo prático", Encoding.UTF8.GetString(markdown.Content));
+        var markdownText = Encoding.UTF8.GetString(markdown!.Content);
+        Assert.Contains("## Iris", markdownText);
+        Assert.Contains("Avaliação: Não útil", markdownText);
+        Assert.Contains("faltou um exemplo prático", markdownText);
         Assert.Contains("\"rating\": \"negative\"", Encoding.UTF8.GetString(json!.Content));
 
         Assert.True(await chat.SetMessageFeedbackAsync(assistant.Id, null));

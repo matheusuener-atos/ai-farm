@@ -5,7 +5,7 @@
 
 ## Contexto
 
-O Compute Lab já mede CU e produz evidência assinada, mas CU técnico não cria
+O Compute Lab já mede CP (Pontos de Processamento) e produz evidência assinada, mas CP técnico não cria
 automaticamente capacidade financeira para recompensar o Provider.
 
 ## Decisão
@@ -15,7 +15,7 @@ capacidade, utilização, sucesso, energia e deduções econômicas para calcula
 reward máximo financiável em BRL. Fotografias escolhidas pelo usuário são
 persistidas, mas o simulador não altera a Wallet ou o Ledger.
 
-Não existe conversão CU → AIC neste incremento. Valores iniciais são exemplos
+Não existe conversão CP → AIC neste incremento. Valores iniciais são exemplos
 editáveis, não preços ou promessas. Reward real permanece bloqueado até a fonte
 de receita, o orçamento e a política de conversão serem aprovados.
 
@@ -35,11 +35,11 @@ Quando as deduções excedem o valor verificado, o reward é limitado a zero e a
 diferença é mostrada como déficit.
 
 O simulador pode adotar a vazão do último benchmark concluído da conta como
-capacidade medida em CU/h. A referência mostra Job, duração, Node e estado da
+capacidade medida em CP/h. A referência mostra Job, duração, Node e estado da
 evidência; os demais parâmetros continuam sendo hipóteses informadas pelo
 usuário.
 
-O ponto de equilíbrio calcula o menor valor bruto por 1.000 CU que cobre
+O ponto de equilíbrio calcula o menor valor bruto por 1.000 CP que cobre
 energia e deduções percentuais. A análise de sensibilidade exibe três cenários
 transparentes — stress, base e favorável — para impedir que uma única projeção
 seja interpretada como promessa.

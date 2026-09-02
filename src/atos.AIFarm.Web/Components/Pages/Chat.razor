@@ -13,7 +13,7 @@
 @inject IChatAttachmentService AttachmentService
 @implements IDisposable
 
-<PageTitle>Chat // atos AI Farm</PageTitle>
+<PageTitle>Iris // atos AI Farm</PageTitle>
 
 <div class="page-heading">
     <p class="eyebrow">atos:/USAR/CHAT</p>
@@ -134,7 +134,7 @@
         }
     </aside>
 
-    <section class="terminal chat-terminal" aria-label="Conversa com IA">
+    <section class="terminal chat-terminal" aria-label="Conversa com Iris">
     <div class="terminal-title">
         @if (_renaming)
         {
@@ -279,7 +279,7 @@
     @if (_messages.Count == 0)
     {
         <div class="empty-state">
-            <span class="purple">atos_AI&gt;</span>
+            <span class="purple">IRIS&gt;</span>
             <p>Envie uma mensagem para executar o ciclo completo de reserva e liquidação.</p>
             <p class="muted">ESTIMATIVA: 20 AIC // CUSTO FAKE: 12 AIC // DIFERENÇA LIBERADA: 8 AIC</p>
         </div>
@@ -394,7 +394,7 @@
     @if (_streaming)
     {
         <article class="message streaming-message" aria-live="polite" aria-label="Resposta em geração">
-            <span class="purple">atos_AI&gt;</span>
+            <span class="purple">IRIS&gt;</span>
             <p>@(_streamingResponse.Length == 0 ? "AGUARDANDO PRIMEIRO TOKEN" : _streamingResponse.ToString())<span class="stream-cursor" aria-hidden="true"></span></p>
             <small>@_executionStatus // @_pendingPlan?.Route.Provider // @_pendingPlan?.Route.Model</small>
         </article>
@@ -1766,14 +1766,14 @@
     }
 
     private static string RoleLabel(ChatMessageRole role) =>
-        role == ChatMessageRole.User ? "VOCÊ" : "atos_AI";
+        role == ChatMessageRole.User ? "VOCÊ" : "IRIS";
 
     private static string ContextRoleLabel(AiContextMessage message) =>
         message.IsSummary
             ? "RESUMO AUTOMÁTICO"
             : message.Role == ChatMessageRole.User
                 ? "VOCÊ"
-                : "atos_AI";
+                : "IRIS";
 
     private static string? MessageMeta(ChatMessageSnapshot message) =>
         message.Route is null ||

@@ -26,7 +26,7 @@ else
     <section class="farm-value-equation" aria-label="Fluxo de valor da Farm">
         <article>
             <span>[ 01 ] COMPUTE ÚTIL</span>
-            <strong>@FormatCu(_snapshot.VerifiedComputeUnitsMilli)</strong>
+            <strong>@FormatCp(_snapshot.VerifiedComputeUnitsMilli)</strong>
             <small>@_snapshot.CompletedJobs JOBS CONCLUÍDOS</small>
         </article>
         <span aria-hidden="true">→</span>
@@ -47,7 +47,7 @@ else
     {
         <section class="farm-no-reward" role="note">
             <strong>[ SEM REWARD FINANCIADO ]</strong>
-            <p>Seu compute foi medido, mas não gerou AIC. Isso é esperado enquanto a política CU → AIC e o Reward Pool não forem aprovados e financiados.</p>
+            <p>Seu compute foi medido, mas não gerou AIC. Isso é esperado enquanto a política CP → AIC e o Reward Pool não forem aprovados e financiados.</p>
         </section>
     }
 
@@ -87,7 +87,7 @@ else
             <div><dt>IA CONSUMIDA</dt><dd>TRANSAÇÕES `CAPTURE` LIQUIDADAS</dd></div>
             <div><dt>PERÍODO DA FARM</dt><dd>@FarmPeriod(_snapshot)</dd></div>
         </dl>
-        <p>CU mede compute. AIC mede poder de consumo. Esta tela não converte uma unidade na outra.</p>
+        <p>CP mede processamento. AIC mede poder de consumo. Esta tela não converte uma unidade na outra.</p>
     </section>
 }
 
@@ -106,7 +106,7 @@ else
         catch (InvalidOperationException exception) { _error = exception.Message; }
     }
 
-    private static string FormatCu(long milli) => $"{milli / 1_000m:N3} CU";
+    private static string FormatCp(long milli) => $"{milli / 1_000m:N3} CP";
 
     private static string FarmPeriod(FarmBalanceSnapshot snapshot) =>
         snapshot.FirstCompletedJobAtUtc is null || snapshot.LastCompletedJobAtUtc is null

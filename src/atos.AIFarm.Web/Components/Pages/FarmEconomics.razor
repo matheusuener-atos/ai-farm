@@ -14,7 +14,7 @@
 
 <section class="economics-warning" role="note">
     <strong>[ SIMULAÇÃO // NÃO FINANCEIRO ]</strong>
-    <span>Nenhum cenário cria AIC, altera a Wallet ou define uma conversão CU → AIC.</span>
+    <span>Nenhum cenário cria AIC, altera a Wallet ou define uma conversão CP → AIC.</span>
 </section>
 
 @if (_benchmark is null)
@@ -29,7 +29,7 @@ else
     <section class="benchmark-source">
         <div>
             <strong>[ ÚLTIMO BENCHMARK // @ShortId(_benchmark.JobId) ]</strong>
-            <span>@Number(_benchmark.ComputeUnitsPerHour) CU/H // @_benchmark.DurationMilliseconds MS // @_benchmark.FinishedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
+            <span>@Number(_benchmark.ComputeUnitsPerHour) CP/H // @_benchmark.DurationMilliseconds MS // @_benchmark.FinishedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
             <small>EVIDÊNCIA @(_benchmark.HasValidEvidence ? "VÁLIDA" : "LEGADA OU INDISPONÍVEL") // NODE @_benchmark.NodeName</small>
         </div>
         <button type="button" class="button-secondary" @onclick="UseLatestBenchmark">[ USAR MEDIÇÃO ]</button>
@@ -42,10 +42,10 @@ else
         <label>HORAS DISPONÍVEIS / MÊS<InputNumber @bind-Value="_scenario.MonthlyAvailableHours" min="0.01" step="1" /></label>
         <label>POTÊNCIA MÉDIA / W<InputNumber @bind-Value="_scenario.PowerWatts" min="0.01" step="1" /></label>
         <label>ENERGIA / R$ POR KWH<InputNumber @bind-Value="_scenario.ElectricityCostPerKwh" min="0" step="0.01" /></label>
-        <label>CAPACIDADE / CU POR HORA<InputNumber @bind-Value="_scenario.ComputeUnitsPerHour" min="0.01" step="1" /></label>
+        <label>CAPACIDADE / CP POR HORA<InputNumber @bind-Value="_scenario.ComputeUnitsPerHour" min="0.01" step="1" /></label>
         <label>UTILIZAÇÃO / %<InputNumber @bind-Value="_scenario.UtilizationPercent" min="0" max="100" step="1" /></label>
         <label>SUCESSO DOS JOBS / %<InputNumber @bind-Value="_scenario.SuccessPercent" min="0" max="100" step="1" /></label>
-        <label>VALOR BRUTO / R$ POR 1.000 CU<InputNumber @bind-Value="_scenario.GrossValuePerThousandCu" min="0" step="0.01" /></label>
+        <label>VALOR BRUTO / R$ POR 1.000 CP<InputNumber @bind-Value="_scenario.GrossValuePerThousandCu" min="0" step="0.01" /></label>
         <label>VERIFICAÇÃO / % DA RECEITA<InputNumber @bind-Value="_scenario.VerificationCostPercent" min="0" max="100" step="1" /></label>
         <label>PLATAFORMA / % DA RECEITA<InputNumber @bind-Value="_scenario.PlatformCostPercent" min="0" max="100" step="1" /></label>
         <label>IMPOSTOS E TAXAS / %<InputNumber @bind-Value="_scenario.TaxesAndFeesPercent" min="0" max="100" step="1" /></label>
@@ -88,13 +88,13 @@ else if (_result is not null)
             </span>
         </header>
         <div class="economics-summary">
-            <article><span>CU TENTADO</span><strong>@Number(_result.AttemptedComputeUnits)</strong></article>
-            <article><span>CU VERIFICADO</span><strong>@Number(_result.VerifiedComputeUnits)</strong></article>
+            <article><span>CP TENTADO</span><strong>@Number(_result.AttemptedComputeUnits)</strong></article>
+            <article><span>CP VERIFICADO</span><strong>@Number(_result.VerifiedComputeUnits)</strong></article>
             <article><span>VALOR ECONÔMICO BRUTO</span><strong>@Money(_result.GrossEconomicValue)</strong></article>
             <article><span>REWARD MÁXIMO FINANCIADO</span><strong>@Money(_result.MaximumFundedReward)</strong></article>
-            <article><span>TETO / 1.000 CU</span><strong>@Money(_result.MaximumRewardPerThousandCu)</strong></article>
+            <article><span>TETO / 1.000 CP</span><strong>@Money(_result.MaximumRewardPerThousandCu)</strong></article>
             <article><span>DÉFICIT</span><strong>@Money(_result.FundingGap)</strong></article>
-            <article><span>PONTO DE EQUILÍBRIO / 1.000 CU</span><strong>@BreakEven(_result.BreakEvenGrossValuePerThousandCu)</strong></article>
+            <article><span>PONTO DE EQUILÍBRIO / 1.000 CP</span><strong>@BreakEven(_result.BreakEvenGrossValuePerThousandCu)</strong></article>
         </div>
     </section>
 
@@ -132,7 +132,7 @@ else if (_result is not null)
                     <dl>
                         <div><dt>UTILIZAÇÃO</dt><dd>@Number(projection.Scenario.UtilizationPercent)%</dd></div>
                         <div><dt>SUCESSO</dt><dd>@Number(projection.Scenario.SuccessPercent)%</dd></div>
-                        <div><dt>VALOR / 1K CU</dt><dd>@Money(projection.Scenario.GrossValuePerThousandCu)</dd></div>
+                        <div><dt>VALOR / 1K CP</dt><dd>@Money(projection.Scenario.GrossValuePerThousandCu)</dd></div>
                         <div><dt>REWARD MÁX.</dt><dd>@Money(projection.Result.MaximumFundedReward)</dd></div>
                         <div><dt>DÉFICIT</dt><dd>@Money(projection.Result.FundingGap)</dd></div>
                     </dl>
@@ -163,8 +163,8 @@ else if (_result is not null)
                     </span>
                 </header>
                 <dl>
-                    <div><dt>CU/H</dt><dd>@Number(saved.Scenario.ComputeUnitsPerHour)</dd></div>
-                    <div><dt>VALOR / 1K CU</dt><dd>@Money(saved.Scenario.GrossValuePerThousandCu)</dd></div>
+                    <div><dt>CP/H</dt><dd>@Number(saved.Scenario.ComputeUnitsPerHour)</dd></div>
+                    <div><dt>VALOR / 1K CP</dt><dd>@Money(saved.Scenario.GrossValuePerThousandCu)</dd></div>
                     <div><dt>REWARD MÁX.</dt><dd>@Money(saved.Result.MaximumFundedReward)</dd></div>
                     <div><dt>DÉFICIT</dt><dd>@Money(saved.Result.FundingGap)</dd></div>
                     <div><dt>BENCHMARK</dt><dd>@(saved.SourceJobId is null ? "MANUAL" : ShortId(saved.SourceJobId.Value))</dd></div>
