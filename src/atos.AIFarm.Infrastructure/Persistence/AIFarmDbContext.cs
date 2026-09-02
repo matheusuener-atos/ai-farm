@@ -20,6 +20,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<AiRequestRecord> AiRequests => Set<AiRequestRecord>();
     public DbSet<AiExecutionRecord> AiExecutions => Set<AiExecutionRecord>();
     public DbSet<FarmNodeRecord> FarmNodes => Set<FarmNodeRecord>();
+    public DbSet<FarmAgentEnrollmentRecord> FarmAgentEnrollments => Set<FarmAgentEnrollmentRecord>();
     public DbSet<FarmJobRecord> FarmJobs => Set<FarmJobRecord>();
     public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
 
@@ -238,15 +239,42 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("farm_nodes", table =>
             {
-                table.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused')");
+                table.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");
                 table.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
+                table.HasCheckConstraint("CK_farm_nodes_connection_kind", "\"ConnectionKind\" IN ('Embedded', 'Agent')");
+                table.HasCheckConstraint(
+                    "CK_farm_nodes_agent_cpu_limit",
+                    "\"AgentMaxLogicalProcessors\" IS NULL OR (\"AgentMaxLogicalProcessors\" >= 1 AND \"AgentMaxLogicalProcessors\" <= \"LogicalProcessors\")");
+                table.HasCheckConstraint(
+                    "CK_farm_nodes_agent_memory_limit",
+                    "\"AgentMaxMemoryBytes\" IS NULL OR (\"AgentMaxMemoryBytes\" >= 1 AND \"AgentMaxMemoryBytes\" <= \"MemoryBytes\")");
+                table.HasCheckConstraint(
+                    "CK_farm_nodes_verified_profile",
+                    "(\"VerificationLevel\" = 'Detected' AND \"VerifiedProfileHash\" IS NULL AND \"ProfileVerifiedAtUtc\" IS NULL) OR " +
+                    "(\"VerificationLevel\" = 'Verified' AND \"VerifiedProfileHash\" IS NOT NULL AND length(\"VerifiedProfileHash\") = 64 AND \"ProfileVerifiedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.HasIndex(x => x.AgentCredentialHash).IsUnique();
             entity.Property(x => x.Name).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.VerificationLevel).HasMaxLength(24);
+            entity.Property(x => x.ConnectionKind).HasMaxLength(24).HasDefaultValue("Embedded");
+            entity.Property(x => x.AgentVersion).HasMaxLength(80);
+            entity.Property(x => x.AgentCredentialHash).HasMaxLength(64);
+            entity.Property(x => x.VerifiedProfileHash).HasMaxLength(64);
+            entity.Property(x => x.AgentAcceptJobs).HasDefaultValue(true);
             entity.Property(x => x.Runtime).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmAgentEnrollmentRecord>(entity =>
+        {
+            entity.ToTable("farm_agent_enrollments");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.ExpiresAtUtc });
+            entity.Property(x => x.TokenHash).HasMaxLength(64);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -254,12 +282,33 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("farm_jobs", table =>
             {
-                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
+                table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_worker_telemetry",
+                    "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR " +
+                    "(\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_agent_lease",
+                    "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR " +
+                    "(\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_manifest_complete",
+                    "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR " +
+                    "(\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_evidence_complete",
+                    "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR " +
+                    "(\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => x.AccountId)
+                .HasDatabaseName("UX_farm_jobs_account_active")
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
             entity.HasIndex(x => x.NodeId);
+            entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);
             entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
             entity.Property(x => x.VerificationPolicy).HasMaxLength(120);
@@ -267,7 +316,15 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.ExpectedDigest).HasMaxLength(64);
             entity.Property(x => x.ResultDigest).HasMaxLength(64);
+            entity.Property(x => x.ManifestVersion).HasMaxLength(80);
+            entity.Property(x => x.ManifestDigest).HasMaxLength(64);
+            entity.Property(x => x.ManifestSignature).HasMaxLength(64);
             entity.Property(x => x.FailureReason).HasMaxLength(500);
+            entity.Property(x => x.WorkerEnforcement).HasMaxLength(80);
+            entity.Property(x => x.EvidenceVersion).HasMaxLength(80);
+            entity.Property(x => x.EvidenceDigest).HasMaxLength(64);
+            entity.Property(x => x.EvidenceSignature).HasMaxLength(64);
+            entity.Property(x => x.EvidenceKeyId).HasMaxLength(32);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -307,11 +364,30 @@ public sealed class FarmNodeRecord
     public string Name { get; set; } = string.Empty;
     public string Status { get; set; } = "Online";
     public string VerificationLevel { get; set; } = "Detected";
+    public string ConnectionKind { get; set; } = "Embedded";
+    public string? AgentVersion { get; set; }
+    public string? AgentCredentialHash { get; set; }
+    public DateTimeOffset? AgentCredentialIssuedAtUtc { get; set; }
+    public bool AgentAcceptJobs { get; set; } = true;
+    public int? AgentMaxLogicalProcessors { get; set; }
+    public long? AgentMaxMemoryBytes { get; set; }
+    public string? VerifiedProfileHash { get; set; }
+    public DateTimeOffset? ProfileVerifiedAtUtc { get; set; }
     public string Runtime { get; set; } = string.Empty;
     public int LogicalProcessors { get; set; }
     public long MemoryBytes { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset LastSeenAtUtc { get; set; }
+}
+
+public sealed class FarmAgentEnrollmentRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string TokenHash { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
 }
 
 public sealed class FarmJobRecord
@@ -326,12 +402,31 @@ public sealed class FarmJobRecord
     public string Status { get; set; } = "Queued";
     public string? ExpectedDigest { get; set; }
     public string? ResultDigest { get; set; }
+    public Guid? AttemptId { get; set; }
+    public string? ManifestVersion { get; set; }
+    public string? ManifestPayload { get; set; }
+    public string? ManifestDigest { get; set; }
+    public string? ManifestSignature { get; set; }
+    public DateTimeOffset? ManifestIssuedAtUtc { get; set; }
+    public DateTimeOffset? ManifestExpiresAtUtc { get; set; }
     public long ComputeUnitsMilli { get; set; }
     public long? DurationMilliseconds { get; set; }
     public string? FailureReason { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? StartedAtUtc { get; set; }
     public DateTimeOffset? FinishedAtUtc { get; set; }
+    public DateTimeOffset? CancellationRequestedAtUtc { get; set; }
+    public DateTimeOffset? AgentLeaseRenewedAtUtc { get; set; }
+    public DateTimeOffset? AgentLeaseExpiresAtUtc { get; set; }
+    public long? WorkerPeakMemoryBytes { get; set; }
+    public long? WorkerProcessorTimeMilliseconds { get; set; }
+    public string? WorkerEnforcement { get; set; }
+    public string? EvidenceVersion { get; set; }
+    public string? EvidencePayload { get; set; }
+    public string? EvidenceDigest { get; set; }
+    public string? EvidenceSignature { get; set; }
+    public string? EvidenceKeyId { get; set; }
+    public DateTimeOffset? EvidenceCreatedAtUtc { get; set; }
 }
 
 public sealed class FarmJobEventRecord

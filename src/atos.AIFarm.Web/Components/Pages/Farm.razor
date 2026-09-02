@@ -1,7 +1,9 @@
 @page "/farm"
 @rendermode InteractiveServer
 @attribute [Authorize]
+@implements IAsyncDisposable
 @inject IFarmLabService FarmLab
+@inject IFarmAgentService FarmAgent
 
 <PageTitle>Compute Lab // atos AI Farm</PageTitle>
 
@@ -52,24 +54,87 @@ else
                 <span>CU VERIFICADO</span>
                 <strong>@FormatCu(_dashboard.VerifiedComputeUnitsMilli)</strong>
             </article>
+            <article>
+                <span>CONEXÃO</span>
+                <strong>@ConnectionLabel(_dashboard.Node.ConnectionKind)</strong>
+            </article>
+            <article>
+                <span>POLÍTICA LOCAL</span>
+                <strong class="@(CanAcceptJobs ? null : "amber")">@(CanAcceptJobs ? "ACEITANDO JOBS" : "PAUSADA")</strong>
+            </article>
+            <article>
+                <span>CPU AUTORIZADA</span>
+                <strong>@_dashboard.Node.AuthorizedLogicalProcessors</strong>
+            </article>
+            <article>
+                <span>MEMÓRIA AUTORIZADA</span>
+                <strong>@FormatBytes(_dashboard.Node.AuthorizedMemoryBytes)</strong>
+            </article>
         </div>
 
-        <p class="farm-runtime">@_dashboard.Node.Runtime</p>
+        <p class="farm-runtime">
+            @_dashboard.Node.Runtime
+            @if (_dashboard.Node.ProfileVerifiedAtUtc is not null &&
+                 _dashboard.Node.VerifiedProfileHash is not null)
+            {
+                <text> // PERFIL @_dashboard.Node.VerifiedProfileHash[..12] // VERIFICADO @_dashboard.Node.ProfileVerifiedAtUtc.Value.ToLocalTime().ToString("dd/MM HH:mm")</text>
+            }
+            else
+            {
+                <text> // PERFIL AGUARDANDO BENCHMARK</text>
+            }
+        </p>
 
         <div class="farm-controls">
-            @if (IsOnline)
+            @if (IsOnline && IsEmbedded)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR NODE ]</button>
                 <button type="button" @onclick="RunBenchmarkAsync" disabled="@_working">
                     @(_working ? "[ EXECUTANDO... ]" : "[ EXECUTAR BENCHMARK ]")
                 </button>
             }
-            else
+            else if (IsOnline)
+            {
+                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
+                <button type="button" @onclick="RunBenchmarkAsync" disabled="@(_working || !CanAcceptJobs)">
+                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : "[ DESPACHAR BENCHMARK ]")
+                </button>
+            }
+            else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
             {
                 <button type="button" @onclick="ResumeAsync" disabled="@_working">[ RETOMAR NODE ]</button>
             }
+            else
+            {
+                <button type="button" disabled>[ AGUARDANDO HEARTBEAT ]</button>
+            }
         </div>
-        <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // SEM SHELL // SEM REDE // SEM AIC</small>
+        <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // LIMITES LOCAIS // SEM SHELL // SEM REDE // SEM AIC</small>
+    </section>
+
+    <section class="terminal farm-agent-panel">
+        <div class="terminal-title">COMPUTE AGENT // VÍNCULO DA MÁQUINA</div>
+        <p>
+            @if (IsEmbedded)
+            {
+                <text>Modo EMBEDDED: o benchmark roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
+            }
+            else
+            {
+                <text>Agent @_dashboard.Node.AgentVersion // último heartbeat @_dashboard.Node.LastSeenAtUtc.ToLocalTime().ToString("HH:mm:ss")</text>
+            }
+        </p>
+        <button type="button" class="button-secondary" @onclick="CreateEnrollmentAsync" disabled="@_working">
+            [ @(IsEmbedded ? "GERAR CÓDIGO DE VÍNCULO" : "ROTACIONAR CREDENCIAL") ]
+        </button>
+        @if (_enrollment is not null)
+        {
+            <div class="farm-enrollment-secret" role="status">
+                <strong>CÓDIGO ÚNICO // EXPIRES @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</strong>
+                <code>@_enrollment.Token</code>
+                <small>Copie agora. O código não será exibido novamente e o anterior foi invalidado.</small>
+            </div>
+        }
     </section>
 
     <section class="terminal farm-jobs">
@@ -85,14 +150,97 @@ else
                 <article class="farm-job">
                     <header>
                         <strong>@job.Workload // @ShortId(job.Id)</strong>
-                        <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
+                        <div class="farm-job-actions">
+                            <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
+                            @if (job.Evidence?.IsValid == true)
+                            {
+                                <a class="farm-evidence-download"
+                                   href="@EvidenceUrl(job.Id)"
+                                   download="@EvidenceFileName(job.Id)">
+                                    [ BAIXAR EVIDÊNCIA ]
+                                </a>
+                            }
+                            @if (!IsEmbedded && CanCancel(job))
+                            {
+                                <button type="button"
+                                        class="button-secondary"
+                                        @onclick="() => CancelJobAsync(job.Id)"
+                                        disabled="@_working">
+                                    [ CANCELAR ]
+                                </button>
+                            }
+                            else if (job.CancellationRequestedAtUtc is not null && CanCancelStatus(job.Status))
+                            {
+                                <span class="amber">[ CANCELAMENTO SOLICITADO ]</span>
+                            }
+                        </div>
                     </header>
                     <dl>
                         <div><dt>VERSÃO</dt><dd>@job.WorkloadVersion</dd></div>
                         <div><dt>VERIFICAÇÃO</dt><dd>@job.VerificationPolicy</dd></div>
                         <div><dt>CU</dt><dd>@FormatCu(job.ComputeUnitsMilli)</dd></div>
+                        <div><dt>DURAÇÃO</dt><dd>@(job.DurationMilliseconds is null ? "---" : $"{job.DurationMilliseconds} MS")</dd></div>
                         <div><dt>DIGEST</dt><dd>@(job.ResultDigest is null ? "---" : job.ResultDigest[..12])</dd></div>
+                        <div><dt>PICO DE MEMÓRIA</dt><dd>@(job.WorkerPeakMemoryBytes is null ? "---" : FormatBytes(job.WorkerPeakMemoryBytes.Value))</dd></div>
+                        <div><dt>CPU DO WORKER</dt><dd>@(job.WorkerProcessorTimeMilliseconds is null ? "---" : $"{job.WorkerProcessorTimeMilliseconds} MS")</dd></div>
+                        <div><dt>CONTENÇÃO</dt><dd>@(job.WorkerEnforcement ?? "---")</dd></div>
                     </dl>
+                    @if (job.AgentLeaseExpiresAtUtc is not null && CanCancelStatus(job.Status))
+                    {
+                        <p class="farm-manifest-legacy">
+                            LEASE // RENOVADO ATÉ @job.AgentLeaseExpiresAtUtc.Value.ToLocalTime().ToString("HH:mm:ss")
+                        </p>
+                    }
+                    @if (job.Manifest is null)
+                    {
+                        <p class="farm-manifest-legacy">MANIFESTO // JOB LEGADO SEM ASSINATURA</p>
+                    }
+                    else
+                    {
+                        <details class="farm-manifest">
+                            <summary>
+                                [ MANIFESTO @job.Manifest.Version //
+                                <span class="@(job.Manifest.IsSignatureValid ? "green" : "error-text")">
+                                    @(job.Manifest.IsSignatureValid ? "ASSINATURA VÁLIDA" : "ASSINATURA INVÁLIDA")
+                                </span> ]
+                            </summary>
+                            <dl>
+                                <div><dt>ATTEMPT</dt><dd>@ShortId(job.Manifest.AttemptId)</dd></div>
+                                <div><dt>VALIDADE</dt><dd>@job.Manifest.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</dd></div>
+                                <div><dt>TIMEOUT</dt><dd>@job.Manifest.TimeoutSeconds S</dd></div>
+                                <div><dt>ITERATIONS</dt><dd>@job.Manifest.Iterations.ToString("N0")</dd></div>
+                                <div><dt>CPU MÁX.</dt><dd>@job.Manifest.MaxLogicalProcessors</dd></div>
+                                <div><dt>MEMÓRIA MÁX.</dt><dd>@FormatBytes(job.Manifest.MaxMemoryBytes)</dd></div>
+                                <div><dt>REDE</dt><dd>@job.Manifest.NetworkPolicy</dd></div>
+                                <div><dt>DADOS</dt><dd>@job.Manifest.DataClassification</dd></div>
+                                <div><dt>PERFIL DO NODE</dt><dd title="@job.Manifest.NodeProfileHash">@(job.Manifest.NodeProfileHash is null ? "---" : ShortHash(job.Manifest.NodeProfileHash))</dd></div>
+                                <div><dt>MANIFEST DIGEST</dt><dd title="@job.Manifest.Digest">@ShortHash(job.Manifest.Digest)</dd></div>
+                                <div><dt>HMAC-SHA256</dt><dd title="@job.Manifest.Signature">@ShortHash(job.Manifest.Signature)</dd></div>
+                            </dl>
+                        </details>
+                    }
+                    @if (job.Status == FarmJobStatus.Completed && job.Evidence is null)
+                    {
+                        <p class="farm-manifest-legacy">EVIDÊNCIA // JOB LEGADO SEM BUNDLE</p>
+                    }
+                    else if (job.Evidence is not null)
+                    {
+                        <details class="farm-evidence">
+                            <summary>
+                                [ BUNDLE @job.Evidence.Version //
+                                <span class="@(job.Evidence.IsValid ? "green" : "error-text")">
+                                    @(job.Evidence.IsValid ? "INTEGRIDADE VÁLIDA" : "INTEGRIDADE INVÁLIDA")
+                                </span> ]
+                            </summary>
+                            <dl>
+                                <div><dt>ALGORITMO</dt><dd>@job.Evidence.Algorithm</dd></div>
+                                <div><dt>KEY ID</dt><dd>@job.Evidence.KeyId</dd></div>
+                                <div><dt>EMITIDO</dt><dd>@job.Evidence.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</dd></div>
+                                <div><dt>PAYLOAD DIGEST</dt><dd title="@job.Evidence.Digest">@ShortHash(job.Evidence.Digest)</dd></div>
+                                <div><dt>ASSINATURA</dt><dd title="@job.Evidence.Signature">@ShortHash(job.Evidence.Signature)</dd></div>
+                            </dl>
+                        </details>
+                    }
                     <ol class="farm-job-events">
                         @foreach (var entry in job.Events)
                         {
@@ -113,9 +261,18 @@ else
     private FarmDashboard? _dashboard;
     private bool _working;
     private string? _error;
+    private FarmAgentEnrollment? _enrollment;
+    private readonly CancellationTokenSource _pollCancellation = new();
+    private Task? _pollTask;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
+    private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
+    private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        _pollTask = PollDashboardAsync(_pollCancellation.Token);
+    }
 
     private async Task PauseAsync() =>
         await ChangeStatusAsync(FarmNodeStatus.Paused);
@@ -149,6 +306,28 @@ else
         finally { _working = false; }
     }
 
+    private async Task CreateEnrollmentAsync()
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try { _enrollment = await FarmAgent.CreateEnrollmentAsync(); }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        { _error = exception.Message; }
+        finally { _working = false; }
+    }
+
+    private async Task CancelJobAsync(Guid jobId)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try { _dashboard = await FarmLab.CancelJobAsync(jobId); }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        { _error = exception.Message; }
+        finally { _working = false; }
+    }
+
     private async Task ReloadAsync()
     {
         try { _dashboard = await FarmLab.GetDashboardAsync(); }
@@ -156,8 +335,47 @@ else
         { _error = exception.Message; }
     }
 
-    private static string NodeStatusLabel(FarmNodeStatus status) =>
-        status == FarmNodeStatus.Online ? "ONLINE" : "PAUSADO";
+    private async Task PollDashboardAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_working) continue;
+                await InvokeAsync(async () =>
+                {
+                    await ReloadAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _pollCancellation.CancelAsync();
+        if (_pollTask is not null)
+        {
+            try { await _pollTask; }
+            catch (OperationCanceledException) { }
+        }
+        _pollCancellation.Dispose();
+    }
+
+    private static string NodeStatusLabel(FarmNodeStatus status) => status switch
+    {
+        FarmNodeStatus.Online => "ONLINE",
+        FarmNodeStatus.Paused => "PAUSADO",
+        FarmNodeStatus.Offline => "OFFLINE",
+        _ => status.ToString().ToUpperInvariant()
+    };
+
+    private static string ConnectionLabel(FarmNodeConnectionKind kind) =>
+        kind == FarmNodeConnectionKind.Agent ? "AGENT" : "EMBEDDED";
 
     private static string VerificationLabel(FarmVerificationLevel level) =>
         level == FarmVerificationLevel.Verified ? "VERIFICADO" : "DETECTADO";
@@ -165,19 +383,38 @@ else
     private static string JobStatusLabel(FarmJobStatus status) => status switch
     {
         FarmJobStatus.Queued => "NA FILA",
+        FarmJobStatus.Offered => "OFERECIDO",
+        FarmJobStatus.Accepted => "ACEITO",
         FarmJobStatus.Running => "EXECUTANDO",
+        FarmJobStatus.Uploading => "ENVIANDO",
         FarmJobStatus.Verifying => "VERIFICANDO",
         FarmJobStatus.Completed => "CONCLUÍDO",
         FarmJobStatus.Failed => "FALHOU",
+        FarmJobStatus.Cancelled => "CANCELADO",
+        FarmJobStatus.TimedOut => "TIMEOUT",
+        FarmJobStatus.Rejected => "REJEITADO",
         _ => status.ToString().ToUpperInvariant()
     };
 
     private static string JobStatusClass(FarmJobStatus status) =>
         status == FarmJobStatus.Completed ? "green" :
-        status == FarmJobStatus.Failed ? "error-text" : "amber";
+        status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? "error-text" : "amber";
+
+    private static bool CanCancel(FarmJobSnapshot job) =>
+        job.CancellationRequestedAtUtc is null && CanCancelStatus(job.Status);
+
+    private static bool CanCancelStatus(FarmJobStatus status) =>
+        status is FarmJobStatus.Offered or FarmJobStatus.Accepted or FarmJobStatus.Running;
 
     private static string FormatCu(long milli) => $"{milli / 1000d:0.000} CU";
     private static string ShortId(Guid id) => id.ToString("N")[..8];
+    private static string EvidenceUrl(Guid jobId) => $"/api/farm/jobs/{jobId}/evidence";
+    private static string EvidenceFileName(Guid jobId) => $"atos-farm-evidence-{jobId:N}.json";
+    private static string ShortHash(string value) =>
+        value.Length <= 16 ? value : $"{value[..12]}...{value[^4..]}";
     private static string FormatBytes(long bytes) =>
-        bytes <= 0 ? "---" : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";
+        bytes <= 0 ? "---" :
+        bytes < 1024L * 1024 * 1024
+            ? $"{bytes / 1024d / 1024d:0.0} MB"
+            : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";
 }

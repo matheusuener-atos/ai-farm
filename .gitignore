@@ -8,5 +8,6 @@ node_modules/
 .env
 appsettings.Local.json
 .aifarm-keys/
+.aifarm-agent/
 .neon
 .env.local

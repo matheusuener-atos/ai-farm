@@ -53,6 +53,11 @@ neon checkout development --project-id crimson-shadow-20267299
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3` e
   `AWS_REGION`: credencial branch-scoped do bucket privado `chat-attachments`.
 
+Jobs do Compute Lab são assinados com
+`AIFarm__Farm__ManifestSigningKey`. Development usa uma chave local
+explicitamente não produtiva quando a variável é omitida. No Render, configure
+um segredo aleatório em Base64 com pelo menos 32 bytes antes do deploy.
+
 O arquivo versionado `neon.ts` declara o bucket privado. Para conferir e
 aplicar a infraestrutura somente na branch selecionada:
 
@@ -78,6 +83,19 @@ informe no Dashboard do Render as variáveis secretas da branch Neon
 
 - `DATABASE_URL`: URL pooled de `production`;
 - `DATABASE_URL_UNPOOLED`: URL direta de `production`, usada nas migrations.
+- `AIFarm__Farm__ManifestSigningKey`: segredo Base64 de 256 bits usado para
+  assinar manifests do Compute Lab.
+
+Gere o segredo localmente e copie somente o resultado para o Environment do
+Render:
+
+```powershell
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+```
+
+Não troque a chave sem um procedimento de rotação: Jobs históricos assinados
+pela chave anterior continuarão registrados, mas não poderão ser revalidados
+com a nova chave.
 
 Anexos exigem também as quatro variáveis `AWS_*` declaradas em `render.yaml`.
 Antes de preenchê-las, o bucket deve ser criado explicitamente na branch Neon
@@ -189,17 +207,137 @@ atos-sha256-chain-v1.
 
 O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
 manifest no verificador e só registra 1,000 CU quando os digests coincidem.
-Cada transição é persistida de forma ordenada:
+Cada novo Job congela um manifesto canônico assinado por HMAC-SHA256 com
+`attempt_id`, validade, timeout, limites de CPU/memória, classificação
+`STANDARD` e rede `DENY_ALL`. A assinatura e a allowlist são verificadas antes
+do runtime; Jobs históricos anteriores permanecem visíveis como legados.
+O PostgreSQL também impede mais de um Job ativo por conta, inclusive entre
+abas ou instâncias concorrentes, e cancelamentos terminalizam a tentativa sem
+emitir CU ou AIC.
+No laboratório `EMBEDDED`, cada transição é persistida de forma ordenada:
 
     QUEUED → RUNNING → VERIFYING → COMPLETED
                                     ↘ FAILED
 
 Este CU é uma medição técnica experimental e específica dessa política; ainda
 não existe conversão CU → AIC. O laboratório não concede reward, não aceita
-shell, imagem de container, egress ou Jobs enviados pelo usuário. O hardware
-exibido pertence ao host onde a aplicação está executando — localmente, a
-máquina de desenvolvimento; no Render, o container do serviço — e ainda não
-representa um Compute Agent instalado no computador do usuário.
+shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
+`EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
+executando — localmente, a máquina de desenvolvimento; no Render, o container
+do serviço. No modo `AGENT`, o inventário e o benchmark pertencem ao computador
+vinculado.
+
+### Vínculo experimental do Compute Agent
+
+O painel `/farm` diferencia o laboratório `EMBEDDED` de um `AGENT` externo.
+O usuário autenticado pode gerar um código de vínculo de uso único, válido por
+10 minutos. Gerar outro código invalida os anteriores. Depois do vínculo, o
+Agent recebe uma credencial de heartbeat que só é armazenada como SHA-256 no
+PostgreSQL; a credencial em texto puro é retornada uma única vez.
+
+O executável dedicado está no projeto `atos.AIFarm.Agent`. Na primeira
+instalação, gere o código em `/farm` e execute:
+
+```powershell
+dotnet run --project src/atos.AIFarm.Agent -- enroll http://localhost:5159
+```
+
+O código é solicitado sem ecoar seu conteúdo. O Agent grava somente sua
+configuração não sensível em `%LOCALAPPDATA%\atos-ai-farm\agent.json`; a
+credencial fica no Windows Credential Manager. Para conferir o vínculo:
+
+```powershell
+dotnet run --project src/atos.AIFarm.Agent -- status
+```
+
+Para manter o node online, inicie o processo e deixe o terminal aberto:
+
+```powershell
+dotnet run --project src/atos.AIFarm.Agent -- run
+```
+
+O Agent envia o inventário e um heartbeat a cada 30 segundos. Durante um Job, o
+protocolo `0.3.0` passa a enviar heartbeats a cada 2 segundos e renova um lease
+de execução com validade de 10 segundos. Ele aplica retry com espera crescente
+quando o Web Service fica indisponível e encerra com `Ctrl+C`.
+HTTP sem TLS é aceito somente em localhost; servidores remotos exigem HTTPS.
+Após 90 segundos sem heartbeat o painel marca o Agent como `OFFLINE`. Nenhuma
+credencial ou código deve ser colocado no Git, em screenshots ou em logs.
+
+O proprietário controla localmente se a máquina aceita novos Jobs e quanto do
+hardware pode ser anunciado. A política fica no mesmo `agent.json`, é relida a
+cada heartbeat e nunca pode ser ampliada pelo servidor:
+
+```powershell
+dotnet run --project src/atos.AIFarm.Agent -- pause
+dotnet run --project src/atos.AIFarm.Agent -- resume
+dotnet run --project src/atos.AIFarm.Agent -- limits 1 256
+```
+
+`limits` recebe CPU lógica e memória em MiB. `pause` não interrompe o Job
+atual: apenas drena o Agent e impede novos despachos e claims. O painel mantém o
+Node online, mas mostra a política local pausada e seus limites efetivos. Esses
+limites são uma política de admissão assinada; isolamento rígido de CPU/memória
+no sistema operacional ainda não faz parte deste runtime experimental.
+
+O Agent `0.4.0` separa o workload do processo coordenador. Depois de validar o
+manifesto, o coordenador inicia diretamente um processo filho interno, sem
+shell, e envia por `stdin` somente um envelope IPC limitado a 4 KiB com
+`workload`, `nonce` e `iterations`. O worker possui uma allowlist fixa para
+`SHA256_CHAIN`, devolve apenas digest e duração por `stdout` e não recebe
+credenciais, URL do servidor ou chave de manifesto. Timeout, encerramento do
+Agent e cancelamento remoto matam toda a árvore do worker. Limites rígidos de
+CPU e memória no sistema operacional foram adicionados na versão seguinte.
+
+O Agent `0.5.0` aplica afinidade de CPU ao processo filho. No Windows, um Job
+Object impõe o teto de memória do manifesto e encerra o worker se ele o
+ultrapassar; o limite também é aplicado ao heap do .NET. Em plataformas onde o
+Job Object não existe, a afinidade é usada quando suportada e o coordenador
+monitora o working set, encerrando a árvore ao ultrapassar o teto. O modo efetivo
+fica explícito como `WINDOWS_JOB_OBJECT...` ou `PROCESS_MONITOR...`, sem fingir
+que o fallback é isolamento nativo equivalente.
+
+Ao concluir, o coordenador mede duração, tempo de CPU e pico de memória do
+processo. A API aceita apenas modos de contenção conhecidos, persiste o conjunto
+completo de telemetria e o painel `/farm` o exibe em cada Job. Esses valores são
+observações do Agent autenticado e entram na evidência operacional do Job; não
+constituem attestation independente do hardware.
+
+O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
+versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
+que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto
+remoto v3 congela e assina esse fingerprint. Depois que a evidência
+determinística é aprovada, o perfil recebe data de verificação; qualquer mudança
+em um de seus componentes revoga o selo e volta o Node para `DETECTADO` até um
+novo benchmark. Isso comprova somente a combinação observada que executou o
+workload — não é attestation criptográfica de fabricante, TPM ou GPU.
+
+Com o Agent online, `[ DESPACHAR BENCHMARK ]` cria uma oferta remota. O
+servidor assina o manifesto com uma chave HMAC derivada exclusivamente para o
+Node; o Agent fixa a identidade dessa chave no Windows Credential Manager,
+confere assinatura, validade, vínculo, workload e limites da allowlist antes de
+executar. O Agent devolve somente o digest e a duração, e o servidor reexecuta o
+benchmark para aceitar ou rejeitar a evidência:
+
+    QUEUED → OFFERED → ACCEPTED → RUNNING → UPLOADING → VERIFYING → COMPLETED
+       │         │          │          │          │          │
+       └─────────┴──────────┴──────────┴──────────┴──────────┴→ FAILED
+                                  ├→ CANCELLED
+                                  ├→ TIMED_OUT
+                                  └→ REJECTED
+
+Falhas de assinatura, manifesto expirado, resultado divergente ou estado
+inválido encerram a tentativa sem emitir CU ou AIC. Reenvios idempotentes só são
+aceitos quando apresentam exatamente a mesma evidência já concluída. O watchdog
+terminaliza ofertas abandonadas ao fim da validade assinada e runtimes que
+ultrapassam 30 segundos, liberando o índice de Job ativo para um novo despacho.
+Enquanto a oferta estiver em `OFFERED`, `ACCEPTED` ou `RUNNING`, o usuário pode
+cancelá-la no painel. Uma oferta ainda não aceita é encerrada imediatamente; um
+Job já aceito recebe um pedido cooperativo, permanece ativo até o Agent
+confirmar o cancelamento e é encerrado pelo watchdog se a confirmação ou o
+lease não chegar. O painel atualiza esses estados automaticamente a cada 2
+segundos, e a transição condicional impede corrida com o envio da evidência.
+
 ## Estado do Marco 1
 
 Implementado:
@@ -254,6 +392,12 @@ Implementado:
 - satisfação agregada por execução no painel operacional;
 - exportação autenticada e portável de conversas em Markdown e JSON.
 - Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CU técnico e trilha de estados.
+- protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
+- executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
+- despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
+- cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
+- política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
+- fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

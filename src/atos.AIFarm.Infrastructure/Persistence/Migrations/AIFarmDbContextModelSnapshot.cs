@@ -593,6 +593,39 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmAgentEnrollmentRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConsumedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("AccountId", "ExpiresAtUtc");
+
+                    b.ToTable("farm_agent_enrollments", "aifarm");
+                });
+
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobEventRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -635,6 +668,18 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("AgentLeaseExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("AgentLeaseRenewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CancellationRequestedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<long>("ComputeUnitsMilli")
                         .HasColumnType("bigint");
 
@@ -643,6 +688,28 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("DurationMilliseconds")
                         .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset?>("EvidenceCreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EvidenceDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("EvidenceKeyId")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("EvidencePayload")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EvidenceSignature")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("EvidenceVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<string>("ExpectedDigest")
                         .HasMaxLength(64)
@@ -654,6 +721,27 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset?>("FinishedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ManifestDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ManifestExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ManifestIssuedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ManifestPayload")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ManifestSignature")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ManifestVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<Guid>("NodeId")
                         .HasColumnType("uuid");
@@ -680,6 +768,16 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<string>("WorkerEnforcement")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<long?>("WorkerPeakMemoryBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("WorkerProcessorTimeMilliseconds")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Workload")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -692,15 +790,31 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_farm_jobs_account_active")
+                        .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
+
+                    b.HasIndex("AttemptId")
+                        .IsUnique();
+
                     b.HasIndex("NodeId");
 
                     b.HasIndex("AccountId", "CreatedAtUtc");
 
                     b.ToTable("farm_jobs", "aifarm", t =>
                         {
+                            t.HasCheckConstraint("CK_farm_jobs_agent_lease", "(\"AgentLeaseRenewedAtUtc\" IS NULL AND \"AgentLeaseExpiresAtUtc\" IS NULL) OR (\"AgentLeaseRenewedAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" IS NOT NULL AND \"AgentLeaseExpiresAtUtc\" > \"AgentLeaseRenewedAtUtc\")");
+
                             t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
 
-                            t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Running', 'Verifying', 'Completed', 'Failed')");
+                            t.HasCheckConstraint("CK_farm_jobs_evidence_complete", "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR (\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_farm_jobs_manifest_complete", "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR (\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
+
+                            t.HasCheckConstraint("CK_farm_jobs_worker_telemetry", "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR (\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
                         });
                 });
 
@@ -712,6 +826,35 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("AgentAcceptJobs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("AgentCredentialHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("AgentCredentialIssuedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("AgentMaxLogicalProcessors")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("AgentMaxMemoryBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AgentVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ConnectionKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("Embedded");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -730,6 +873,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<DateTimeOffset?>("ProfileVerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Runtime")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -745,16 +891,31 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(24)
                         .HasColumnType("character varying(24)");
 
+                    b.Property<string>("VerifiedProfileHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId")
                         .IsUnique();
 
+                    b.HasIndex("AgentCredentialHash")
+                        .IsUnique();
+
                     b.ToTable("farm_nodes", "aifarm", t =>
                         {
-                            t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused')");
+                            t.HasCheckConstraint("CK_farm_nodes_agent_cpu_limit", "\"AgentMaxLogicalProcessors\" IS NULL OR (\"AgentMaxLogicalProcessors\" >= 1 AND \"AgentMaxLogicalProcessors\" <= \"LogicalProcessors\")");
+
+                            t.HasCheckConstraint("CK_farm_nodes_agent_memory_limit", "\"AgentMaxMemoryBytes\" IS NULL OR (\"AgentMaxMemoryBytes\" >= 1 AND \"AgentMaxMemoryBytes\" <= \"MemoryBytes\")");
+
+                            t.HasCheckConstraint("CK_farm_nodes_connection_kind", "\"ConnectionKind\" IN ('Embedded', 'Agent')");
+
+                            t.HasCheckConstraint("CK_farm_nodes_status", "\"Status\" IN ('Online', 'Paused', 'Offline')");
 
                             t.HasCheckConstraint("CK_farm_nodes_verification", "\"VerificationLevel\" IN ('Detected', 'Verified')");
+
+                            t.HasCheckConstraint("CK_farm_nodes_verified_profile", "(\"VerificationLevel\" = 'Detected' AND \"VerifiedProfileHash\" IS NULL AND \"ProfileVerifiedAtUtc\" IS NULL) OR (\"VerificationLevel\" = 'Verified' AND \"VerifiedProfileHash\" IS NOT NULL AND length(\"VerifiedProfileHash\") = 64 AND \"ProfileVerifiedAtUtc\" IS NOT NULL)");
                         });
                 });
 
@@ -1075,6 +1236,15 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ParentConversationId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmAgentEnrollmentRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.AccountRecord", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmJobEventRecord", b =>

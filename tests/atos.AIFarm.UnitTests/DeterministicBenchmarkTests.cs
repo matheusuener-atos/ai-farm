@@ -22,4 +22,14 @@ public sealed class DeterministicBenchmarkTests
         Assert.NotEqual(baseline, DeterministicBenchmark.Compute("nonce-b", 100));
         Assert.NotEqual(baseline, DeterministicBenchmark.Compute("nonce-a", 101));
     }
+
+    [Fact]
+    public void CancellationStopsTheWorkload()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            DeterministicBenchmark.Compute("nonce-controlado", 100_000, cancellation.Token));
+    }
 }

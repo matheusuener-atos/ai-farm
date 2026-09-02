@@ -12,8 +12,11 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
@@ -39,6 +42,22 @@ builder.Services.AddAuthentication(options =>
     .AddIdentityCookies();
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("farm-agent", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+});
 if (builder.Environment.IsDevelopment())
 {
     var developmentKeys = Path.Combine(builder.Environment.ContentRootPath, ".aifarm-keys");
@@ -152,7 +171,24 @@ else if (objectStorageValues.Any(x => !string.IsNullOrWhiteSpace(x)))
     throw new InvalidOperationException(
         "Neon Object Storage requires AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3 and AWS_REGION together.");
 }
-builder.Services.AddAIFarmPostgres(postgresConnection, objectStorage: objectStorage);
+var manifestSigningKey =
+    builder.Configuration["AIFarm:Farm:ManifestSigningKey"];
+FarmManifestSigningOptions farmManifestSigning;
+if (string.IsNullOrWhiteSpace(manifestSigningKey))
+{
+    if (!builder.Environment.IsDevelopment())
+        throw new InvalidOperationException(
+            "AIFarm:Farm:ManifestSigningKey is required outside Development.");
+    farmManifestSigning = FarmManifestSigningOptions.Development;
+}
+else
+{
+    farmManifestSigning = new FarmManifestSigningOptions(manifestSigningKey);
+}
+builder.Services.AddAIFarmPostgres(
+    postgresConnection,
+    objectStorage: objectStorage,
+    farmManifestSigning: farmManifestSigning);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
@@ -206,6 +242,7 @@ if (!app.Environment.IsDevelopment())
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
@@ -245,6 +282,165 @@ app.MapGet("/api/chat/conversations/{conversationId:guid}/export/{format}", asyn
         ? Results.NotFound()
         : Results.File(export.Content, export.ContentType, export.FileName);
 }).RequireAuthorization();
+
+app.MapGet("/api/farm/jobs/{jobId:guid}/evidence", async (
+    Guid jobId,
+    HttpResponse response,
+    IFarmLabService farmLab,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var evidence = await farmLab.DownloadEvidenceAsync(jobId, cancellationToken);
+        return evidence is null
+            ? Results.NotFound()
+            : Results.File(evidence.Content, "application/json; charset=utf-8", evidence.FileName);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
+app.MapPost("/api/farm/agents/enroll", async (
+    HttpRequest request,
+    HttpResponse response,
+    FarmAgentEnrollmentRequest agent,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var token = request.Headers["X-Enrollment-Token"].ToString();
+    try
+    {
+        var enrollment = await farmAgents.EnrollAsync(token, agent, cancellationToken);
+        return enrollment is null ? Results.Unauthorized() : Results.Ok(enrollment);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/heartbeat", async (
+    HttpRequest request,
+    HttpResponse response,
+    FarmAgentHeartbeatRequest heartbeat,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var authorization = request.Headers.Authorization.ToString();
+    var credential = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? authorization["Bearer ".Length..].Trim()
+        : string.Empty;
+    try
+    {
+        var result = await farmAgents.HeartbeatAsync(credential, heartbeat, cancellationToken);
+        return result is null ? Results.Unauthorized() : Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapGet("/api/farm/agents/trust", async (
+    HttpRequest request,
+    HttpResponse response,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var trust = await farmAgents.GetTrustAsync(ReadBearer(request), cancellationToken);
+    return trust is null ? Results.Unauthorized() : Results.Ok(trust);
+}).RequireRateLimiting("farm-agent");
+
+app.MapPost("/api/farm/agents/jobs/claim", async (
+    HttpRequest request,
+    HttpResponse response,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var offer = await farmAgents.ClaimJobAsync(ReadBearer(request), cancellationToken);
+    return offer is null ? Results.NoContent() : Results.Ok(offer);
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/jobs/{jobId:guid}/started", async (
+    Guid jobId,
+    HttpRequest request,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+    await farmAgents.MarkJobStartedAsync(ReadBearer(request), jobId, cancellationToken)
+        ? Results.NoContent()
+        : Results.NotFound()).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/jobs/{jobId:guid}/reject", async (
+    Guid jobId,
+    HttpRequest request,
+    FarmRemoteJobRejection rejection,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return await farmAgents.RejectJobAsync(
+            ReadBearer(request), jobId, rejection, cancellationToken)
+            ? Results.NoContent()
+            : Results.NotFound();
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+
+app.MapPost("/api/farm/agents/jobs/{jobId:guid}/result", async (
+    Guid jobId,
+    HttpRequest request,
+    HttpResponse response,
+    FarmRemoteJobResult result,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    try
+    {
+        var acknowledgement = await farmAgents.SubmitResultAsync(
+            ReadBearer(request),
+            jobId,
+            result,
+            cancellationToken);
+        return acknowledgement is null ? Results.NotFound() : Results.Ok(acknowledgement);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -289,6 +485,14 @@ static Task WriteHealthResponse(HttpContext context, HealthReport report, string
         correlationId = context.TraceIdentifier,
         checks,
     });
+}
+
+static string ReadBearer(HttpRequest request)
+{
+    var authorization = request.Headers.Authorization.ToString();
+    return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? authorization["Bearer ".Length..].Trim()
+        : string.Empty;
 }
 
 static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string contentRootPath)

@@ -290,7 +290,7 @@ code { color: var(--white); }
 .farm-node-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid #4b3600; }
 .farm-node-header > div { display: grid; gap: .35rem; }
 .farm-node-header strong { color: var(--amber-bright); overflow-wrap: anywhere; }
-.farm-metrics { display: grid; grid-template-columns: repeat(4, 1fr); }
+.farm-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .farm-metrics article { display: grid; gap: .55rem; padding: 1rem; border-right: 1px solid #4b3600; }
 .farm-metrics article:last-child { border-right: 0; }
 .farm-metrics span, .farm-runtime { color: var(--muted); font-size: .68rem; }
@@ -298,14 +298,31 @@ code { color: var(--white); }
 .farm-runtime { margin: 0; padding: .8rem 1rem; border-top: 1px solid #4b3600; overflow-wrap: anywhere; }
 .farm-controls { display: flex; flex-wrap: wrap; gap: .6rem; padding: 1rem; border-top: 1px solid #4b3600; }
 .farm-node-panel > .classification-note { margin: 0; padding: 0 1rem 1rem; }
+.farm-agent-panel { margin-bottom: 1rem; padding: 0; }
+.farm-agent-panel > p, .farm-agent-panel > button { margin: 1rem; }
+.farm-enrollment-secret { display: grid; gap: .65rem; margin-top: 1rem; padding: 1rem; border-top: 1px solid var(--purple); background: #120b1d; }
+.farm-enrollment-secret strong { color: var(--purple-soft); }
+.farm-enrollment-secret code { padding: .75rem; border: 1px solid #5d3994; color: var(--white); background: var(--black); overflow-wrap: anywhere; user-select: all; }
+.farm-enrollment-secret small { color: var(--amber-bright); }
 .farm-jobs { padding: 0; }
 .farm-jobs > .muted { padding: 1rem; }
 .farm-job { padding: 1rem; border-top: 1px solid #292927; }
 .farm-job header { display: flex; justify-content: space-between; gap: 1rem; }
+.farm-job-actions { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.farm-job-actions button { padding: .35rem .6rem; font-size: .68rem; }
+.farm-evidence-download { border: 1px solid var(--green); color: var(--green); padding: .35rem .6rem; font-size: .68rem; text-decoration: none; }
+.farm-evidence-download:hover { color: var(--black); background: var(--green); }
 .farm-job dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: 1rem 0; }
 .farm-job dl > div { min-width: 0; }
 .farm-job dt { color: var(--muted); font-size: .65rem; }
 .farm-job dd { margin: .3rem 0 0; overflow-wrap: anywhere; }
+.farm-manifest { margin: 0 0 1rem; border: 1px solid #4b3600; background: var(--amber-deep); }
+.farm-manifest summary { cursor: pointer; padding: .7rem; color: var(--amber-bright); }
+.farm-manifest dl { grid-template-columns: repeat(5, 1fr); margin: 0; padding: .8rem; border-top: 1px solid #4b3600; }
+.farm-evidence { margin: 0 0 1rem; border: 1px solid #235600; background: #061100; }
+.farm-evidence summary { cursor: pointer; padding: .7rem; color: var(--green); }
+.farm-evidence dl { grid-template-columns: repeat(5, 1fr); margin: 0; padding: .8rem; border-top: 1px solid #235600; }
+.farm-manifest-legacy { margin: 0 0 1rem; color: var(--muted); font-size: .68rem; }
 .farm-job-events { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
 .farm-job-events li { display: grid; grid-template-columns: 5rem 7rem 1fr; gap: .6rem; color: var(--muted); font-size: .68rem; }
 .farm-job-events strong { color: var(--white); }
@@ -314,6 +331,7 @@ code { color: var(--white); }
 @media (max-width: 760px) {
     .farm-node-header, .farm-job header { align-items: flex-start; flex-direction: column; }
     .farm-metrics, .farm-job dl { grid-template-columns: repeat(2, 1fr); }
+    .farm-manifest dl, .farm-evidence dl { grid-template-columns: repeat(2, 1fr); }
     .farm-metrics article:nth-child(2) { border-right: 0; }
     .farm-metrics article { border-bottom: 1px solid #4b3600; }
     .farm-job-events li { grid-template-columns: 4.5rem 1fr; }

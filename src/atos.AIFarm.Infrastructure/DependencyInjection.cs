@@ -78,10 +78,13 @@ public static class DependencyInjection
         this IServiceCollection services,
         string connectionString,
         AIFarmIdentity? identity = null,
-        NeonObjectStorageOptions? objectStorage = null)
+        NeonObjectStorageOptions? objectStorage = null,
+        FarmManifestSigningOptions? farmManifestSigning = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton(
+            farmManifestSigning ?? FarmManifestSigningOptions.Development);
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)
@@ -97,6 +100,7 @@ public static class DependencyInjection
         services.RemoveAll<IAIFarmReadinessProbe>();
         services.RemoveAll<IChatAttachmentService>();
         services.RemoveAll<IFarmLabService>();
+        services.RemoveAll<IFarmAgentService>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
@@ -104,6 +108,7 @@ public static class DependencyInjection
             PostgresReservationExpirationService>();
         services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();
         services.AddScoped<IFarmLabService, PostgresFarmLabService>();
+        services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();
         if (objectStorage is null)
         {
             services.AddSingleton<IChatAttachmentService, UnavailableChatAttachmentService>();
