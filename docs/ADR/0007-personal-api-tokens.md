@@ -21,3 +21,6 @@ Emissão, estado e revogação aparecem na categoria `Security` do Centro de Aud
 - revogação e expiração impedem novas autenticações imediatamente;
 - integrações operam com privilégio mínimo;
 - esta versão oferece somente leitura e não permite executar a Iris, alterar Wallet, reconhecer incidentes ou controlar Nodes.
+
+A extensão de execução da Iris foi decidida posteriormente no ADR 0008; os
+escopos de leitura e as garantias criptográficas deste ADR permanecem válidos.

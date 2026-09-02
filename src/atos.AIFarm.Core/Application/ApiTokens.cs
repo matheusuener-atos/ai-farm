@@ -8,7 +8,10 @@ public enum ApiTokenScope
     UsageRead = 2,
     IncidentsRead = 4,
     AuditRead = 8,
-    AllRead = ProfileRead | UsageRead | IncidentsRead | AuditRead
+    ConversationsRead = 16,
+    IrisExecute = 32,
+    AllRead = ProfileRead | UsageRead | IncidentsRead | AuditRead | ConversationsRead,
+    All = AllRead | IrisExecute
 }
 
 public sealed record ApiTokenCreateRequest(
@@ -22,7 +25,7 @@ public sealed record ApiTokenCreateRequest(
             .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (name.Length is < 3 or > 80)
             throw new ArgumentException("O nome do token deve ter entre 3 e 80 caracteres.", nameof(Name));
-        if (Scopes == ApiTokenScope.None || (Scopes & ~ApiTokenScope.AllRead) != 0)
+        if (Scopes == ApiTokenScope.None || (Scopes & ~ApiTokenScope.All) != 0)
             throw new ArgumentException("Selecione ao menos um escopo válido.", nameof(Scopes));
         var expiration = ExpiresAtUtc.ToUniversalTime();
         if (expiration <= now)

@@ -51,6 +51,8 @@ builder.Services.AddAuthorization(options =>
     AddApiPolicy(options, AIFarmApiTokenDefaults.UsageReadPolicy, ApiTokenScope.UsageRead);
     AddApiPolicy(options, AIFarmApiTokenDefaults.IncidentsReadPolicy, ApiTokenScope.IncidentsRead);
     AddApiPolicy(options, AIFarmApiTokenDefaults.AuditReadPolicy, ApiTokenScope.AuditRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.ConversationsReadPolicy, ApiTokenScope.ConversationsRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.IrisExecutePolicy, ApiTokenScope.IrisExecute);
 });
 builder.Services.AddHttpContextAccessor();
 if (builder.Configuration.GetValue<bool>("RENDER"))
@@ -85,6 +87,17 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("iris-execute", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst
@@ -461,6 +474,73 @@ personalApi.MapGet("/audit", async (
         return Results.BadRequest(new { error = exception.Message });
     }
 }).RequireAuthorization(AIFarmApiTokenDefaults.AuditReadPolicy);
+
+personalApi.MapGet("/conversations", async (
+    string? search,
+    int? page,
+    int? pageSize,
+    bool? archived,
+    IChatStore chat,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await chat.SearchConversationsAsync(
+            new ConversationQuery(search, page ?? 1, pageSize ?? 25, archived ?? false),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.ConversationsReadPolicy);
+
+personalApi.MapGet("/conversations/{conversationId:guid}", async (
+    Guid conversationId,
+    IChatStore chat,
+    CancellationToken cancellationToken) =>
+{
+    var conversation = await chat.GetConversationAsync(conversationId, cancellationToken);
+    return conversation is null ? Results.NotFound() : Results.Ok(conversation);
+}).RequireAuthorization(AIFarmApiTokenDefaults.ConversationsReadPolicy);
+
+personalApi.MapPost("/iris/responses", async (
+    IrisApiExecutionRequest execution,
+    HttpRequest request,
+    HttpResponse response,
+    IrisApiService iris,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        var result = await iris.ExecuteAsync(
+            execution,
+            tokenId,
+            request.Headers["X-Idempotency-Key"].ToString(),
+            cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (AiUsageBudgetExceededException exception)
+    {
+        return Results.Conflict(new { error = exception.Message, code = "usage_budget_exceeded" });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.IrisExecutePolicy)
+  .RequireRateLimiting("iris-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(32 * 1024));
 
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,

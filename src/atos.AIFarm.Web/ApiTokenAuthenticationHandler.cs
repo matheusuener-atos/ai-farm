@@ -15,6 +15,8 @@ public static class AIFarmApiTokenDefaults
     public const string UsageReadPolicy = "api:usage:read";
     public const string IncidentsReadPolicy = "api:incidents:read";
     public const string AuditReadPolicy = "api:audit:read";
+    public const string ConversationsReadPolicy = "api:conversations:read";
+    public const string IrisExecutePolicy = "api:iris:execute";
 }
 
 public sealed class ApiTokenAuthenticationHandler(
@@ -43,7 +45,8 @@ public sealed class ApiTokenAuthenticationHandler(
         };
         foreach (var scope in Enum.GetValues<ApiTokenScope>())
         {
-            if (scope is ApiTokenScope.None or ApiTokenScope.AllRead || !identity.Scopes.HasFlag(scope)) continue;
+            if (scope is ApiTokenScope.None or ApiTokenScope.AllRead or ApiTokenScope.All ||
+                !identity.Scopes.HasFlag(scope)) continue;
             claims.Add(new Claim(AIFarmApiTokenDefaults.ScopeClaim, scope.ToString()));
         }
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));

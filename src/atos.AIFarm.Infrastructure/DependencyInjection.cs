@@ -71,6 +71,7 @@ public static class DependencyInjection
         }
         services.AddSingleton<IAiProvider, ProtectedAiProvider>();
         services.AddScoped<ChatWorkflow>();
+        services.AddScoped<IrisApiService>();
         services.AddHostedService<ReservationExpirationWorker>();
         return services;
     }

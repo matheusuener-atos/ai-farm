@@ -11,13 +11,14 @@ public sealed class ApiTokenContractTests
     {
         var request = new ApiTokenCreateRequest(
             "  painel   interno  ",
-            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead,
+            ApiTokenScope.ProfileRead | ApiTokenScope.UsageRead | ApiTokenScope.IrisExecute,
             Now.AddDays(30));
 
         var normalized = request.Normalize(Now);
 
         Assert.Equal("painel interno", normalized.Name);
         Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.UsageRead));
+        Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.IrisExecute));
         Assert.Equal(TimeSpan.Zero, normalized.ExpiresAtUtc.Offset);
     }
 
@@ -30,5 +31,24 @@ public sealed class ApiTokenContractTests
             "token válido", ApiTokenScope.ProfileRead, Now).Normalize(Now));
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
             "token válido", ApiTokenScope.ProfileRead, Now.AddDays(367)).Normalize(Now));
+        Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
+            "token válido", (ApiTokenScope)64, Now.AddDays(1)).Normalize(Now));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("curta")]
+    public void IrisApiRejectsInvalidIdempotencyKeys(string key)
+    {
+        Assert.Throws<ArgumentException>(() => IrisApiService.NormalizeIdempotencyKey(key));
+    }
+
+    [Fact]
+    public void IrisApiRequestRejectsEmptyPromptAndInvalidContext()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new IrisApiExecutionRequest("  ").Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new IrisApiExecutionRequest("válido", MaximumContextMessages: 65).Validate());
     }
 }

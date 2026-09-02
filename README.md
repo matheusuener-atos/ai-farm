@@ -402,7 +402,7 @@ Implementado:
 - Centro de Auditoria unificado e isolado por conta para Ledger, Iris, Farm, economia e rewards, com filtros, validação de integridade e exportação JSON digestada.
 - Centro de Incidentes que prioriza falhas de integridade, Iris, Farm e Node, com reconhecimento persistente e idempotente sem alterar a evidência original.
 - orçamento preventivo da Iris por conta, com teto por tarefa, dia e mês UTC, retenções concorrentes idempotentes e painel em `/iris/budget`.
-- tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos de leitura, expiração, revogação, rate limit e endpoints REST `/api/v1`.
+- tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos mínimos, expiração, revogação, rate limit e endpoints REST `/api/v1` para consulta e execução idempotente.
 
 ### API pessoal da Iris
 
@@ -415,6 +415,9 @@ GET /api/v1/me
 GET /api/v1/usage
 GET /api/v1/incidents?openOnly=true
 GET /api/v1/audit?page=1&pageSize=25
+GET /api/v1/conversations?page=1&pageSize=25
+GET /api/v1/conversations/{conversationId}
+POST /api/v1/iris/responses
 ```
 
 Exemplo, sem registrar o token no repositório:
@@ -423,6 +426,34 @@ Exemplo, sem registrar o token no repositório:
 $headers = @{ Authorization = "Bearer $env:IRIS_API_TOKEN" }
 Invoke-RestMethod "http://localhost:5159/api/v1/usage" -Headers $headers
 ```
+
+Para executar a Iris, emita um token com `IrisExecute`. Esse escopo pode
+consumir AIC e, portanto, deve ser concedido somente a clientes autorizados. A
+rota exige uma chave de idempotência entre 8 e 120 caracteres, isolada por
+token. Repetir a mesma chave devolve o resultado anterior sem nova chamada ao
+Provider, nova cobrança ou nova conversa:
+
+```powershell
+$headers = @{
+  Authorization = "Bearer $env:IRIS_API_TOKEN"
+  "X-Idempotency-Key" = "meu-job-0001"
+}
+$body = @{
+  prompt = "Resuma os incidentes operacionais desta semana"
+  maximumContextMessages = 16
+  dataClassification = "Standard"
+} | ConvertTo-Json
+Invoke-RestMethod "http://localhost:5159/api/v1/iris/responses" `
+  -Method Post -ContentType "application/json" -Headers $headers -Body $body
+```
+
+Opcionalmente, envie `conversationId` para continuar uma conversa pertencente
+à mesma conta. A execução usa o mesmo preflight do chat, respeita o limite por
+tarefa, o orçamento diário/mensal e a classificação de dados, e reserva e
+liquida o custo na Wallet. `ConversationsRead` é um escopo separado e permite
+consultar o histórico sem conceder execução. As consultas têm limite de 120
+chamadas por minuto por token; a rota de execução usa o limite mais restritivo
+de 20 por minuto. Não registre tokens, prompts ou respostas em logs.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

@@ -55,6 +55,12 @@
         <label><input type="checkbox" @bind="_usageRead" /> USO <small>GET /api/v1/usage</small></label>
         <label><input type="checkbox" @bind="_incidentsRead" /> INCIDENTES <small>GET /api/v1/incidents</small></label>
         <label><input type="checkbox" @bind="_auditRead" /> AUDITORIA <small>GET /api/v1/audit</small></label>
+        <label><input type="checkbox" @bind="_conversationsRead" /> CONVERSAS <small>GET /api/v1/conversations</small></label>
+    </fieldset>
+    <fieldset class="token-scopes">
+        <legend>ESCOPOS DE EXECUÇÃO</legend>
+        <label><input type="checkbox" @bind="_irisExecute" /> EXECUTAR IRIS <small>POST /api/v1/iris/responses</small></label>
+        <p class="muted">ATENÇÃO // ESTE ESCOPO PODE CONSUMIR AIC DA WALLET E ESTÁ SUJEITO AOS ORÇAMENTOS DA CONTA.</p>
     </fieldset>
     <button type="button" @onclick="CreateAsync" disabled="@_working">
         @(_working ? "[ EMITINDO... ]" : "[ EMITIR TOKEN ]")
@@ -106,6 +112,8 @@
     private bool _usageRead = true;
     private bool _incidentsRead;
     private bool _auditRead;
+    private bool _conversationsRead;
+    private bool _irisExecute;
     private bool _loading = true;
     private bool _working;
     private string? _createdSecret;
@@ -152,7 +160,9 @@
         (_profileRead ? ApiTokenScope.ProfileRead : 0) |
         (_usageRead ? ApiTokenScope.UsageRead : 0) |
         (_incidentsRead ? ApiTokenScope.IncidentsRead : 0) |
-        (_auditRead ? ApiTokenScope.AuditRead : 0);
+        (_auditRead ? ApiTokenScope.AuditRead : 0) |
+        (_conversationsRead ? ApiTokenScope.ConversationsRead : 0) |
+        (_irisExecute ? ApiTokenScope.IrisExecute : 0);
 
     private async Task CopySecretAsync()
     {
@@ -163,6 +173,6 @@
     private static string Status(ApiTokenSnapshot token) => token.IsRevoked ? "REVOGADO" : token.IsExpired(DateTimeOffset.UtcNow) ? "EXPIRADO" : "ATIVO";
     private static string StatusClass(ApiTokenSnapshot token) => token.IsRevoked || token.IsExpired(DateTimeOffset.UtcNow) ? "muted" : "green";
     private static string FormatScopes(ApiTokenScope scopes) => string.Join(" // ", Enum.GetValues<ApiTokenScope>()
-        .Where(x => x is not ApiTokenScope.None and not ApiTokenScope.AllRead && scopes.HasFlag(x))
+        .Where(x => x is not ApiTokenScope.None and not ApiTokenScope.AllRead and not ApiTokenScope.All && scopes.HasFlag(x))
         .Select(x => x.ToString().ToUpperInvariant()));
 }
