@@ -116,7 +116,7 @@ public sealed class PostgresFarmEconomicsScenarioStore(
             content);
     }
 
-    private static FarmEconomicsScenarioSnapshot ToSnapshot(FarmEconomicsScenarioRecord record)
+    internal static FarmEconomicsScenarioSnapshot ToSnapshot(FarmEconomicsScenarioRecord record)
     {
         var scenario = JsonSerializer.Deserialize<FarmEconomicsScenario>(record.InputPayload, JsonOptions)
             ?? throw new InvalidOperationException("O cenário econômico persistido é inválido.");

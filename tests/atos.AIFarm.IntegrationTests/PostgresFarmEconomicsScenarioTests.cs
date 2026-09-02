@@ -42,6 +42,31 @@ public sealed class PostgresFarmEconomicsScenarioTests
             Assert.True(saved.Result.MaximumFundedReward > 0);
             Assert.Single(await storeA.ListAsync());
 
+            var proposalsA = providerA.GetRequiredService<IFarmRewardProposalStore>();
+            var proposal = await proposalsA.CreateAsync(job.Id, saved.Id);
+            Assert.Equal(job.Id, proposal.JobId);
+            Assert.Equal(saved.Id, proposal.ScenarioId);
+            Assert.Equal(1_000, proposal.ProcessingPointsMilli);
+            Assert.Equal(
+                decimal.Round(
+                    job.ComputeUnitsMilli * saved.Result.MaximumRewardPerThousandCu / 1_000_000m,
+                    6,
+                    MidpointRounding.AwayFromZero),
+                proposal.RecommendedRewardBrl);
+            Assert.Equal(evidence.Digest, proposal.SourceEvidenceDigest);
+            Assert.Equal(saved.Digest, proposal.ScenarioDigest);
+            Assert.Equal(FarmRewardProposalStatus.AwaitingPolicyAndFunding, proposal.Status);
+            Assert.True(proposal.IsIntegrityValid);
+            Assert.Equal(proposal.Id, (await proposalsA.CreateAsync(job.Id, saved.Id)).Id);
+            Assert.Single(await proposalsA.ListAsync());
+
+            var concurrentScenario = await storeA.SaveAsync("Cenário concorrente", Scenario(), job.Id);
+            var concurrentProposals = await Task.WhenAll(
+                Enumerable.Range(0, 4)
+                    .Select(_ => proposalsA.CreateAsync(job.Id, concurrentScenario.Id)));
+            Assert.Single(concurrentProposals.Select(x => x.Id).Distinct());
+            Assert.Equal(2, (await proposalsA.ListAsync()).Count);
+
             var walletA = providerA.GetRequiredService<IWalletService>();
             var operationId = Guid.NewGuid();
             var reservation = await walletA.ReservePromotionalAsync(
@@ -59,6 +84,10 @@ public sealed class PostgresFarmEconomicsScenarioTests
 
             var storeB = providerB.GetRequiredService<IFarmEconomicsScenarioStore>();
             Assert.Empty(await storeB.ListAsync());
+            var proposalsB = providerB.GetRequiredService<IFarmRewardProposalStore>();
+            Assert.Empty(await proposalsB.ListAsync());
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                proposalsB.CreateAsync(job.Id, saved.Id));
             var report = Assert.IsType<FarmEconomicsReportDownload>(
                 await storeA.DownloadReportAsync(saved.Id));
             Assert.Equal($"atos-farm-economics-{saved.Id:N}.json", report.FileName);
@@ -78,12 +107,15 @@ public sealed class PostgresFarmEconomicsScenarioTests
             var factory = providerA.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
             await using (var db = await factory.CreateDbContextAsync())
             {
+                var proposalRecord = await db.FarmRewardProposals.SingleAsync(x => x.Id == proposal.Id);
+                proposalRecord.Digest = new string('0', 64);
                 var record = await db.FarmEconomicsScenarios.SingleAsync(x => x.Id == saved.Id);
                 record.Digest = new string('0', 64);
                 await db.SaveChangesAsync();
             }
 
-            var tampered = Assert.Single(await storeA.ListAsync());
+            Assert.False((await proposalsA.ListAsync()).Single(x => x.Id == proposal.Id).IsIntegrityValid);
+            var tampered = (await storeA.ListAsync()).Single(x => x.Id == saved.Id);
             Assert.False(tampered.IsIntegrityValid);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 storeA.DownloadReportAsync(saved.Id));
@@ -114,6 +146,8 @@ public sealed class PostgresFarmEconomicsScenarioTests
         await using var provider = BuildProvider(connectionString, accountId);
         var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
+        db.FarmRewardProposals.RemoveRange(db.FarmRewardProposals.Where(x => x.AccountId == accountId));
+        await db.SaveChangesAsync();
         db.FarmEconomicsScenarios.RemoveRange(db.FarmEconomicsScenarios.Where(x => x.AccountId == accountId));
         await db.SaveChangesAsync();
         var jobIds = await db.FarmJobs.Where(x => x.AccountId == accountId).Select(x => x.Id).ToArrayAsync();

@@ -398,6 +398,7 @@ Implementado:
 - cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
 - política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
 - fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
+- propostas imutáveis de reward vinculadas a Job, evidência e cenário econômico, sem emissão automática de AIC.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento
@@ -419,6 +420,18 @@ SHA-256 para detectar alterações. Cada fotografia íntegra pode ser baixada co
 relatório JSON pela própria conta. O envelope inclui um segundo digest SHA-256
 do payload exportado; ele permite verificar integridade e não representa uma
 assinatura criptográfica.
+
+A rota autenticada `/farm/rewards` fecha a cadeia de proveniência antes de
+qualquer pagamento. Uma proposta só pode ser registrada quando o Job concluído
+possui evidência HMAC válida e a fotografia econômica íntegra foi criada a
+partir desse mesmo Job. Ela congela CP, valor recomendado em BRL, digests das
+duas fontes, versão, horário e digest próprio. A operação é idempotente por
+cenário e isolada por conta.
+
+Todas as propostas permanecem em `AwaitingPolicyAndFunding`. Elas não criam
+AIC, não movimentam o Ledger e não afirmam uma taxa CP → AIC. Liquidação só
+poderá ser adicionada depois que fonte do Reward Pool, orçamento, autoridade de
+aprovação e política de conversão forem definidos explicitamente.
 
 Os valores iniciais são apenas um exemplo editável. O simulador não define
 preço real, não converte CP em AIC e não registra Reward no Ledger. Uma futura
