@@ -1035,15 +1035,13 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AccountId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_farm_jobs_account_active")
-                        .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
-
                     b.HasIndex("AttemptId")
                         .IsUnique();
 
-                    b.HasIndex("NodeId");
+                    b.HasIndex("NodeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_farm_jobs_node_active")
+                        .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
 
                     b.HasIndex("AccountId", "CreatedAtUtc");
 
@@ -1159,10 +1157,16 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("UX_farm_nodes_account_embedded")
+                        .HasFilter("\"ConnectionKind\" = 'Embedded'");
 
                     b.HasIndex("AgentCredentialHash")
                         .IsUnique();
+
+                    b.HasIndex("AccountId", "Name")
+                        .IsUnique()
+                        .HasFilter("\"ConnectionKind\" = 'Agent'");
 
                     b.ToTable("farm_nodes", "aifarm", t =>
                         {

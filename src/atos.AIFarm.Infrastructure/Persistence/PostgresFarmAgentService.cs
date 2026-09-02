@@ -73,13 +73,19 @@ internal sealed class PostgresFarmAgentService(
         var enrollment = await db.FarmAgentEnrollments
             .SingleAsync(x => x.TokenHash == tokenHash, cancellationToken);
         var node = await db.FarmNodes
-            .SingleOrDefaultAsync(x => x.AccountId == enrollment.AccountId, cancellationToken);
+            .SingleOrDefaultAsync(
+                x => x.AccountId == enrollment.AccountId &&
+                     x.ConnectionKind == "Agent" &&
+                     x.Name == normalized.Name,
+                cancellationToken);
         if (node is null)
         {
             node = new FarmNodeRecord
             {
                 Id = Guid.NewGuid(),
                 AccountId = enrollment.AccountId,
+                Name = normalized.Name,
+                ConnectionKind = FarmNodeConnectionKind.Agent.ToString(),
                 CreatedAtUtc = now
             };
             db.FarmNodes.Add(node);

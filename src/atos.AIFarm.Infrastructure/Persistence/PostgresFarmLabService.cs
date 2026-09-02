@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -21,19 +22,16 @@ internal sealed class PostgresFarmLabService(
     {
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        var embedded = await EnsureEmbeddedNodeAsync(db, identity.AccountId, cancellationToken);
         var now = timeProvider.GetUtcNow();
         await FarmJobLifecycle.ExpireAsync(
             db,
             now,
             cancellationToken,
             accountId: identity.AccountId);
-        if (node.ConnectionKind == FarmNodeConnectionKind.Embedded.ToString())
-        {
-            node.LastSeenAtUtc = now;
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        return await BuildDashboardAsync(db, node, cancellationToken);
+        embedded.LastSeenAtUtc = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
     }
 
     public async Task<FarmDashboard> SetNodeStatusAsync(
@@ -45,12 +43,38 @@ internal sealed class PostgresFarmLabService(
 
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        await EnsureEmbeddedNodeAsync(db, identity.AccountId, cancellationToken);
+        var node = await GetPrimaryNodeAsync(db, identity.AccountId, cancellationToken);
+        return await SetNodeStatusCoreAsync(db, identity.AccountId, node, status, cancellationToken);
+    }
+
+    public async Task<FarmDashboard> SetNodeStatusAsync(
+        Guid nodeId,
+        FarmNodeStatus status,
+        CancellationToken cancellationToken = default)
+    {
+        if (status is not (FarmNodeStatus.Online or FarmNodeStatus.Paused))
+            throw new ArgumentOutOfRangeException(nameof(status));
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.Id == nodeId && x.AccountId == identity.AccountId, cancellationToken)
+            ?? throw new InvalidOperationException("Node não encontrado para esta conta.");
+        return await SetNodeStatusCoreAsync(db, identity.AccountId, node, status, cancellationToken);
+    }
+
+    private async Task<FarmDashboard> SetNodeStatusCoreAsync(
+        AIFarmDbContext db,
+        Guid accountId,
+        FarmNodeRecord node,
+        FarmNodeStatus status,
+        CancellationToken cancellationToken)
+    {
         node.Status = status.ToString();
         if (node.ConnectionKind == FarmNodeConnectionKind.Embedded.ToString())
             node.LastSeenAtUtc = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
-        return await BuildDashboardAsync(db, node, cancellationToken);
+        return await BuildDashboardAsync(db, accountId, cancellationToken);
     }
 
     public Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default) =>
@@ -111,6 +135,10 @@ internal sealed class PostgresFarmLabService(
         var accountId = explicitAccountId ??
             (await identityAccessor.GetRequiredIdentityAsync(cancellationToken)).AccountId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await using var schedulingTransaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({SchedulingLockKey(accountId)})",
+            cancellationToken);
         if (apiTokenId is Guid tokenId && apiIdempotencyKey is not null)
         {
             var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
@@ -137,47 +165,14 @@ internal sealed class PostgresFarmLabService(
             if (replay is not null)
                 return await LoadJobAsync(db, replay.Id, cancellationToken);
         }
-        var node = await EnsureNodeAsync(db, accountId, cancellationToken);
+        await EnsureEmbeddedNodeAsync(db, accountId, cancellationToken);
         await FarmJobLifecycle.ExpireAsync(
             db,
             timeProvider.GetUtcNow(),
             cancellationToken,
             accountId: accountId);
+        var node = await SelectExecutionNodeAsync(db, accountId, cancellationToken);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
-        if (!Enum.TryParse<FarmNodeStatus>(node.Status, out var nodeStatus) ||
-            nodeStatus != FarmNodeStatus.Online)
-            throw new InvalidOperationException("Retome o node antes de executar um workload.");
-        if (isAgent && timeProvider.GetUtcNow() - node.LastSeenAtUtc > AgentHeartbeatTolerance)
-            throw new InvalidOperationException("O Compute Agent está offline; aguarde um heartbeat válido.");
-        if (isAgent && !node.AgentAcceptJobs)
-            throw new InvalidOperationException("A política local do Compute Agent está pausada.");
-        if (isAgent && node.AgentVersion != FarmAgentProtocol.CurrentAgentVersion)
-            throw new InvalidOperationException(
-                $"Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion} antes de despachar.");
-
-        if (await db.FarmJobs.AnyAsync(
-                x => x.AccountId == accountId &&
-                     FarmJobLifecycle.ActiveStatuses.Contains(x.Status),
-                cancellationToken))
-        {
-            if (apiTokenId is Guid activeTokenId && apiIdempotencyKey is not null)
-            {
-                var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                    x => x.AccountId == accountId &&
-                         x.ApiTokenId == activeTokenId &&
-                         x.ApiIdempotencyKey == apiIdempotencyKey,
-                    cancellationToken);
-                if (replay is not null)
-                {
-                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version ||
-                        replay.InputDigest != useful?.InputDigest)
-                        throw new InvalidOperationException(
-                            "A chave de idempotência já foi usada com outro workload.");
-                    return await LoadJobAsync(db, replay.Id, cancellationToken);
-                }
-            }
-            throw new InvalidOperationException("Já existe um Job do laboratório em execução.");
-        }
 
         var now = timeProvider.GetUtcNow();
         var jobId = Guid.NewGuid();
@@ -290,6 +285,8 @@ internal sealed class PostgresFarmLabService(
                 exception);
         }
 
+        await schedulingTransaction.CommitAsync(cancellationToken);
+
         if (isAgent)
             return await LoadJobAsync(db, job.Id, cancellationToken);
 
@@ -400,9 +397,6 @@ internal sealed class PostgresFarmLabService(
     {
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
-        if (node.ConnectionKind != FarmNodeConnectionKind.Agent.ToString())
-            throw new InvalidOperationException("Cancelamento remoto está disponível apenas para Jobs do Compute Agent.");
         await FarmJobLifecycle.ExpireAsync(
             db,
             timeProvider.GetUtcNow(),
@@ -414,10 +408,13 @@ internal sealed class PostgresFarmLabService(
                 x => x.Id == jobId && x.AccountId == identity.AccountId,
                 cancellationToken)
             ?? throw new InvalidOperationException("Job não encontrado para esta conta.");
+        var node = await db.FarmNodes.SingleAsync(x => x.Id == job.NodeId, cancellationToken);
+        if (node.ConnectionKind != FarmNodeConnectionKind.Agent.ToString())
+            throw new InvalidOperationException("Cancelamento remoto está disponível apenas para Jobs do Compute Agent.");
         if (job.Status == FarmJobStatus.Cancelled.ToString())
-            return await BuildDashboardAsync(db, node, cancellationToken);
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
         if (job.CancellationRequestedAtUtc is not null)
-            return await BuildDashboardAsync(db, node, cancellationToken);
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
         if (job.Status is not ("Offered" or "Accepted" or "Running"))
             throw new InvalidOperationException("Este Job não pode mais ser cancelado.");
 
@@ -430,7 +427,7 @@ internal sealed class PostgresFarmLabService(
                 "Oferta cancelada pelo usuário antes do aceite do Agent; nenhum CP ou AIC emitido.",
                 now,
                 cancellationToken))
-            return await BuildDashboardAsync(db, node, cancellationToken);
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
 
         var requested = await db.FarmJobs
             .Where(x => x.Id == job.Id &&
@@ -456,7 +453,7 @@ internal sealed class PostgresFarmLabService(
             OccurredAtUtc = now
         });
         await db.SaveChangesAsync(cancellationToken);
-        return await BuildDashboardAsync(db, node, cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
     }
 
     public async Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
@@ -486,12 +483,13 @@ internal sealed class PostgresFarmLabService(
             content);
     }
 
-    private async Task<FarmNodeRecord> EnsureNodeAsync(
+    private async Task<FarmNodeRecord> EnsureEmbeddedNodeAsync(
         AIFarmDbContext db,
         Guid accountId,
         CancellationToken cancellationToken)
     {
-        var node = await db.FarmNodes.SingleOrDefaultAsync(x => x.AccountId == accountId, cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.AccountId == accountId && x.ConnectionKind == "Embedded", cancellationToken);
         if (node is not null) return node;
 
         node = new FarmNodeRecord
@@ -513,13 +511,69 @@ internal sealed class PostgresFarmLabService(
         return node;
     }
 
-    private async Task<FarmDashboard> BuildDashboardAsync(
+    private async Task<FarmNodeRecord> GetPrimaryNodeAsync(
         AIFarmDbContext db,
-        FarmNodeRecord node,
+        Guid accountId,
+        CancellationToken cancellationToken) =>
+        await db.FarmNodes
+            .Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.ConnectionKind == "Agent")
+            .ThenBy(x => x.CreatedAtUtc)
+            .FirstAsync(cancellationToken);
+
+    private async Task<FarmNodeRecord> SelectExecutionNodeAsync(
+        AIFarmDbContext db,
+        Guid accountId,
         CancellationToken cancellationToken)
     {
+        var now = timeProvider.GetUtcNow();
+        var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
+            .ToArrayAsync(cancellationToken);
+        var activeNodeIds = await db.FarmJobs
+            .Where(x => x.AccountId == accountId && FarmJobLifecycle.ActiveStatuses.Contains(x.Status))
+            .Select(x => x.NodeId).ToArrayAsync(cancellationToken);
+        var lastAssignments = await db.FarmJobs.Where(x => x.AccountId == accountId)
+            .GroupBy(x => x.NodeId)
+            .Select(group => new { NodeId = group.Key, LastAtUtc = group.Max(x => x.CreatedAtUtc) })
+            .ToDictionaryAsync(x => x.NodeId, x => x.LastAtUtc, cancellationToken);
+        var agents = nodes.Where(x => x.ConnectionKind == "Agent").ToArray();
+        var compatibleAgents = agents
+            .Where(x => x.AgentVersion == FarmAgentProtocol.CurrentAgentVersion)
+            .ToArray();
+        if (agents.Length > 0 && compatibleAgents.Length == 0)
+            throw new InvalidOperationException(
+                $"Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion} antes de despachar.");
+        var selected = compatibleAgents
+            .Where(x => x.Status == FarmNodeStatus.Online.ToString() &&
+                        x.AgentAcceptJobs &&
+                        now - x.LastSeenAtUtc <= AgentHeartbeatTolerance &&
+                        !activeNodeIds.Contains(x.Id))
+            .OrderBy(x => lastAssignments.GetValueOrDefault(x.Id, DateTimeOffset.MinValue))
+            .ThenBy(x => x.Id)
+            .FirstOrDefault();
+        if (selected is not null) return selected;
+        if (agents.Length > 0)
+            throw new InvalidOperationException(
+                "Nenhum Compute Agent do pool está online, compatível e disponível.");
+        return nodes.SingleOrDefault(x =>
+                   x.ConnectionKind == "Embedded" &&
+                   x.Status == FarmNodeStatus.Online.ToString() &&
+                   !activeNodeIds.Contains(x.Id))
+            ?? throw new InvalidOperationException("Nenhum Node do pool está disponível.");
+    }
+
+    private async Task<FarmDashboard> BuildDashboardAsync(
+        AIFarmDbContext db,
+        Guid accountId,
+        CancellationToken cancellationToken)
+    {
+        var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.ConnectionKind == "Agent")
+            .ThenBy(x => x.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+        var node = nodes[0];
         var jobs = await db.FarmJobs
-            .Where(x => x.AccountId == node.AccountId)
+            .Where(x => x.AccountId == accountId)
             .OrderByDescending(x => x.CreatedAtUtc)
             .Take(10)
             .ToArrayAsync(cancellationToken);
@@ -528,8 +582,10 @@ internal sealed class PostgresFarmLabService(
             .Where(x => ids.Contains(x.JobId))
             .OrderBy(x => x.Sequence)
             .ToArrayAsync(cancellationToken);
-        return new FarmDashboard(ToSnapshot(node), jobs.Select(
-            x => ToSnapshot(x, events.Where(e => e.JobId == x.Id))).ToArray());
+        return new FarmDashboard(
+            ToSnapshot(node),
+            jobs.Select(x => ToSnapshot(x, events.Where(e => e.JobId == x.Id))).ToArray(),
+            nodes.Select(ToSnapshot).ToArray());
     }
 
     private async Task<FarmJobSnapshot> LoadJobAsync(
@@ -581,6 +637,9 @@ internal sealed class PostgresFarmLabService(
         try { return job.InputDigest == FarmDeterministicWorkloads.ComputeInputDigest(job.InputPayload); }
         catch (ArgumentException) { return false; }
     }
+
+    private static long SchedulingLockKey(Guid accountId) =>
+        BinaryPrimitives.ReadInt64LittleEndian(SHA256.HashData(accountId.ToByteArray()));
 
     private bool TryReadVerifiedManifest(
         FarmJobRecord job,

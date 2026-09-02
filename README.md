@@ -341,6 +341,20 @@ artefatos maiores no Object Storage e workloads de inferência são fases
 posteriores. A conclusão válida gera 2,000 CP técnicos e continua sem converter
 CP em AIC automaticamente.
 
+O **Compute Pool v1** remove o limite histórico de um único Agent por conta.
+Cada nome de máquina representa um Node independente; vincular novamente o
+mesmo nome rotaciona somente sua credencial. Quando há Agents cadastrados, o
+scheduler escolhe apenas entre Agents online, compatíveis, com heartbeat atual,
+política local ativa e sem Job em andamento. Entre os elegíveis, ganha o menos
+recentemente utilizado. Sem Agents cadastrados, o runtime embedded continua
+disponível para desenvolvimento.
+
+A alocação usa um advisory lock transacional por conta no PostgreSQL. Assim,
+duas instâncias web podem receber submissões simultâneas sem reservar o mesmo
+Node. O índice parcial garante no máximo um Job ativo por Node, enquanto Nodes
+distintos processam Jobs em paralelo. O painel `/farm` lista todo o pool e a API
+expõe `GET /api/v1/farm/nodes`, além de pausa e retomada por Node.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto

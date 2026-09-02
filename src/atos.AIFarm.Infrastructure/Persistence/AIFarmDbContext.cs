@@ -262,7 +262,14 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "(\"VerificationLevel\" = 'Verified' AND \"VerifiedProfileHash\" IS NOT NULL AND length(\"VerifiedProfileHash\") = 64 AND \"ProfileVerifiedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.HasIndex(x => x.AccountId);
+            entity.HasIndex(x => new { x.AccountId, x.Name })
+                .IsUnique()
+                .HasFilter("\"ConnectionKind\" = 'Agent'");
+            entity.HasIndex(x => x.AccountId)
+                .HasDatabaseName("UX_farm_nodes_account_embedded")
+                .IsUnique()
+                .HasFilter("\"ConnectionKind\" = 'Embedded'");
             entity.HasIndex(x => x.AgentCredentialHash).IsUnique();
             entity.Property(x => x.Name).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(24);
@@ -332,11 +339,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
             entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
-            entity.HasIndex(x => x.AccountId)
-                .HasDatabaseName("UX_farm_jobs_account_active")
+            entity.HasIndex(x => x.NodeId)
+                .HasDatabaseName("UX_farm_jobs_node_active")
                 .IsUnique()
                 .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
-            entity.HasIndex(x => x.NodeId);
             entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);
             entity.Property(x => x.ApiIdempotencyKey).HasMaxLength(120);

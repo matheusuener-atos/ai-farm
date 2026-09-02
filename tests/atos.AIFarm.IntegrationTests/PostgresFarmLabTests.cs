@@ -313,6 +313,71 @@ public sealed class PostgresFarmLabTests
 
     [Fact]
     [Trait("Category", "Postgres")]
+    public async Task ComputePoolDispatchesConcurrentJobsToDistinctAgents()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos compute pool test");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+            await lab.GetDashboardAsync();
+
+            async Task<FarmAgentEnrollmentResult> EnrollAsync(string name)
+            {
+                var enrollment = await agents.CreateEnrollmentAsync();
+                return Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
+                    enrollment.Token,
+                    new FarmAgentEnrollmentRequest(
+                        name, ".NET 10 // WINDOWS", 8, 16L * 1024 * 1024 * 1024,
+                        FarmAgentProtocol.CurrentAgentVersion)));
+            }
+
+            var first = await EnrollAsync("POOL-NODE-A");
+            var second = await EnrollAsync("POOL-NODE-B");
+            var heartbeat = new FarmAgentHeartbeatRequest(
+                ".NET 10 // WINDOWS", 8, 16L * 1024 * 1024 * 1024,
+                FarmAgentProtocol.CurrentAgentVersion);
+            Assert.NotNull(await agents.HeartbeatAsync(first.Credential, heartbeat));
+            Assert.NotNull(await agents.HeartbeatAsync(second.Credential, heartbeat));
+
+            var offers = await Task.WhenAll(
+                lab.RunBenchmarkAsync(),
+                lab.RunWorkloadAsync("merkle-root-sha256-v1"));
+            Assert.Equal(2, offers.Select(x => x.NodeId).Distinct().Count());
+            Assert.All(offers, offer => Assert.Equal(FarmJobStatus.Offered, offer.Status));
+
+            var firstClaim = Assert.IsType<FarmRemoteJobOffer>(await agents.ClaimJobAsync(first.Credential));
+            var secondClaim = Assert.IsType<FarmRemoteJobOffer>(await agents.ClaimJobAsync(second.Credential));
+            foreach (var pair in new[] { (first.Credential, Claim: firstClaim), (second.Credential, Claim: secondClaim) })
+            {
+                var trust = Assert.IsType<FarmAgentTrust>(await agents.GetTrustAsync(pair.Credential));
+                Assert.True(FarmManifestSecurity.TryVerify(
+                    pair.Claim.ManifestPayload, pair.Claim.ManifestDigest, pair.Claim.ManifestSignature,
+                    new FarmManifestSigningOptions(trust.VerificationKey), out var manifest));
+                Assert.NotNull(manifest);
+                Assert.True(await agents.MarkJobStartedAsync(pair.Credential, pair.Claim.JobId));
+                var digest = FarmDeterministicWorkloads.Compute(
+                    manifest.Workload, manifest.Nonce, manifest.Iterations);
+                var acknowledgement = await agents.SubmitResultAsync(
+                    pair.Credential, pair.Claim.JobId, RemoteResult(digest, 10));
+                Assert.True(acknowledgement?.Verified);
+            }
+
+            var dashboard = await lab.GetDashboardAsync();
+            Assert.Equal(3, dashboard.Nodes.Count);
+            Assert.Equal(2, dashboard.Nodes.Count(x => x.ConnectionKind == FarmNodeConnectionKind.Agent));
+            Assert.Equal(2, dashboard.RecentJobs.Count(x => x.Status == FarmJobStatus.Completed));
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
     public async Task AgentEnrollmentIsOneTimeAndHeartbeatExpiresOffline()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");

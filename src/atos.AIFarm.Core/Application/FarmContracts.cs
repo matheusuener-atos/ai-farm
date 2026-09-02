@@ -199,8 +199,15 @@ public sealed record FarmJobSnapshot(
 
 public sealed record FarmDashboard(
     FarmNodeSnapshot Node,
-    IReadOnlyList<FarmJobSnapshot> RecentJobs)
+    IReadOnlyList<FarmJobSnapshot> RecentJobs,
+    IReadOnlyList<FarmNodeSnapshot>? PoolNodes = null)
 {
+    public IReadOnlyList<FarmNodeSnapshot> Nodes => PoolNodes ?? [Node];
+    public int OnlineNodeCount => Nodes.Count(x => x.Status == FarmNodeStatus.Online);
+    public int AvailableNodeCount =>
+        (Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent)
+            ? Nodes.Where(x => x.ConnectionKind == FarmNodeConnectionKind.Agent)
+            : Nodes).Count(x => x.AcceptJobs);
     public long VerifiedComputeUnitsMilli =>
         RecentJobs.Where(x => x.Status == FarmJobStatus.Completed)
             .Sum(x => x.ComputeUnitsMilli);
@@ -210,6 +217,10 @@ public interface IFarmLabService
 {
     Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default);
     Task<FarmDashboard> SetNodeStatusAsync(FarmNodeStatus status, CancellationToken cancellationToken = default);
+    Task<FarmDashboard> SetNodeStatusAsync(
+        Guid nodeId,
+        FarmNodeStatus status,
+        CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,

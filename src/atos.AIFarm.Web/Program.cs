@@ -531,6 +531,34 @@ personalApi.MapGet("/farm/workloads", () => Results.Ok(new
     workloads = FarmWorkloadCatalog.Definitions
 })).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
+personalApi.MapGet("/farm/nodes", async (
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+    Results.Ok((await farm.GetDashboardAsync(cancellationToken)).Nodes))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/pause", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeStatusAsync(nodeId, FarmNodeStatus.Paused, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/resume", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeStatusAsync(nodeId, FarmNodeStatus.Online, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
 personalApi.MapGet("/farm/schedules", async (
     IFarmScheduleService schedules,
     CancellationToken cancellationToken) =>

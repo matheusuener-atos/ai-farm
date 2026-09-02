@@ -59,7 +59,10 @@ public sealed class PostgresFarmAnalyticsQuery(
         }).ToArray();
 
         var nodeRecord = await db.FarmNodes.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.AccountId == identity.AccountId, cancellationToken);
+            .Where(x => x.AccountId == identity.AccountId)
+            .OrderByDescending(x => x.ConnectionKind == "Agent")
+            .ThenBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
         FarmAnalyticsNode? node = null;
         if (nodeRecord is not null)
         {
