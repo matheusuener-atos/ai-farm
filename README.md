@@ -404,6 +404,19 @@ integração real está implementada no Marco 2 abaixo; sua prova com orçamento
 controlado depende da configuração de uma chave. Políticas comerciais e a Farm
 distribuída continuam fora deste marco.
 
+## Fase 4 — Simulador econômico
+
+A rota autenticada `/farm/economy` inicia a prova econômica sem alterar a
+Wallet. O cenário combina capacidade em CU/h, utilização, taxa de sucesso,
+energia, valor bruto do workload, verificação, plataforma, impostos, margem e
+reserva de risco. O resultado mostra o reward máximo financiável em BRL e o
+eventual déficit.
+
+Os valores iniciais são apenas um exemplo editável. O simulador não define
+preço real, não converte CU em AIC e não registra Reward no Ledger. Uma futura
+política comercial somente poderá consumir seus resultados depois que fonte de
+receita, regra CU → AIC e orçamento forem decididos explicitamente.
+
 ## Marco 2 — Provider OpenAI
 
 A primeira integração real usa a Responses API server-side, com o snapshot

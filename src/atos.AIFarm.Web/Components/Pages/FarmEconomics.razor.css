@@ -1,0 +1,39 @@
+.economics-warning {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--amber);
+    background: var(--amber-deep);
+}
+
+.economics-warning strong { color: var(--amber-bright); }
+.economics-warning span { color: var(--muted); font-size: .72rem; text-align: right; }
+.economics-inputs { margin-bottom: 1rem; }
+.economics-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #343432; }
+.economics-form label { display: grid; gap: .55rem; padding: 1rem; color: var(--muted); background: var(--black); font-size: .68rem; }
+.economics-form input { width: 100%; min-width: 0; border: 1px solid #494946; padding: .7rem; color: var(--white); background: #090909; font: inherit; }
+.economics-form input:focus { outline: 1px solid var(--amber); }
+.economics-actions { display: flex; flex-wrap: wrap; gap: .6rem; padding: 1rem; border-top: 1px solid #494946; }
+.economics-result { margin-bottom: 1rem; border: 1px solid; }
+.economics-result.viable { border-color: var(--green); background: #061100; }
+.economics-result.unviable { border-color: #ff6767; background: #130505; }
+.economics-result > header { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem; border-bottom: 1px solid #343432; }
+.economics-result > header > div { display: grid; gap: .4rem; }
+.economics-result > header span { color: var(--muted); font-size: .68rem; }
+.economics-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.economics-summary article { display: grid; gap: .55rem; padding: 1rem; border-right: 1px solid #343432; border-bottom: 1px solid #343432; }
+.economics-summary span, .economics-breakdown dt { color: var(--muted); font-size: .65rem; }
+.economics-summary strong { overflow-wrap: anywhere; }
+.economics-breakdown dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #343432; }
+.economics-breakdown dl > div { display: grid; gap: .45rem; padding: 1rem; background: var(--black); }
+.economics-breakdown dd { margin: 0; overflow-wrap: anywhere; }
+.economics-breakdown > p { margin: 0; padding: 1rem; color: var(--amber-bright); font-size: .68rem; line-height: 1.6; }
+
+@media (max-width: 760px) {
+    .economics-warning, .economics-result > header { align-items: flex-start; flex-direction: column; }
+    .economics-warning span { text-align: left; }
+    .economics-form, .economics-summary { grid-template-columns: 1fr; }
+    .economics-breakdown dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
