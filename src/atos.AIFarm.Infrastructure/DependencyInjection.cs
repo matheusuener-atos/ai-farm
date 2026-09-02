@@ -112,6 +112,8 @@ public static class DependencyInjection
         services.RemoveAll<IFarmJobHistoryService>();
         services.RemoveAll<IFarmScheduleService>();
         services.RemoveAll<IFarmScheduleDispatcher>();
+        services.RemoveAll<IFarmDemandQueueService>();
+        services.RemoveAll<IFarmDemandDispatcher>();
         services.RemoveAll<IAuditTrail>();
         services.RemoveAll<IOperationalIncidentService>();
         services.RemoveAll<IAiUsageBudgetService>();
@@ -139,6 +141,12 @@ public static class DependencyInjection
         services.AddScoped<IFarmScheduleDispatcher>(provider =>
             provider.GetRequiredService<PostgresFarmScheduleService>());
         services.AddHostedService<FarmScheduleWorker>();
+        services.AddScoped<PostgresFarmDemandQueueService>();
+        services.AddScoped<IFarmDemandQueueService>(provider =>
+            provider.GetRequiredService<PostgresFarmDemandQueueService>());
+        services.AddScoped<IFarmDemandDispatcher>(provider =>
+            provider.GetRequiredService<PostgresFarmDemandQueueService>());
+        services.AddHostedService<FarmDemandWorker>();
         services.AddScoped<IAuditTrail, PostgresAuditTrail>();
         services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
         services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();

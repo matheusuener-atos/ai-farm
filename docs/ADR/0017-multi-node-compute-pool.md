@@ -33,4 +33,5 @@ permitem pausar ou retomar cada Node isoladamente.
 - uma máquina continua executando no máximo um Job por vez;
 - múltiplas instâncias do servidor coordenam a seleção pelo PostgreSQL;
 - Agents indisponíveis não provocam execução inesperada no host web;
-- esta fase ainda não inclui prioridades, GPUs ou filas com reserva de recurso.
+- prioridades e retenção foram delegadas à Demand Queue v1; GPUs e reserva
+  explícita de recursos continuam fora desta fase.

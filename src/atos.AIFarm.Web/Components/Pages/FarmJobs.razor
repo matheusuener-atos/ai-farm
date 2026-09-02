@@ -44,6 +44,7 @@
                 <option value="Interactive">PAINEL</option>
                 <option value="PersonalApi">API PESSOAL</option>
                 <option value="Scheduled">AGENDAMENTO</option>
+                <option value="Demand">DEMANDA</option>
             </select>
         </label>
         <label>DE // UTC<input type="date" @bind="_fromDate" /></label>
@@ -226,6 +227,7 @@ else
     {
         FarmJobOrigin.PersonalApi => "API",
         FarmJobOrigin.Scheduled => "AGENDA",
+        FarmJobOrigin.Demand => "DEMANDA",
         _ => "PAINEL"
     };
     private static string StatusLabel(FarmJobStatus status) => status.ToString().ToUpperInvariant();

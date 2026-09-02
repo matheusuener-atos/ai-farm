@@ -353,7 +353,21 @@ A alocação usa um advisory lock transacional por conta no PostgreSQL. Assim,
 duas instâncias web podem receber submissões simultâneas sem reservar o mesmo
 Node. O índice parcial garante no máximo um Job ativo por Node, enquanto Nodes
 distintos processam Jobs em paralelo. O painel `/farm` lista todo o pool e a API
-expõe `GET /api/v1/farm/nodes`, além de pausa e retomada por Node.
+permite operar cada Node separadamente.
+
+A **Demand Queue v1** separa aceitação de execução. `/farm/demands` persiste a
+entrada antes de procurar capacidade, aceita prioridades baixa, normal e alta,
+validade entre cinco minutos e sete dias, cancelamento pré-despacho e atualização
+automática do estado. Um worker tenta despachar primeiro as demandas prioritárias
+e mais antigas, aplica backoff quando todos os Nodes compatíveis estão ocupados e
+expira itens que não obtiveram capacidade no prazo.
+
+O claim é atômico no PostgreSQL e suporta múltiplas instâncias web. O ID da
+demanda também é gravado com unicidade no Job, tornando a retomada idempotente
+mesmo se o processo cair entre a criação do Job e a confirmação da fila. A API
+pessoal oferece `GET/POST /api/v1/farm/demands` e
+`POST /api/v1/farm/demands/{id}/cancel`; submissões exigem
+`X-Idempotency-Key`. O Centro de Jobs identifica `DEMANDA` como origem própria.
 
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256

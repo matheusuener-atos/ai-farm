@@ -557,6 +557,47 @@ personalApi.MapPost("/farm/nodes/{nodeId:guid}/resume", async (
     catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+    .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/demands", async (
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await demands.GetDashboardAsync(cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/demands", async (
+    FarmDemandRequest submission,
+    HttpRequest request,
+    HttpResponse response,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        return Results.Accepted(value: await demands.SubmitAsync(
+            submission, tokenId, request.Headers["X-Idempotency-Key"].ToString(), cancellationToken));
+    }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(48 * 1024));
+
+personalApi.MapPost("/farm/demands/{demandId:guid}/cancel", async (
+    Guid demandId,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await demands.CancelAsync(demandId, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
   .RequireRateLimiting("farm-execute");
 
 personalApi.MapGet("/farm/schedules", async (

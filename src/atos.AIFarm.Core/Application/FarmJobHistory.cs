@@ -4,7 +4,8 @@ public enum FarmJobOrigin
 {
     Interactive,
     PersonalApi,
-    Scheduled
+    Scheduled,
+    Demand
 }
 
 public sealed record FarmJobHistoryQuery(

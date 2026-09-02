@@ -6,10 +6,17 @@
 }
 .useful-form textarea { resize: vertical; line-height: 1.5; }
 .useful-form button { justify-self: start; }
+.form-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; }
+.queue-metrics { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); margin-bottom: 1rem; }
+.queue-metrics div { display: grid; gap: .35rem; padding: 1rem; border-right: 1px solid var(--border); }
+.queue-metrics div:last-child { border-right: 0; }
+.queue-metrics small, .empty { color: var(--muted); }
+.queue-metrics strong { font-size: 1.4rem; }
 .useful-job {
     display: grid; grid-template-columns: minmax(15rem, 2fr) minmax(10rem, 1fr) auto auto;
     gap: 1rem; align-items: center; padding: 1rem; border-top: 1px solid var(--border);
 }
 .useful-job div { display: grid; gap: .3rem; }
 .useful-job small { color: var(--muted); }
-@media (max-width: 800px) { .useful-job { grid-template-columns: 1fr; } }
+.queue-actions { min-width: 12rem; }
+@media (max-width: 800px) { .useful-job, .form-row, .queue-metrics { grid-template-columns: 1fr; } .queue-metrics div { border-right: 0; border-bottom: 1px solid var(--border); } }

@@ -83,14 +83,14 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
         FarmUsefulJobSubmission submission,
@@ -99,7 +99,7 @@ internal sealed class PostgresFarmLabService(
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, null, tokenId, idempotencyKey,
-            null, null, submission, cancellationToken);
+            null, null, null, submission, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
         Guid accountId,
@@ -115,7 +115,17 @@ internal sealed class PostgresFarmLabService(
             scheduleId,
             scheduledForUtc.ToUniversalTime(),
             null,
+            null,
             cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunQueuedDemandAsync(
+        Guid accountId,
+        Guid demandId,
+        FarmUsefulJobSubmission submission,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            submission.Definition.Id, accountId, null, null, null, null,
+            demandId, submission, cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
         string workloadId,
@@ -124,6 +134,7 @@ internal sealed class PostgresFarmLabService(
         string? apiIdempotencyKey,
         Guid? scheduleId,
         DateTimeOffset? scheduledForUtc,
+        Guid? demandId,
         FarmUsefulJobSubmission? useful,
         CancellationToken cancellationToken)
     {
@@ -161,6 +172,14 @@ internal sealed class PostgresFarmLabService(
                 x => x.AccountId == accountId &&
                      x.ScheduleId == recurringScheduleId &&
                      x.ScheduledForUtc == occurrence,
+                cancellationToken);
+            if (replay is not null)
+                return await LoadJobAsync(db, replay.Id, cancellationToken);
+        }
+        if (demandId is Guid queuedDemandId)
+        {
+            var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                x => x.AccountId == accountId && x.DemandId == queuedDemandId,
                 cancellationToken);
             if (replay is not null)
                 return await LoadJobAsync(db, replay.Id, cancellationToken);
@@ -217,6 +236,7 @@ internal sealed class PostgresFarmLabService(
             ApiIdempotencyKey = apiIdempotencyKey,
             ScheduleId = scheduleId,
             ScheduledForUtc = scheduledForUtc,
+            DemandId = demandId,
             DemandLabel = useful?.Label,
             InputVersion = useful?.InputVersion,
             InputPayload = useful?.InputPayload,
@@ -238,7 +258,9 @@ internal sealed class PostgresFarmLabService(
         };
         db.FarmJobs.Add(job);
         AddEvent(db, job, FarmJobStatus.Queued, now,
-            scheduleId is null
+            demandId is not null
+                ? $"Demanda persistente {demandId:N} vinculada ao manifesto assinado."
+                : scheduleId is null
                 ? useful is null
                     ? $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler."
                     : $"Demanda útil '{useful.Label}' vinculada ao manifesto assinado."
@@ -276,6 +298,15 @@ internal sealed class PostgresFarmLabService(
                     x => x.AccountId == accountId &&
                          x.ScheduleId == replayScheduleId &&
                          x.ScheduledForUtc == replayOccurrence,
+                    cancellationToken);
+                if (replay is not null)
+                    return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
+            }
+            if (demandId is Guid replayDemandId)
+            {
+                await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
+                var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == accountId && x.DemandId == replayDemandId,
                     cancellationToken);
                 if (replay is not null)
                     return await LoadJobAsync(replayDb, replay.Id, cancellationToken);

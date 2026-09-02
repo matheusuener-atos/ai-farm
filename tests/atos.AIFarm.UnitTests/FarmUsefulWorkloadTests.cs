@@ -50,4 +50,22 @@ public sealed class FarmUsefulWorkloadTests
         var request = new FarmScheduleRequest("Índice diário", "iris-text-index-v1", 60);
         Assert.Throws<ArgumentException>(() => request.Validate(DateTimeOffset.UtcNow));
     }
+
+    [Fact]
+    public void DemandQueueValidatesPriorityLifetimeAndUsefulPayload()
+    {
+        var valid = new FarmDemandRequest(
+            "iris-text-index-v1", "Fila Iris", "Trabalho útil",
+            FarmDemandPriority.High, 60).Validate();
+        Assert.Equal(FarmDemandPriority.High, valid.Priority);
+        Assert.Equal(60, valid.LifetimeMinutes);
+        Assert.Equal("atos-text-input-v1", valid.Submission.InputVersion);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new FarmDemandRequest(
+            "iris-text-index-v1", "Fila Iris", "Trabalho útil",
+            FarmDemandPriority.Normal, 4).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new FarmDemandRequest(
+            "iris-text-index-v1", "Fila Iris", "Trabalho útil",
+            (FarmDemandPriority)99, 60).Validate());
+    }
 }
