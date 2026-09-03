@@ -804,6 +804,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("InputDigest")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -832,6 +835,20 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("NextAttemptAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("OutputDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("OutputPayload")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("OutputSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OutputVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.Property<int>("Priority")
                         .HasColumnType("integer");
 
@@ -845,6 +862,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(24)
                         .HasColumnType("character varying(24)");
+
+                    b.Property<int>("TargetShards")
+                        .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -872,13 +892,62 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_farm_demands_attempts", "\"Attempts\" >= 0");
 
+                            t.HasCheckConstraint("CK_farm_demands_completed", "\"Status\" <> 'Completed' OR (\"OutputDigest\" IS NOT NULL AND \"FinishedAtUtc\" IS NOT NULL)");
+
                             t.HasCheckConstraint("CK_farm_demands_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
+
+                            t.HasCheckConstraint("CK_farm_demands_output", "(\"OutputVersion\" IS NULL AND \"OutputPayload\" IS NULL AND \"OutputSizeBytes\" IS NULL AND \"OutputDigest\" IS NULL) OR (\"OutputVersion\" IS NOT NULL AND \"OutputPayload\" IS NOT NULL AND \"OutputSizeBytes\" > 0 AND \"OutputDigest\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_demands_priority", "\"Priority\" >= 0 AND \"Priority\" <= 2");
 
                             t.HasCheckConstraint("CK_farm_demands_resources", "\"RequiredLogicalProcessors\" > 0 AND \"RequiredMemoryBytes\" > 0 AND length(\"WorkloadVersion\") > 0");
 
-                            t.HasCheckConstraint("CK_farm_demands_status", "\"Status\" IN ('Queued', 'Dispatching', 'Submitted', 'Cancelled', 'Expired', 'Failed')");
+                            t.HasCheckConstraint("CK_farm_demands_shards", "\"TargetShards\" >= 1 AND \"TargetShards\" <= 8");
+
+                            t.HasCheckConstraint("CK_farm_demands_status", "\"Status\" IN ('Queued', 'Dispatching', 'Processing', 'Submitted', 'Completed', 'Cancelled', 'Expired', 'Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmDemandShardRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DemandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("InputDigest")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("InputPayload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("InputSizeBytes")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId")
+                        .IsUnique();
+
+                    b.HasIndex("DemandId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("farm_demand_shards", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_farm_demand_shards_input", "\"InputSizeBytes\" > 0 AND length(\"InputDigest\") = 64");
+
+                            t.HasCheckConstraint("CK_farm_demand_shards_sequence", "\"Sequence\" > 0");
                         });
                 });
 
@@ -1009,6 +1078,12 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<string>("DemandLabel")
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
+
+                    b.Property<int?>("DemandShardCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DemandShardIndex")
+                        .HasColumnType("integer");
 
                     b.Property<long?>("DurationMilliseconds")
                         .HasColumnType("bigint");
@@ -1151,9 +1226,6 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasIndex("AttemptId")
                         .IsUnique();
 
-                    b.HasIndex("DemandId")
-                        .IsUnique();
-
                     b.HasIndex("NodeId")
                         .IsUnique()
                         .HasDatabaseName("UX_farm_jobs_node_active")
@@ -1162,6 +1234,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasIndex("AccountId", "CreatedAtUtc");
 
                     b.HasIndex("ApiTokenId", "ApiIdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("DemandId", "DemandShardIndex")
                         .IsUnique();
 
                     b.HasIndex("ScheduleId", "ScheduledForUtc")
@@ -1174,6 +1249,8 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_jobs_api_idempotency_complete", "(\"ApiTokenId\" IS NULL AND \"ApiIdempotencyKey\" IS NULL) OR (\"ApiTokenId\" IS NOT NULL AND \"ApiIdempotencyKey\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
+
+                            t.HasCheckConstraint("CK_farm_jobs_demand_shard_complete", "(\"DemandId\" IS NULL AND \"DemandShardIndex\" IS NULL AND \"DemandShardCount\" IS NULL) OR (\"DemandId\" IS NOT NULL AND \"DemandShardIndex\" > 0 AND \"DemandShardCount\" >= \"DemandShardIndex\")");
 
                             t.HasCheckConstraint("CK_farm_jobs_evidence_complete", "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR (\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
 
@@ -1866,6 +1943,15 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.FarmDemandShardRecord", b =>
+                {
+                    b.HasOne("atos.AIFarm.Infrastructure.Persistence.FarmDemandRecord", null)
+                        .WithMany()
+                        .HasForeignKey("DemandId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

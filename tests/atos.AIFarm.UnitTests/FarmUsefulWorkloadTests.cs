@@ -68,4 +68,47 @@ public sealed class FarmUsefulWorkloadTests
             "iris-text-index-v1", "Fila Iris", "Trabalho útil",
             (FarmDemandPriority)99, 60).Validate());
     }
+
+    [Fact]
+    public void TextWorkPartitionerCreatesBalancedDeterministicShards()
+    {
+        const string input = "um dois três quatro cinco seis sete";
+
+        var first = FarmTextWorkPartitioner.Partition(input, 3);
+        var second = FarmTextWorkPartitioner.Partition(input, 3);
+
+        Assert.Equal(["um dois três", "quatro cinco", "seis sete"], first);
+        Assert.Equal(first, second);
+        Assert.Equal(["um", "dois"], FarmTextWorkPartitioner.Partition("um dois", 8));
+        Assert.Equal(input, Assert.Single(FarmTextWorkPartitioner.Partition(input, 1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => FarmTextWorkPartitioner.Partition(input, 9));
+    }
+
+    [Fact]
+    public void DistributedTextIndexAggregatesCanonicalShardOutputs()
+    {
+        const string input = "Iris distribui texto entre dois nodes úteis";
+        var parts = FarmTextWorkPartitioner.Partition(input, 2);
+        var shards = parts.Select((part, index) =>
+        {
+            var execution = FarmDeterministicWorkloads.Execute(
+                "IRIS_TEXT_INDEX", Guid.NewGuid().ToString("N"), 1, part);
+            return (index + 1, FarmDeterministicWorkloads.ComputeInputDigest(part),
+                execution.Digest, Assert.IsType<string>(execution.OutputPayload));
+        }).ToArray();
+
+        var aggregate = FarmDistributedTextIndex.Aggregate(
+            FarmDeterministicWorkloads.ComputeInputDigest(input), shards);
+        var repeated = FarmDistributedTextIndex.Aggregate(
+            FarmDeterministicWorkloads.ComputeInputDigest(input), shards.Reverse().ToArray());
+
+        Assert.Equal(aggregate, repeated);
+        Assert.Equal(64, aggregate.Digest.Length);
+        using var json = JsonDocument.Parse(aggregate.Payload);
+        Assert.Equal("atos-distributed-text-index-v1", json.RootElement.GetProperty("version").GetString());
+        Assert.Equal(2, json.RootElement.GetProperty("shard_count").GetInt32());
+        Assert.Equal(7, json.RootElement.GetProperty("token_count").GetInt32());
+        Assert.Throws<ArgumentException>(() => FarmDistributedTextIndex.Aggregate(
+            FarmDeterministicWorkloads.ComputeInputDigest(input), [shards[1]]));
+    }
 }

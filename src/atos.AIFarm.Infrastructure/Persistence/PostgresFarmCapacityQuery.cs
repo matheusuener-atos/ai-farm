@@ -20,7 +20,9 @@ internal sealed class PostgresFarmCapacityQuery(
         var queued = await db.FarmDemands.AsNoTracking().CountAsync(
             x => x.AccountId == identity.AccountId &&
                  (x.Status == FarmDemandStatus.Queued.ToString() ||
-                  x.Status == FarmDemandStatus.Dispatching.ToString()), cancellationToken);
+                  x.Status == FarmDemandStatus.Dispatching.ToString() ||
+                  x.Status == FarmDemandStatus.Processing.ToString() ||
+                  x.Status == FarmDemandStatus.Submitted.ToString()), cancellationToken);
         var hasAgents = farm.Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent);
         var nodes = farm.Nodes.Select(node =>
         {

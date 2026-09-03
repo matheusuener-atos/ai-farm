@@ -3,6 +3,7 @@ using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 
 namespace atos.AIFarm.IntegrationTests;
 
@@ -180,6 +181,96 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task DistributedDemandFansOutToTwoAgentsAndAggregatesVerifiedOutput()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "distributed demand test");
+        var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            await lab.SetNodeStatusAsync(FarmNodeStatus.Paused);
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+
+            async Task<FarmAgentEnrollmentResult> EnrollAsync(string name)
+            {
+                var enrollment = await agents.CreateEnrollmentAsync();
+                var linked = Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
+                    enrollment.Token,
+                    new FarmAgentEnrollmentRequest(
+                        name, ".NET 10 // TEST", 4, 512L * 1024 * 1024,
+                        FarmAgentProtocol.CurrentAgentVersion)));
+                Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
+                    new FarmAgentHeartbeatRequest(
+                        ".NET 10 // TEST", 4, 512L * 1024 * 1024,
+                        FarmAgentProtocol.CurrentAgentVersion, AcceptJobs: true,
+                        MaxLogicalProcessors: 1, MaxMemoryBytes: 128L * 1024 * 1024)));
+                return linked;
+            }
+
+            var first = await EnrollAsync("DISTRIBUTED-A");
+            var second = await EnrollAsync("DISTRIBUTED-B");
+            var queue = provider.GetRequiredService<IFarmDemandQueueService>();
+            var dispatcher = provider.GetRequiredService<IFarmDemandDispatcher>();
+            const string input = "Iris distribui esta demanda útil entre dois nodes independentes";
+            var demand = await queue.SubmitAsync(new(
+                "iris-text-index-v1", "Índice distribuído", input,
+                FarmDemandPriority.High, 60, TargetShards: 2));
+
+            Assert.Equal(1, await dispatcher.DispatchDueAsync());
+            var dispatched = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            Assert.Equal(FarmDemandStatus.Submitted, dispatched.Status);
+            Assert.Equal(2, dispatched.DispatchedShards);
+            Assert.Equal(2, dispatched.Shards.Select(x => x.JobId).Distinct().Count());
+
+            foreach (var linked in new[] { first, second })
+            {
+                var offer = Assert.IsType<FarmRemoteJobOffer>(await agents.ClaimJobAsync(linked.Credential));
+                var trust = Assert.IsType<FarmAgentTrust>(await agents.GetTrustAsync(linked.Credential));
+                Assert.True(FarmManifestSecurity.TryVerify(
+                    offer.ManifestPayload, offer.ManifestDigest, offer.ManifestSignature,
+                    new FarmManifestSigningOptions(trust.VerificationKey), out var manifest));
+                var verifiedManifest = Assert.IsType<FarmJobManifest>(manifest);
+                var shardInput = Assert.IsType<FarmRemoteJobInput>(offer.Input);
+                Assert.True(await agents.MarkJobStartedAsync(linked.Credential, offer.JobId));
+                var execution = FarmDeterministicWorkloads.Execute(
+                    verifiedManifest.Workload, verifiedManifest.Nonce,
+                    verifiedManifest.Iterations, shardInput.Payload);
+                var acknowledgement = await agents.SubmitResultAsync(
+                    linked.Credential, offer.JobId,
+                    RemoteResult(execution.Digest, 10) with { OutputPayload = execution.OutputPayload });
+                Assert.True(acknowledgement?.Verified);
+            }
+
+            clock.Advance(TimeSpan.FromSeconds(6));
+            Assert.Equal(1, await dispatcher.DispatchDueAsync());
+            var completed = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            Assert.Equal(FarmDemandStatus.Completed, completed.Status);
+            Assert.Equal(2, completed.CompletedShards);
+            Assert.Equal(64, completed.OutputDigest?.Length);
+            var download = Assert.IsType<FarmUsefulJobOutput>(await queue.DownloadOutputAsync(demand.Id));
+            Assert.Equal(completed.OutputDigest, Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(download.Content)).ToLowerInvariant());
+            using var json = JsonDocument.Parse(download.Content);
+            Assert.Equal("atos-distributed-text-index-v1", json.RootElement.GetProperty("version").GetString());
+            Assert.Equal(2, json.RootElement.GetProperty("shard_count").GetInt32());
+            Assert.Equal(9, json.RootElement.GetProperty("token_count").GetInt32());
+
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var jobs = await db.FarmJobs.AsNoTracking().Where(x => x.DemandId == demand.Id).ToArrayAsync();
+            Assert.Equal(2, jobs.Select(x => x.NodeId).Distinct().Count());
+            Assert.Equal([1, 2], jobs.OrderBy(x => x.DemandShardIndex).Select(x => x.DemandShardIndex!.Value));
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
     private static ServiceProvider BuildProvider(string connectionString, AIFarmIdentity identity, TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
@@ -205,11 +296,17 @@ public sealed class PostgresFarmDemandQueueTests
         MemoryBytes = 512L * 1024 * 1024, CreatedAtUtc = now, LastSeenAtUtc = now
     };
 
+    private static FarmRemoteJobResult RemoteResult(string digest, long durationMilliseconds) =>
+        new(digest, durationMilliseconds, 32L * 1024 * 1024, 8,
+            FarmWorkerEnforcement.ProcessMonitorCpuAffinity);
+
     private static async Task CleanupAsync(string connectionString, Guid accountId)
     {
         await using var provider = BuildProvider(connectionString, new(accountId, accountId, "cleanup"));
         var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
+        db.FarmAgentEnrollments.RemoveRange(db.FarmAgentEnrollments.Where(x => x.AccountId == accountId));
+        await db.SaveChangesAsync();
         var jobIds = await db.FarmJobs.Where(x => x.AccountId == accountId).Select(x => x.Id).ToArrayAsync();
         db.FarmJobEvents.RemoveRange(db.FarmJobEvents.Where(x => jobIds.Contains(x.JobId)));
         db.FarmJobs.RemoveRange(db.FarmJobs.Where(x => x.AccountId == accountId));

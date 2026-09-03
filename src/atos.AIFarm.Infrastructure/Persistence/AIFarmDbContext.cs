@@ -26,6 +26,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmScheduleRecord> FarmSchedules => Set<FarmScheduleRecord>();
     public DbSet<FarmScheduleTriggerRecord> FarmScheduleTriggers => Set<FarmScheduleTriggerRecord>();
     public DbSet<FarmDemandRecord> FarmDemands => Set<FarmDemandRecord>();
+    public DbSet<FarmDemandShardRecord> FarmDemandShards => Set<FarmDemandShardRecord>();
     public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
     public DbSet<FarmRewardProposalRecord> FarmRewardProposals => Set<FarmRewardProposalRecord>();
     public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
@@ -313,6 +314,10 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "(\"ApiTokenId\" IS NULL OR (\"ScheduleId\" IS NULL AND \"DemandId\" IS NULL)) AND " +
                     "(\"ScheduleId\" IS NULL OR \"DemandId\" IS NULL)");
                 table.HasCheckConstraint(
+                    "CK_farm_jobs_demand_shard_complete",
+                    "(\"DemandId\" IS NULL AND \"DemandShardIndex\" IS NULL AND \"DemandShardCount\" IS NULL) OR " +
+                    "(\"DemandId\" IS NOT NULL AND \"DemandShardIndex\" > 0 AND \"DemandShardCount\" >= \"DemandShardIndex\")");
+                table.HasCheckConstraint(
                     "CK_farm_jobs_useful_input_complete",
                     "(\"InputVersion\" IS NULL AND \"InputPayload\" IS NULL AND \"InputSizeBytes\" IS NULL AND \"InputDigest\" IS NULL AND \"DemandLabel\" IS NULL) OR " +
                     "(\"InputVersion\" IS NOT NULL AND \"InputPayload\" IS NOT NULL AND \"InputSizeBytes\" > 0 AND \"InputDigest\" IS NOT NULL AND \"DemandLabel\" IS NOT NULL)");
@@ -341,7 +346,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
             entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
-            entity.HasIndex(x => x.DemandId).IsUnique();
+            entity.HasIndex(x => new { x.DemandId, x.DemandShardIndex }).IsUnique();
             entity.HasIndex(x => x.NodeId)
                 .HasDatabaseName("UX_farm_jobs_node_active")
                 .IsUnique()
@@ -422,11 +427,14 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("farm_demands", table =>
             {
-                table.HasCheckConstraint("CK_farm_demands_status", "\"Status\" IN ('Queued', 'Dispatching', 'Submitted', 'Cancelled', 'Expired', 'Failed')");
+                table.HasCheckConstraint("CK_farm_demands_status", "\"Status\" IN ('Queued', 'Dispatching', 'Processing', 'Submitted', 'Completed', 'Cancelled', 'Expired', 'Failed')");
                 table.HasCheckConstraint("CK_farm_demands_priority", "\"Priority\" >= 0 AND \"Priority\" <= 2");
                 table.HasCheckConstraint("CK_farm_demands_attempts", "\"Attempts\" >= 0");
                 table.HasCheckConstraint("CK_farm_demands_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
                 table.HasCheckConstraint("CK_farm_demands_resources", "\"RequiredLogicalProcessors\" > 0 AND \"RequiredMemoryBytes\" > 0 AND length(\"WorkloadVersion\") > 0");
+                table.HasCheckConstraint("CK_farm_demands_shards", "\"TargetShards\" >= 1 AND \"TargetShards\" <= 8");
+                table.HasCheckConstraint("CK_farm_demands_output", "(\"OutputVersion\" IS NULL AND \"OutputPayload\" IS NULL AND \"OutputSizeBytes\" IS NULL AND \"OutputDigest\" IS NULL) OR (\"OutputVersion\" IS NOT NULL AND \"OutputPayload\" IS NOT NULL AND \"OutputSizeBytes\" > 0 AND \"OutputDigest\" IS NOT NULL)");
+                table.HasCheckConstraint("CK_farm_demands_completed", "\"Status\" <> 'Completed' OR (\"OutputDigest\" IS NOT NULL AND \"FinishedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.Status, x.NextAttemptAtUtc, x.Priority });
@@ -440,8 +448,26 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.InputDigest).HasMaxLength(64);
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.Detail).HasMaxLength(500);
+            entity.Property(x => x.OutputVersion).HasMaxLength(80);
+            entity.Property(x => x.OutputPayload).HasColumnType("text");
+            entity.Property(x => x.OutputDigest).HasMaxLength(64);
             entity.Property(x => x.ApiIdempotencyKey).HasMaxLength(120);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmDemandShardRecord>(entity =>
+        {
+            entity.ToTable("farm_demand_shards", table =>
+            {
+                table.HasCheckConstraint("CK_farm_demand_shards_sequence", "\"Sequence\" > 0");
+                table.HasCheckConstraint("CK_farm_demand_shards_input", "\"InputSizeBytes\" > 0 AND length(\"InputDigest\") = 64");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.DemandId, x.Sequence }).IsUnique();
+            entity.HasIndex(x => x.JobId).IsUnique();
+            entity.Property(x => x.InputPayload).HasColumnType("text");
+            entity.Property(x => x.InputDigest).HasMaxLength(64);
+            entity.HasOne<FarmDemandRecord>().WithMany().HasForeignKey(x => x.DemandId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<FarmEconomicsScenarioRecord>(entity =>
@@ -604,6 +630,8 @@ public sealed class FarmJobRecord
     public Guid? ScheduleId { get; set; }
     public DateTimeOffset? ScheduledForUtc { get; set; }
     public Guid? DemandId { get; set; }
+    public int? DemandShardIndex { get; set; }
+    public int? DemandShardCount { get; set; }
     public string? DemandLabel { get; set; }
     public string? InputVersion { get; set; }
     public string? InputPayload { get; set; }
@@ -695,6 +723,7 @@ public sealed class FarmDemandRecord
     public string WorkloadVersion { get; set; } = string.Empty;
     public int RequiredLogicalProcessors { get; set; }
     public long RequiredMemoryBytes { get; set; }
+    public int TargetShards { get; set; }
     public string Label { get; set; } = string.Empty;
     public string InputVersion { get; set; } = string.Empty;
     public string InputPayload { get; set; } = string.Empty;
@@ -708,8 +737,24 @@ public sealed class FarmDemandRecord
     public DateTimeOffset? ClaimedAtUtc { get; set; }
     public Guid? JobId { get; set; }
     public string? Detail { get; set; }
+    public string? OutputVersion { get; set; }
+    public string? OutputPayload { get; set; }
+    public int? OutputSizeBytes { get; set; }
+    public string? OutputDigest { get; set; }
+    public DateTimeOffset? FinishedAtUtc { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class FarmDemandShardRecord
+{
+    public Guid Id { get; set; }
+    public Guid DemandId { get; set; }
+    public int Sequence { get; set; }
+    public string InputPayload { get; set; } = string.Empty;
+    public int InputSizeBytes { get; set; }
+    public string InputDigest { get; set; } = string.Empty;
+    public Guid? JobId { get; set; }
 }
 
 public sealed class FarmEconomicsScenarioRecord

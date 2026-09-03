@@ -83,14 +83,14 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
         FarmUsefulJobSubmission submission,
@@ -99,7 +99,7 @@ internal sealed class PostgresFarmLabService(
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, null, tokenId, idempotencyKey,
-            null, null, null, submission, cancellationToken);
+            null, null, null, null, null, submission, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
         Guid accountId,
@@ -116,16 +116,20 @@ internal sealed class PostgresFarmLabService(
             scheduledForUtc.ToUniversalTime(),
             null,
             null,
+            null,
+            null,
             cancellationToken);
 
     internal Task<FarmJobSnapshot> RunQueuedDemandAsync(
         Guid accountId,
         Guid demandId,
+        int shardIndex,
+        int shardCount,
         FarmUsefulJobSubmission submission,
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, accountId, null, null, null, null,
-            demandId, submission, cancellationToken);
+            demandId, shardIndex, shardCount, submission, cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
         string workloadId,
@@ -135,6 +139,8 @@ internal sealed class PostgresFarmLabService(
         Guid? scheduleId,
         DateTimeOffset? scheduledForUtc,
         Guid? demandId,
+        int? demandShardIndex,
+        int? demandShardCount,
         FarmUsefulJobSubmission? useful,
         CancellationToken cancellationToken)
     {
@@ -143,6 +149,9 @@ internal sealed class PostgresFarmLabService(
             throw new ArgumentException("A entrada útil não corresponde ao workload solicitado.", nameof(workloadId));
         if (useful is null && definition.InputSchema is not null)
             throw new ArgumentException("Este workload exige uma demanda tipada.", nameof(workloadId));
+        if (demandId.HasValue != demandShardIndex.HasValue || demandId.HasValue != demandShardCount.HasValue ||
+            (demandShardIndex.HasValue && (demandShardIndex < 1 || demandShardCount < demandShardIndex)))
+            throw new ArgumentException("A atribuição do shard da demanda é inválida.", nameof(demandId));
         var accountId = explicitAccountId ??
             (await identityAccessor.GetRequiredIdentityAsync(cancellationToken)).AccountId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -179,7 +188,8 @@ internal sealed class PostgresFarmLabService(
         if (demandId is Guid queuedDemandId)
         {
             var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                x => x.AccountId == accountId && x.DemandId == queuedDemandId,
+                x => x.AccountId == accountId && x.DemandId == queuedDemandId &&
+                     x.DemandShardIndex == demandShardIndex,
                 cancellationToken);
             if (replay is not null)
                 return await LoadJobAsync(db, replay.Id, cancellationToken);
@@ -237,6 +247,8 @@ internal sealed class PostgresFarmLabService(
             ScheduleId = scheduleId,
             ScheduledForUtc = scheduledForUtc,
             DemandId = demandId,
+            DemandShardIndex = demandShardIndex,
+            DemandShardCount = demandShardCount,
             DemandLabel = useful?.Label,
             InputVersion = useful?.InputVersion,
             InputPayload = useful?.InputPayload,
@@ -259,7 +271,7 @@ internal sealed class PostgresFarmLabService(
         db.FarmJobs.Add(job);
         AddEvent(db, job, FarmJobStatus.Queued, now,
             demandId is not null
-                ? $"Demanda persistente {demandId:N} vinculada ao manifesto assinado."
+                ? $"Shard {demandShardIndex}/{demandShardCount} da demanda {demandId:N} vinculado ao manifesto assinado."
                 : scheduleId is null
                 ? useful is null
                     ? $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler."
@@ -306,7 +318,8 @@ internal sealed class PostgresFarmLabService(
             {
                 await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
                 var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                    x => x.AccountId == accountId && x.DemandId == replayDemandId,
+                    x => x.AccountId == accountId && x.DemandId == replayDemandId &&
+                         x.DemandShardIndex == demandShardIndex,
                     cancellationToken);
                 if (replay is not null)
                     return await LoadJobAsync(replayDb, replay.Id, cancellationToken);

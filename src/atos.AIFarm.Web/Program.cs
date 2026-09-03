@@ -396,6 +396,22 @@ app.MapGet("/api/farm/jobs/{jobId:guid}/output", async (
     }
 }).RequireAuthorization();
 
+app.MapGet("/api/farm/demands/{demandId:guid}/output", async (
+    Guid demandId,
+    HttpResponse response,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var output = await demands.DownloadOutputAsync(demandId, cancellationToken);
+        return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+    }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).RequireAuthorization();
+
 app.MapGet("/api/farm/jobs/export", async (
     string? search,
     string? workloadId,
@@ -605,6 +621,22 @@ personalApi.MapPost("/farm/demands/{demandId:guid}/cancel", async (
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
   .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/demands/{demandId:guid}/output", async (
+    Guid demandId,
+    HttpResponse response,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var output = await demands.DownloadOutputAsync(demandId, cancellationToken);
+        return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+    }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
 
 personalApi.MapGet("/farm/schedules", async (
     IFarmScheduleService schedules,

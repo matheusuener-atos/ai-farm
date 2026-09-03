@@ -384,6 +384,23 @@ visão está disponível em `GET /api/v1/farm/capacity` com escopo de leitura da
 Farm. A fila mostra o contrato de recursos congelado em cada demanda e utiliza
 os diagnósticos do scheduler nas retentativas.
 
+A **Distributed Demand v1** permite que uma única entrada de texto seja
+processada por até oito Nodes. Ao aceitar a demanda, o servidor divide tokens
+contíguos em shards determinísticos e persiste cada parte com digest próprio.
+O dispatcher cria um Job útil por shard, sempre respeitando o limite de um Job
+ativo por Node; se a capacidade acabar no meio do fan-out, preserva os Jobs já
+criados e retoma somente as partes restantes. Quedas entre criação e vínculo
+também são recuperadas pelo par único demanda + sequência.
+
+Cada Agent recebe apenas seu shard no protocolo já existente. O resultado é
+reexecutado e sua evidência é validada individualmente. Somente quando todos os
+shards terminam aprovados o coordenador ordena as partes, soma as métricas e
+grava um `atos-distributed-text-index-v1` canônico com SHA-256. A tela mostra o
+progresso por shard e libera o JSON consolidado; a API expõe
+`GET /api/v1/farm/demands/{id}/output` com `FarmRead`. Cada Job aprovado mantém
+seu CP técnico conforme o catálogo, mas este fan-in não cria reward extra nem
+define conversão CP → AIC.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto
