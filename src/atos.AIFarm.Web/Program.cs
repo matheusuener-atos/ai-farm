@@ -1369,13 +1369,16 @@ static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string 
         var path = Path.Combine(directory.FullName, ".env.local");
         if (File.Exists(path))
         {
+            // "__" vira ":" como nas variáveis de ambiente reais; sem isso,
+            // chaves hierárquicas do .env.local (AIFarm__AI__Provider,
+            // AIFarm__Farm__ManifestSigningKey) eram ignoradas em silêncio.
             var values = File.ReadLines(path)
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0 && !line.StartsWith('#'))
                 .Select(line => line.Split('=', 2))
                 .Where(parts => parts.Length == 2)
                 .ToDictionary(
-                    parts => parts[0].Trim(),
+                    parts => parts[0].Trim().Replace("__", ":"),
                     parts => parts[1].Trim().Trim('"', '\''),
                     StringComparer.OrdinalIgnoreCase);
             configuration.AddInMemoryCollection(values!);
