@@ -8,9 +8,9 @@
 
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/DEMAND_QUEUE</p>
-    <h1>FILA DE TRABALHO</h1>
+    <h1>Fila de trabalho</h1>
     <p>A Iris retém, prioriza e despacha cada demanda quando um Compute Agent compatível estiver disponível.</p>
-    <a class="text-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
+    <a class="text-link" href="/farm/jobs">Abrir centro de jobs →</a>
 </div>
 
 @if (_message is not null)
@@ -26,7 +26,7 @@
 </section>
 
 <section class="panel">
-    <div class="panel-head"><h2>NOVA DEMANDA</h2><span>STANDARD // MÁX. 32 KiB // SEM REDE</span></div>
+    <div class="panel-head"><h2>Nova demanda</h2><span>STANDARD // MÁX. 32 KiB // SEM REDE</span></div>
     <div class="useful-form">
         <label>RÓTULO
             <input @bind="_label" maxlength="120" placeholder="indexar documentação do produto" disabled="@_working" />
@@ -68,24 +68,24 @@
         </label>
         <small>O envio confirma a entrada na fila; a execução ocorrerá quando houver capacidade. Não envie conteúdo PRIVATE ou CONFIDENTIAL.</small>
         <button type="button" @onclick="SubmitAsync" disabled="@_working">
-            @(_working ? "[ ENFILEIRANDO... ]" : "[ ENFILEIRAR DEMANDA ]")
+            @(_working ? "Enfileirando..." : "Enfileirar demanda")
         </button>
     </div>
 </section>
 
 <section class="panel">
-    <div class="panel-head"><h2>DEMANDAS RECENTES</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button></div>
+    <div class="panel-head"><h2>Demandas recentes</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">Atualizar</button></div>
     @if (_dashboard.Demands.Count == 0) { <p class="empty">NENHUMA DEMANDA ENFILEIRADA.</p> }
     @foreach (var demand in _dashboard.Demands)
     {
         <article class="useful-job">
             <div><strong>@demand.Label</strong><small>@demand.WorkloadVersion // @demand.Id.ToString("N")[..8]</small></div>
             <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>REQUER @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) // TENTATIVAS @demand.Attempts</small><small>INPUT @Short(demand.InputDigest)</small></div>
-            <div><span class="@StatusClass(demand.Status)">[ @Status(demand.Status) ]</span><small>SHARDS @demand.CompletedShards/@demand.TargetShards // DESPACHADOS @demand.DispatchedShards // FALHAS @demand.FailedShards</small><small>@demand.Detail</small></div>
+            <div><span class="@StatusClass(demand.Status)">@Status(demand.Status)</span><small>SHARDS @demand.CompletedShards/@demand.TargetShards // DESPACHADOS @demand.DispatchedShards // FALHAS @demand.FailedShards</small><small>@demand.Detail</small></div>
             <div class="queue-actions">
                 @if (demand.Status == FarmDemandStatus.Queued)
                 {
-                    <button class="button-danger" @onclick="() => CancelAsync(demand.Id)" disabled="@_working">[ CANCELAR ]</button>
+                    <button class="button-danger" @onclick="() => CancelAsync(demand.Id)" disabled="@_working">Cancelar</button>
                 }
                 @if (demand.JobId is Guid jobId)
                 {
@@ -93,7 +93,7 @@
                 }
                 @if (demand.Status == FarmDemandStatus.Completed)
                 {
-                    <a class="text-link" href="@OutputUrl(demand.Id)">[ BAIXAR ÍNDICE DISTRIBUÍDO ]</a>
+                    <a class="text-link" href="@OutputUrl(demand.Id)">Baixar índice distribuído</a>
                 }
             </div>
         </article>

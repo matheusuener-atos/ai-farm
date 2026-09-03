@@ -9,12 +9,12 @@
 
 <div class="page-heading">
     <p class="eyebrow amber">atos:/FARM/REWARDS</p>
-    <h1>ANTES DO PAGAMENTO</h1>
+    <h1>Antes do pagamento</h1>
     <p>Transforme evidência técnica e cenário econômico em uma proposta auditável, sem emitir AIC.</p>
 </div>
 
 <section class="reward-guardrail" role="note">
-    <strong>[ LIQUIDAÇÃO BLOQUEADA ]</strong>
+    <strong>Liquidação bloqueada</strong>
     <span>Uma proposta recomenda valor em BRL. Ela não define CP → AIC, não financia o Reward Pool e não movimenta o Ledger.</span>
 </section>
 
@@ -30,13 +30,13 @@
 @if (_loading)
 {
     <section class="terminal placeholder">
-        <div class="terminal-title">[ VALIDANDO FONTES ]</div>
+        <div class="terminal-title"><span>Validando fontes</span></div>
     </section>
 }
 else
 {
     <section class="terminal reward-sources">
-        <div class="terminal-title">FONTES ELEGÍVEIS // CENÁRIO MEDIDO + EVIDÊNCIA VÁLIDA</div>
+        <div class="terminal-title"><span>Fontes elegíveis</span><small>cenário medido + evidência válida</small></div>
         @if (EligibleSources.Count == 0)
         {
             <div class="reward-empty">
@@ -55,7 +55,7 @@ else
                             <strong>@source.Scenario.Name</strong>
                             <small>JOB @ShortId(source.Job.Id) // CENÁRIO @ShortId(source.Scenario.Id)</small>
                         </div>
-                        <span class="green">[ FONTES VÁLIDAS ]</span>
+                        <span class="green">Fontes válidas</span>
                     </header>
                     <dl>
                         <div><dt>PROCESSAMENTO</dt><dd>@FormatCp(source.Job.ComputeUnitsMilli)</dd></div>
@@ -66,7 +66,7 @@ else
                     <button type="button"
                             @onclick="() => CreateProposalAsync(source)"
                             disabled="@(_working || HasProposal(source.Scenario.Id))">
-                        @(HasProposal(source.Scenario.Id) ? "[ PROPOSTA REGISTRADA ]" : "[ REGISTRAR PROPOSTA ]")
+                        @(HasProposal(source.Scenario.Id) ? "Proposta registrada" : "Registrar proposta")
                     </button>
                 </article>
             }
@@ -74,7 +74,7 @@ else
     </section>
 
     <section class="terminal reward-history">
-        <div class="terminal-title">PROPOSTAS IMUTÁVEIS // ÚLTIMAS 20</div>
+        <div class="terminal-title"><span>Propostas imutáveis</span><small>últimas 20</small></div>
         @if (_proposals.Count == 0)
         {
             <p class="muted">Nenhuma proposta registrada nesta conta.</p>
@@ -90,7 +90,7 @@ else
                             <small>@proposal.CreatedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") // @proposal.Version</small>
                         </div>
                         <span class="@(proposal.IsIntegrityValid ? "amber" : "error-text")">
-                            [ @(proposal.IsIntegrityValid ? "AGUARDANDO POLÍTICA + FUNDING" : "INTEGRIDADE INVÁLIDA") ]
+                            @(proposal.IsIntegrityValid ? "AGUARDANDO POLÍTICA + FUNDING" : "INTEGRIDADE INVÁLIDA")
                         </span>
                     </header>
                     <dl>

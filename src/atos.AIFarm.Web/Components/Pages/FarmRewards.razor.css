@@ -11,7 +11,7 @@
 .reward-guardrail strong { color: var(--amber-bright); }
 .reward-guardrail span { max-width: 60rem; color: var(--muted); font-size: .7rem; text-align: right; }
 .reward-notice { margin-bottom: 1rem; padding: .8rem 1rem; border: 1px solid var(--green); color: var(--green); }
-.reward-sources > article, .reward-history > article { padding: 1rem; border-top: 1px solid #292927; }
+.reward-sources > article, .reward-history > article { padding: 1rem; border-top: 1px solid #E6E4DE; }
 .reward-sources article > header, .reward-history article > header { display: flex; justify-content: space-between; gap: 1rem; }
 .reward-sources header > div, .reward-history header > div { display: grid; gap: .35rem; }
 .reward-sources header small, .reward-history header small { color: var(--muted); }

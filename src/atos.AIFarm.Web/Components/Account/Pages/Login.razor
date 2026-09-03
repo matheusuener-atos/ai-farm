@@ -5,10 +5,11 @@
 
 <PageTitle>Entrar // atos AI Farm</PageTitle>
 
-<section class="auth-panel">
-    <p class="eyebrow">atos:/IDENTITY/LOGIN</p>
-    <h1>ENTRAR</h1>
-    <p class="muted">AUTENTICAÇÃO LOCAL SEGURA // COOKIE HTTP-ONLY</p>
+<section class="win auth-panel">
+    <div class="win-title"><span>Entrar</span></div>
+    <div class="win-body">
+    <h1 class="sr-only">Entrar</h1>
+    <p class="muted">Autenticação local segura · cookie HTTP-only</p>
 
     <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login" class="auth-form">
         <DataAnnotationsValidator />
@@ -17,18 +18,19 @@
         {
             <p class="error" role="alert">@errorMessage</p>
         }
-        <label for="login-email">E-MAIL</label>
+        <label for="login-email">E-mail</label>
         <InputText id="login-email" @bind-Value="Input.Email" autocomplete="username" />
-        <label for="login-password">SENHA</label>
+        <label for="login-password">Senha</label>
         <InputText id="login-password" type="password" @bind-Value="Input.Password" autocomplete="current-password" />
         <label class="auth-check">
             <InputCheckbox @bind-Value="Input.RememberMe" />
-            MANTER CONECTADO
+            Manter conectado
         </label>
-        <button type="submit">[ ENTRAR ]</button>
+        <button type="submit">Entrar</button>
     </EditForm>
 
-    <a class="text-link" href="@RegisterUrl">[ CRIAR CONTA ]</a>
+    <a class="text-link" href="@RegisterUrl">Criar conta</a>
+    </div>
 </section>
 
 @code {

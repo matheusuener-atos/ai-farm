@@ -7,7 +7,7 @@
 
 <div class="page-head">
     <p class="eyebrow">atos:/IRIS/BUDGET</p>
-    <h1>LIMITES DE USO</h1>
+    <h1>Limites de uso</h1>
     <p>CONTROLE PREVENTIVO // RETENÇÕES CONCORRENTES // PERÍODOS EM UTC</p>
 </div>
 
@@ -57,12 +57,12 @@ else
     <section class="panel budget-panel">
         <div class="panel-head section-heading">
             <div>
-                <h2>POLÍTICA DA CONTA</h2>
+                <h2>Política da conta</h2>
                 <p class="muted">A ESTIMATIVA É RETIDA ANTES DO LEDGER E LIBERADA EM FALHAS</p>
             </div>
             <label class="budget-switch">
                 <input type="checkbox" @bind="_enabled" />
-                <span>@(_enabled ? "[ PROTEÇÃO ATIVA ]" : "[ PROTEÇÃO DESATIVADA ]")</span>
+                <span>@(_enabled ? "Proteção ativa" : "Proteção desativada")</span>
             </label>
         </div>
 
@@ -86,9 +86,9 @@ else
 
         <div class="budget-actions">
             <button type="button" @onclick="SaveAsync" disabled="@_saving">
-                @(_saving ? "[ SALVANDO... ]" : "[ SALVAR POLÍTICA ]")
+                @(_saving ? "Salvando..." : "Salvar política")
             </button>
-            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_saving">[ ATUALIZAR CONSUMO ]</button>
+            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_saving">Atualizar consumo</button>
         </div>
         <p class="muted budget-help">Desativar a política não apaga histórico. O limite global de segurança da instalação continua válido.</p>
     </section>

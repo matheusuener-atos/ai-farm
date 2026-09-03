@@ -7,9 +7,9 @@
 
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/SCHEDULES</p>
-    <h1>AUTOMAÇÃO DA FARM</h1>
+    <h1>Automação da farm</h1>
     <p>Execução recorrente de workloads allowlisted, com disparos idempotentes e rastreáveis em UTC.</p>
-    <a class="schedule-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
+    <a class="schedule-link" href="/farm/jobs">Abrir centro de jobs →</a>
 </div>
 
 @if (_message is not null)
@@ -18,7 +18,7 @@
 }
 
 <section class="panel schedule-create">
-    <div class="panel-head"><h2>NOVO AGENDAMENTO</h2><span>INTERVALO FIXO // UTC</span></div>
+    <div class="panel-head"><h2>Novo agendamento</h2><span>INTERVALO FIXO // UTC</span></div>
     <div class="schedule-form">
         <label>NOME
             <input @bind="_name" maxlength="80" placeholder="benchmark periódico" disabled="@_working" />
@@ -43,7 +43,7 @@
             </select>
         </label>
         <button type="button" @onclick="CreateAsync" disabled="@_working">
-            @(_working ? "[ SALVANDO... ]" : "[ CRIAR E ATIVAR ]")
+            @(_working ? "Salvando..." : "Criar e ativar")
         </button>
     </div>
     <small>O primeiro disparo ocorre imediatamente. Pausa, indisponibilidade e contenção nunca emitem CP ou AIC.</small>
@@ -63,7 +63,7 @@ else
     </div>
 
     <section class="panel">
-        <div class="panel-head"><h2>AGENDAMENTOS</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button></div>
+        <div class="panel-head"><h2>Agendamentos</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">Atualizar</button></div>
         @if (_dashboard.Schedules.Count == 0)
         {
             <p class="schedule-empty">NENHUM AGENDAMENTO CONFIGURADO.</p>
@@ -72,7 +72,7 @@ else
             @foreach (var schedule in _dashboard.Schedules)
             {
                 <article>
-                    <header><div><strong>@schedule.Name</strong><small>@schedule.WorkloadVersion</small></div><span class="@(schedule.Status == FarmScheduleStatus.Active ? "green" : "amber")">[ @schedule.Status.ToString().ToUpperInvariant() ]</span></header>
+                    <header><div><strong>@schedule.Name</strong><small>@schedule.WorkloadVersion</small></div><span class="@(schedule.Status == FarmScheduleStatus.Active ? "green" : "amber")">@schedule.Status.ToString().ToUpperInvariant()</span></header>
                     <dl>
                         <div><dt>INTERVALO</dt><dd>@FormatInterval(schedule.IntervalMinutes)</dd></div>
                         <div><dt>PRÓXIMO UTC</dt><dd>@schedule.NextRunAtUtc.ToString("dd/MM HH:mm:ss")</dd></div>
@@ -80,9 +80,9 @@ else
                         <div><dt>ID</dt><dd>@schedule.Id.ToString("N")[..8]</dd></div>
                     </dl>
                     <footer>
-                        <button type="button" @onclick="() => TriggerAsync(schedule.Id)" disabled="@_working">[ EXECUTAR AGORA ]</button>
+                        <button type="button" @onclick="() => TriggerAsync(schedule.Id)" disabled="@_working">Executar agora</button>
                         <button type="button" class="button-secondary" @onclick="() => ToggleAsync(schedule)" disabled="@_working">
-                            [ @(schedule.Status == FarmScheduleStatus.Active ? "PAUSAR" : "RETOMAR") ]
+                            @(schedule.Status == FarmScheduleStatus.Active ? "PAUSAR" : "RETOMAR")
                         </button>
                     </footer>
                 </article>
@@ -91,7 +91,7 @@ else
     </section>
 
     <section class="panel schedule-triggers">
-        <div class="panel-head"><h2>DISPAROS RECENTES // ÚLTIMOS 50</h2><span>ATRIBUIÇÃO EXPLÍCITA</span></div>
+        <div class="panel-head"><h2>Disparos recentes</h2><small>últimos 50</small><span>ATRIBUIÇÃO EXPLÍCITA</span></div>
         @if (_dashboard.RecentTriggers.Count == 0)
         {
             <p class="schedule-empty">NENHUM DISPARO REGISTRADO.</p>
@@ -106,7 +106,7 @@ else
                 {
                     <a href="/farm/jobs?jobId=@jobId">JOB @jobId.ToString("N")[..8]</a>
                 }
-                <span class="@TriggerClass(trigger.Status)">[ @TriggerLabel(trigger.Status) ]</span>
+                <span class="@TriggerClass(trigger.Status)">@TriggerLabel(trigger.Status)</span>
             </article>
         }
     </section>
