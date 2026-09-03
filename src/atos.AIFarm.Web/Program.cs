@@ -1246,6 +1246,17 @@ var readinessOptions = new HealthCheckOptions
 };
 app.MapHealthChecks("/health/ready", readinessOptions);
 app.MapHealthChecks("/health", readinessOptions);
+app.MapPost("/account/interface-mode", async (
+    IInterfaceModeService interfaceMode,
+    [FromForm] string? mode) =>
+{
+    if (Enum.TryParse<AIFarmInterfaceMode>(mode, true, out var parsed))
+    {
+        await interfaceMode.SetAsync(parsed);
+    }
+    return Results.LocalRedirect("~/");
+}).RequireAuthorization();
+
 app.MapPost("/account/logout", async (
     SignInManager<AIFarmUser> signInManager,
     [FromForm] string? returnUrl) =>

@@ -2,9 +2,82 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IWalletService WalletService
+@inject IInterfaceModeService InterfaceMode
 
 <PageTitle>Wallet // atos AI Farm</PageTitle>
 
+@if (IsLite)
+{
+    <div class="page-head">
+        <p class="eyebrow">atos:/CREDITOS</p>
+        <h1>Meus créditos</h1>
+        <p>TUDO REGISTRADO // NADA MUDA SOZINHO</p>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p class="error">@_error</p>
+    }
+    else if (_snapshot is null)
+    {
+        <p class="muted">CARREGANDO...</p>
+    }
+    else
+    {
+        <div class="home-lite">
+            <section class="win" aria-label="Resumo dos créditos">
+                <div class="win-title"><span>Resumo</span></div>
+                <div class="win-body home-balance">
+                    <div class="home-balance-head">
+                        <div>
+                            <span class="label">Disponível agora</span>
+                            <strong class="home-balance-value">@Aic.Format(_snapshot.Balance.AvailableMinor)</strong>
+                            <span class="muted">
+                                @(_snapshot.Balance.ReservedMinor > 0
+                                    ? $"{Aic.Format(_snapshot.Balance.ReservedMinor)} guardados para conversas em andamento — o que não for usado volta sozinho."
+                                    : "Nenhum valor guardado no momento.")
+                            </span>
+                        </div>
+                        <div class="page-actions">
+                            <a class="btn primary" href="/chat">Conversar com a Iris</a>
+                        </div>
+                    </div>
+                    <div class="home-stats">
+                        <div><span class="label">Bônus de boas-vindas</span><strong>@LiteBucket(CreditBucket.Promotional)</strong><span class="muted">todo mundo começa com eles</span></div>
+                        <div><span class="label">Ganhos pelo computador</span><strong>@LiteBucket(CreditBucket.Earned)</strong><span class="muted">quando a conversão estiver ativa</span></div>
+                        <div><span class="label">Comprados</span><strong>@LiteBucket(CreditBucket.Purchased)</strong><span class="muted">créditos adquiridos</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="win" aria-label="Últimas movimentações">
+                <div class="win-title"><span>Últimas movimentações</span></div>
+                <div class="home-ledger">
+                    @if (_snapshot.Transactions.Count == 0)
+                    {
+                        <p class="muted">Nenhuma movimentação ainda.</p>
+                    }
+                    else
+                    {
+                        @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc).Take(12))
+                        {
+                            <div class="home-ledger-row">
+                                <span class="mono muted">@transaction.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
+                                <span>@LiteTypeLabel(transaction.Type)</span>
+                                <span class="mono num">@Aic.Format(transaction.Entries.Max(x => x.AmountMinor))</span>
+                            </div>
+                        }
+                    }
+                    <div class="home-ledger-foot">
+                        <span class="muted">Extrato técnico completo no modo completo (menu Conta).</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+    }
+}
+else
+{
 <div class="page-head">
     <p class="eyebrow">atos:/WALLET</p>
     <h1>AI wallet</h1>
@@ -145,8 +218,27 @@ else
         </div>
     </section>
 }
+}
 
 @code {
+    private AIFarmInterfaceMode Mode { get; set; } = AIFarmInterfaceMode.Pro;
+
+    private bool IsLite => Mode == AIFarmInterfaceMode.Lite;
+
+    private string LiteBucket(CreditBucket bucket) =>
+        Aic.Format(_snapshot!.Balance.AvailableByBucket.GetValueOrDefault(bucket));
+
+    private static string LiteTypeLabel(LedgerTransactionType type) => type switch
+    {
+        LedgerTransactionType.Grant => "Créditos recebidos",
+        LedgerTransactionType.Reserve => "Guardado para uma conversa",
+        LedgerTransactionType.Capture => "Usado numa conversa",
+        LedgerTransactionType.Release => "Devolvido ao saldo",
+        LedgerTransactionType.Reward => "Ganho do seu computador",
+        LedgerTransactionType.Refund => "Reembolso",
+        _ => "Correção"
+    };
+
     private WalletSnapshot? _snapshot;
     private string? _error;
 
@@ -154,6 +246,7 @@ else
     {
         try
         {
+            Mode = await InterfaceMode.GetAsync();
             _snapshot = await WalletService.GetSnapshotAsync();
         }
         catch (Exception)

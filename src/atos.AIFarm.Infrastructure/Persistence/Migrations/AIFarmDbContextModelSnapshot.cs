@@ -232,6 +232,13 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<string>("InterfaceMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasDefaultValue("Lite");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -239,7 +246,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("accounts", "aifarm");
+                    b.ToTable("accounts", "aifarm", t =>
+                        {
+                            t.HasCheckConstraint("CK_accounts_interface_mode", "\"InterfaceMode\" IN ('Lite', 'Pro')");
+                        });
                 });
 
             modelBuilder.Entity("atos.AIFarm.Infrastructure.Persistence.AiExecutionRecord", b =>

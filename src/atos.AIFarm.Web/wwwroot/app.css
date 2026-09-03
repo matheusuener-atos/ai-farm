@@ -728,3 +728,9 @@ td.error-text::before { background: var(--red); }
 .economics-warning { background: var(--amber); }
 .economics-warning strong, .economics-warning span { color: var(--ink); }
 .conversation-search input::placeholder { text-transform: none; }
+
+/* Farmer Lite (ADR 0030): mesmas janelas, textos e passos simplificados. */
+.home-lite { display: grid; gap: 18px; max-width: 780px; }
+.lite-steps { margin: 0; padding-left: 22px; display: grid; gap: 10px; font-size: 14px; }
+.lite-steps li::marker { font-weight: 700; color: var(--orange); }
+.lite-footnote { display: block; margin-top: 14px; }
