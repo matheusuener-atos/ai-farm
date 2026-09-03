@@ -66,8 +66,10 @@ internal sealed class PostgresFarmDemandQueueService(
         }
         var record = new FarmDemandRecord
         {
-            Id = Guid.NewGuid(), AccountId = identity.AccountId,
-            ApiTokenId = tokenId, ApiIdempotencyKey = idempotencyKey,
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            ApiTokenId = tokenId,
+            ApiIdempotencyKey = idempotencyKey,
             WorkloadId = validated.Submission.Definition.Id,
             WorkloadVersion = validated.Submission.Definition.Version,
             RequiredLogicalProcessors = validated.Submission.Definition.RequiredLogicalProcessors,
@@ -80,16 +82,22 @@ internal sealed class PostgresFarmDemandQueueService(
             InputSizeBytes = validated.Submission.InputSizeBytes,
             InputDigest = validated.Submission.InputDigest,
             Priority = (int)validated.Priority,
-            Status = FarmDemandStatus.Queued.ToString(), Attempts = 0,
-            NextAttemptAtUtc = now, ExpiresAtUtc = now.AddMinutes(validated.LifetimeMinutes),
+            Status = FarmDemandStatus.Queued.ToString(),
+            Attempts = 0,
+            NextAttemptAtUtc = now,
+            ExpiresAtUtc = now.AddMinutes(validated.LifetimeMinutes),
             Detail = $"Aguardando capacidade para {parts.Count} shard(s).",
-            CreatedAtUtc = now, UpdatedAtUtc = now
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
         };
         db.FarmDemands.Add(record);
         db.FarmDemandShards.AddRange(parts.Select((payload, index) => new FarmDemandShardRecord
         {
-            Id = Guid.NewGuid(), DemandId = record.Id, Sequence = index + 1,
-            InputPayload = payload, InputSizeBytes = Encoding.UTF8.GetByteCount(payload),
+            Id = Guid.NewGuid(),
+            DemandId = record.Id,
+            Sequence = index + 1,
+            InputPayload = payload,
+            InputSizeBytes = Encoding.UTF8.GetByteCount(payload),
             InputDigest = FarmDeterministicWorkloads.ComputeInputDigest(payload)
         }));
         try { await db.SaveChangesAsync(cancellationToken); }

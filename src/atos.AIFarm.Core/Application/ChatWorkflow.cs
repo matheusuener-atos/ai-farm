@@ -278,11 +278,31 @@ public sealed class ChatWorkflow(
         var operationId = Guid.NewGuid();
         if (usageBudget is not null)
         {
-            await usageBudget.ReserveAsync(
-                operationId,
-                plan.MaximumCostMinor,
-                $"{idempotencyKey}:budget",
-                cancellationToken);
+            var budgetCheckedAtUtc = _timeProvider.GetUtcNow();
+            try
+            {
+                await usageBudget.ReserveAsync(
+                    operationId,
+                    plan.MaximumCostMinor,
+                    $"{idempotencyKey}:budget",
+                    cancellationToken);
+            }
+            catch (AiUsageBudgetExceededException exception)
+            {
+                await chat.SaveFailedAsync(
+                    idempotencyKey,
+                    new FailedChatExecution(
+                        conversationId,
+                        operationId,
+                        plan.Route,
+                        plan.MaximumCostMinor,
+                        FailureCode(exception),
+                        budgetCheckedAtUtc,
+                        _timeProvider.GetUtcNow(),
+                        plan.DataClassification),
+                    CancellationToken.None);
+                throw;
+            }
         }
 
         ReservationResult reservation;

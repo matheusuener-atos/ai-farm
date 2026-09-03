@@ -8,7 +8,8 @@ namespace atos.AIFarm.Infrastructure.Persistence;
 public sealed class PostgresAiUsageBudgetService(
     IDbContextFactory<AIFarmDbContext> dbFactory,
     IAIFarmIdentityAccessor identityAccessor,
-    TimeProvider timeProvider) : IAiUsageBudgetService
+    TimeProvider timeProvider,
+    AiUsageSafetyCapPolicy safetyCap) : IAiUsageBudgetService
 {
     private static readonly TimeSpan ReservationLifetime = TimeSpan.FromMinutes(15);
 
@@ -85,22 +86,33 @@ public sealed class PostgresAiUsageBudgetService(
                 .SetProperty(x => x.SettledAtUtc, now), cancellationToken);
 
         var policy = await GetPolicyAsync(db, identity.AccountId, cancellationToken);
-        if (policy.IsEnabled)
+        if (policy.IsEnabled && estimatedCostMinor > policy.MaximumPerRequestMinor)
+            throw Exceeded("por tarefa", policy.MaximumPerRequestMinor, estimatedCostMinor);
+        if (policy.IsEnabled || safetyCap.IsEnabled)
         {
-            if (estimatedCostMinor > policy.MaximumPerRequestMinor)
-                throw Exceeded("por tarefa", policy.MaximumPerRequestMinor, estimatedCostMinor);
             var snapshot = await BuildSnapshotAsync(db, identity.AccountId, now, cancellationToken);
-            if (snapshot.UsedTodayMinor + snapshot.ReservedMinor + estimatedCostMinor > policy.DailyLimitMinor)
-                throw Exceeded("diário", policy.DailyLimitMinor, snapshot.UsedTodayMinor + snapshot.ReservedMinor + estimatedCostMinor);
-            if (snapshot.UsedThisMonthMinor + snapshot.ReservedMinor + estimatedCostMinor > policy.MonthlyLimitMinor)
-                throw Exceeded("mensal", policy.MonthlyLimitMinor, snapshot.UsedThisMonthMinor + snapshot.ReservedMinor + estimatedCostMinor);
+            var projectedToday = snapshot.UsedTodayMinor + snapshot.ReservedMinor + estimatedCostMinor;
+            if (policy.IsEnabled)
+            {
+                if (projectedToday > policy.DailyLimitMinor)
+                    throw Exceeded("diário", policy.DailyLimitMinor, projectedToday);
+                if (snapshot.UsedThisMonthMinor + snapshot.ReservedMinor + estimatedCostMinor > policy.MonthlyLimitMinor)
+                    throw Exceeded("mensal", policy.MonthlyLimitMinor, snapshot.UsedThisMonthMinor + snapshot.ReservedMinor + estimatedCostMinor);
+            }
+            if (safetyCap.IsEnabled && projectedToday > safetyCap.DailyCapMinor)
+                throw SafetyCapReached(safetyCap.DailyCapMinor, projectedToday);
         }
 
         db.AiUsageBudgetReservations.Add(new AiUsageBudgetReservationRecord
         {
-            Id = Guid.NewGuid(), AccountId = identity.AccountId, OperationId = operationId,
-            IdempotencyKey = idempotencyKey, ReservedMinor = estimatedCostMinor,
-            Status = "Active", CreatedAtUtc = now, ExpiresAtUtc = now.Add(ReservationLifetime)
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            OperationId = operationId,
+            IdempotencyKey = idempotencyKey,
+            ReservedMinor = estimatedCostMinor,
+            Status = "Active",
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.Add(ReservationLifetime)
         });
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -171,4 +183,8 @@ public sealed class PostgresAiUsageBudgetService(
 
     private static AiUsageBudgetExceededException Exceeded(string period, long limit, long projected) => new(
         $"Orçamento {period} da Iris excedido: limite {Aic.Format(limit)}, projeção {Aic.Format(projected)}.");
+
+    private static AiUsageBudgetExceededException SafetyCapReached(long limit, long projected) => new(
+        $"Teto diário de segurança do provider real atingido: limite {Aic.Format(limit)}, projeção {Aic.Format(projected)}.",
+        "DailySafetyCapReached");
 }

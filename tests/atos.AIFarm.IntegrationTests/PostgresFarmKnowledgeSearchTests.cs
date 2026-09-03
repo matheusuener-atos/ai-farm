@@ -10,12 +10,11 @@ namespace atos.AIFarm.IntegrationTests;
 [Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmKnowledgeSearchTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task SearchUsesOnlyIntactCompletedIndexesFromCurrentAccount()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var ownerId = Guid.NewGuid();
         var foreignId = Guid.NewGuid();
         try
@@ -63,21 +62,30 @@ public sealed class PostgresFarmKnowledgeSearchTests
         var now = DateTimeOffset.UtcNow;
         db.FarmDemands.Add(new FarmDemandRecord
         {
-            Id = Guid.NewGuid(), AccountId = accountId,
+            Id = Guid.NewGuid(),
+            AccountId = accountId,
             WorkloadId = "iris-text-index-v1",
             WorkloadVersion = "atos-iris-text-index-v1",
-            RequiredLogicalProcessors = 1, RequiredMemoryBytes = 128L * 1024 * 1024,
-            TargetShards = 1, Label = label,
-            InputVersion = "atos-text-input-v1", InputPayload = input,
-            InputSizeBytes = Encoding.UTF8.GetByteCount(input), InputDigest = inputDigest,
+            RequiredLogicalProcessors = 1,
+            RequiredMemoryBytes = 128L * 1024 * 1024,
+            TargetShards = 1,
+            Label = label,
+            InputVersion = "atos-text-input-v1",
+            InputPayload = input,
+            InputSizeBytes = Encoding.UTF8.GetByteCount(input),
+            InputDigest = inputDigest,
             Priority = (int)FarmDemandPriority.Normal,
-            Status = FarmDemandStatus.Completed.ToString(), Attempts = 1,
-            NextAttemptAtUtc = now, ExpiresAtUtc = now.AddDays(1),
+            Status = FarmDemandStatus.Completed.ToString(),
+            Attempts = 1,
+            NextAttemptAtUtc = now,
+            ExpiresAtUtc = now.AddDays(1),
             OutputVersion = FarmDistributedTextIndex.Version,
             OutputPayload = aggregate.Payload,
             OutputSizeBytes = Encoding.UTF8.GetByteCount(aggregate.Payload),
             OutputDigest = intact ? aggregate.Digest : new string('0', 64),
-            FinishedAtUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now
+            FinishedAtUtc = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
         });
         await db.SaveChangesAsync();
     }
@@ -109,17 +117,4 @@ public sealed class PostgresFarmKnowledgeSearchTests
         await db.Accounts.Where(x => x.Id == accountId).ExecuteDeleteAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var value = Environment.GetEnvironmentVariable(key);
-        if (!string.IsNullOrWhiteSpace(value)) return value;
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "atos.AIFarm.slnx")))
-            directory = directory.Parent;
-        var path = Path.Combine(directory?.FullName ?? Directory.GetCurrentDirectory(), ".env.local");
-        if (!File.Exists(path)) return null;
-        var prefix = key + "=";
-        return File.ReadLines(path).FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal))?
-            [prefix.Length..].Trim().Trim('"', '\'');
-    }
 }

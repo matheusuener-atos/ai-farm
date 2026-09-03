@@ -10,12 +10,11 @@ namespace atos.AIFarm.IntegrationTests;
 
 public sealed class PostgresAuditTrailTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task PersonalApiTokensAreHashedScopedRevocableAndAccountIsolated()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var firstIdentity = NewIdentity("token-first");
         var secondIdentity = NewIdentity("token-second");
         try
@@ -71,12 +70,11 @@ public sealed class PostgresAuditTrailTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task IrisBudgetIsEnforcedIdempotentAndIsolatedByAccount()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var firstIdentity = NewIdentity("budget-first");
         var secondIdentity = NewIdentity("budget-second");
         try
@@ -117,12 +115,11 @@ public sealed class PostgresAuditTrailTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task IncidentsAreDetectedAcknowledgedAndIsolatedByAccount()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var firstIdentity = NewIdentity("incident-first");
         var secondIdentity = NewIdentity("incident-second");
         try
@@ -166,12 +163,11 @@ public sealed class PostgresAuditTrailTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task AuditIsAccountScopedFilterableAndExportsDigestEnvelope()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var firstIdentity = NewIdentity("audit-first");
         var secondIdentity = NewIdentity("audit-second");
 
@@ -282,20 +278,4 @@ public sealed class PostgresAuditTrailTests
         await db.SaveChangesAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var path = Path.Combine(directory.FullName, ".env.local");
-            if (File.Exists(path))
-            {
-                var prefix = $"{key}=";
-                var line = File.ReadLines(path).FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal));
-                return line?[prefix.Length..].Trim().Trim('"', '\'');
-            }
-            directory = directory.Parent;
-        }
-        return null;
-    }
 }

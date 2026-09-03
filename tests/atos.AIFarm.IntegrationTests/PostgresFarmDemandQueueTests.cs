@@ -10,12 +10,11 @@ namespace atos.AIFarm.IntegrationTests;
 [Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmDemandQueueTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task ConcurrentDispatchCreatesExactlyOneVerifiedJob()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "demand queue test");
         try
@@ -52,12 +51,11 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task QueuedDemandCanBeCancelledAndExpired()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "demand lifecycle test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -80,12 +78,11 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task CapacityFailureRequeuesAndLaterDispatchesToAgent()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "demand retry test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -99,17 +96,23 @@ public sealed class PostgresFarmDemandQueueTests
             {
                 db.FarmNodes.Add(new FarmNodeRecord
                 {
-                    Id = agentId, AccountId = accountId, Name = "QUEUE-AGENT",
+                    Id = agentId,
+                    AccountId = accountId,
+                    Name = "QUEUE-AGENT",
                     Status = FarmNodeStatus.Paused.ToString(),
                     VerificationLevel = FarmVerificationLevel.Detected.ToString(),
                     ConnectionKind = FarmNodeConnectionKind.Agent.ToString(),
                     AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
                     AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
-                    AgentCredentialIssuedAtUtc = clock.GetUtcNow(), AgentAcceptJobs = true,
-                    AgentMaxLogicalProcessors = 1, AgentMaxMemoryBytes = 256L * 1024 * 1024,
-                    Runtime = ".NET 10 // test", LogicalProcessors = 1,
+                    AgentCredentialIssuedAtUtc = clock.GetUtcNow(),
+                    AgentAcceptJobs = true,
+                    AgentMaxLogicalProcessors = 1,
+                    AgentMaxMemoryBytes = 256L * 1024 * 1024,
+                    Runtime = ".NET 10 // test",
+                    LogicalProcessors = 1,
                     MemoryBytes = 512L * 1024 * 1024,
-                    CreatedAtUtc = clock.GetUtcNow(), LastSeenAtUtc = clock.GetUtcNow()
+                    CreatedAtUtc = clock.GetUtcNow(),
+                    LastSeenAtUtc = clock.GetUtcNow()
                 });
                 await db.SaveChangesAsync();
             }
@@ -141,12 +144,11 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task ResourceAwareSchedulerUsesBestFitNodeAndUpdatesCapacityMatrix()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "capacity matrix test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -186,12 +188,11 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task DistributedDemandFansOutToTwoAgentsAndAggregatesVerifiedOutput()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "distributed demand test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -276,12 +277,11 @@ public sealed class PostgresFarmDemandQueueTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task MultiSlotAgentRunsTwoShardsWithinReservedResources()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "multi slot agent test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -406,18 +406,25 @@ public sealed class PostgresFarmDemandQueueTests
 
     private static FarmNodeRecord Agent(
         Guid id, Guid accountId, string name, long authorizedMemory, DateTimeOffset now) => new()
-    {
-        Id = id, AccountId = accountId, Name = name,
-        Status = FarmNodeStatus.Online.ToString(),
-        VerificationLevel = FarmVerificationLevel.Detected.ToString(),
-        ConnectionKind = FarmNodeConnectionKind.Agent.ToString(),
-        AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
-        AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
-        AgentCredentialIssuedAtUtc = now, AgentAcceptJobs = true,
-        AgentMaxLogicalProcessors = 1, AgentMaxMemoryBytes = authorizedMemory,
-        Runtime = ".NET 10 // test", LogicalProcessors = 4,
-        MemoryBytes = 512L * 1024 * 1024, CreatedAtUtc = now, LastSeenAtUtc = now
-    };
+        {
+            Id = id,
+            AccountId = accountId,
+            Name = name,
+            Status = FarmNodeStatus.Online.ToString(),
+            VerificationLevel = FarmVerificationLevel.Detected.ToString(),
+            ConnectionKind = FarmNodeConnectionKind.Agent.ToString(),
+            AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
+            AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
+            AgentCredentialIssuedAtUtc = now,
+            AgentAcceptJobs = true,
+            AgentMaxLogicalProcessors = 1,
+            AgentMaxMemoryBytes = authorizedMemory,
+            Runtime = ".NET 10 // test",
+            LogicalProcessors = 4,
+            MemoryBytes = 512L * 1024 * 1024,
+            CreatedAtUtc = now,
+            LastSeenAtUtc = now
+        };
 
     private static FarmRemoteJobResult RemoteResult(string digest, long durationMilliseconds) =>
         new(digest, durationMilliseconds, 32L * 1024 * 1024, 8,
@@ -449,24 +456,7 @@ public sealed class PostgresFarmDemandQueueTests
         await db.SaveChangesAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var value = Environment.GetEnvironmentVariable(key);
-        if (!string.IsNullOrWhiteSpace(value)) return value;
-        var path = Path.Combine(FindRepositoryRoot(), ".env.local");
-        if (!File.Exists(path)) return null;
-        var prefix = key + "=";
-        return File.ReadLines(path).FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal))?
-            [prefix.Length..].Trim().Trim('"', '\'');
-    }
 
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "atos.AIFarm.slnx")))
-            directory = directory.Parent;
-        return directory?.FullName ?? Directory.GetCurrentDirectory();
-    }
 
     private sealed class AdjustableTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

@@ -9,12 +9,11 @@ namespace atos.AIFarm.IntegrationTests;
 [Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmNodeReliabilityTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task QuarantineRemovesFailingNodeFromCapacitySchedulerAndRaisesIncident()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "node reliability test");
@@ -119,21 +118,21 @@ public sealed class PostgresFarmNodeReliabilityTests
         Guid nodeId,
         FarmJobStatus status,
         DateTimeOffset finishedAtUtc) => new()
-    {
-        Id = Guid.NewGuid(),
-        AccountId = accountId,
-        NodeId = nodeId,
-        Workload = "SHA256_CHAIN",
-        WorkloadVersion = "atos-sha256-chain-v1",
-        VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
-        Nonce = Guid.NewGuid().ToString("N"),
-        Status = status.ToString(),
-        CreatedAtUtc = finishedAtUtc.AddSeconds(-1),
-        StartedAtUtc = finishedAtUtc.AddSeconds(-1),
-        FinishedAtUtc = finishedAtUtc,
-        ComputeUnitsMilli = status == FarmJobStatus.Completed ? 1_000 : 0,
-        FailureReason = status == FarmJobStatus.Completed ? null : "Synthetic reliability outcome."
-    };
+        {
+            Id = Guid.NewGuid(),
+            AccountId = accountId,
+            NodeId = nodeId,
+            Workload = "SHA256_CHAIN",
+            WorkloadVersion = "atos-sha256-chain-v1",
+            VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
+            Nonce = Guid.NewGuid().ToString("N"),
+            Status = status.ToString(),
+            CreatedAtUtc = finishedAtUtc.AddSeconds(-1),
+            StartedAtUtc = finishedAtUtc.AddSeconds(-1),
+            FinishedAtUtc = finishedAtUtc,
+            ComputeUnitsMilli = status == FarmJobStatus.Completed ? 1_000 : 0,
+            FailureReason = status == FarmJobStatus.Completed ? null : "Synthetic reliability outcome."
+        };
 
     private static ServiceProvider BuildProvider(
         string connectionString,
@@ -179,22 +178,7 @@ public sealed class PostgresFarmNodeReliabilityTests
         await db.SaveChangesAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var path = Path.Combine(FindRepositoryRoot(), ".env.local");
-        if (!File.Exists(path)) return null;
-        var prefix = key + "=";
-        return File.ReadLines(path).FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal))?
-            [prefix.Length..].Trim().Trim('"', '\'');
-    }
 
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "atos.AIFarm.slnx")))
-            directory = directory.Parent;
-        return directory?.FullName ?? Directory.GetCurrentDirectory();
-    }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

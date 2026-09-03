@@ -17,11 +17,13 @@ public static class DependencyInjection
         ChatExecutionLimits? executionLimits = null,
         AiProviderProtectionOptions? providerProtection = null,
         OpenAiProviderOptions? openAi = null,
-        ChatContextLimits? contextLimits = null)
+        ChatContextLimits? contextLimits = null,
+        AiUsageSafetyCapPolicy? safetyCap = null)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton(executionLimits ?? ChatExecutionLimits.Default);
         services.TryAddSingleton(providerProtection ?? AiProviderProtectionOptions.Default);
+        services.TryAddSingleton((safetyCap ?? AiUsageSafetyCapPolicy.Disabled).Validate());
         var configuredContextLimits = (contextLimits ?? ChatContextLimits.Default).Validate();
         services.TryAddSingleton(configuredContextLimits);
         services.TryAddSingleton<IChatContextPlanner>(
@@ -89,6 +91,7 @@ public static class DependencyInjection
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
+        services.TryAddSingleton(AiUsageSafetyCapPolicy.Disabled);
         services.TryAddSingleton(
             farmManifestSigning ?? FarmManifestSigningOptions.Development);
         services.TryAddSingleton(

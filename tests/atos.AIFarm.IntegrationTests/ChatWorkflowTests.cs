@@ -108,6 +108,35 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task SafetyCapDenialIsRecordedAsFailedExecutionForIncidents()
+    {
+        var wallet = await FundedWalletAsync();
+        var chat = new InMemoryChatStore();
+        var budget = new InMemoryAiUsageBudgetService(
+            TimeProvider.System,
+            new AiUsageSafetyCapPolicy(true, Aic.FromAic(5)));
+        var workflow = new ChatWorkflow(
+            wallet,
+            new FixedPriceEstimator(),
+            new BestAvailableRouteSelector(),
+            new FakeAiProvider(),
+            chat,
+            usageBudget: budget);
+
+        var error = await Assert.ThrowsAsync<AiUsageBudgetExceededException>(() =>
+            workflow.SendAsync("estourar o teto de segurança", "safety-cap-denied"));
+
+        Assert.Equal("DailySafetyCapReached", error.FailureCode);
+        Assert.False(error.IsRetryable);
+        var failed = Assert.Single((await chat.GetDashboardAsync()).RecentExecutions);
+        Assert.Equal("DailySafetyCapReached", failed.Status);
+        Assert.Equal(0, failed.ActualCostMinor);
+        var snapshot = await wallet.GetSnapshotAsync();
+        Assert.Equal(Aic.FromAic(1_000), snapshot.Balance.AvailableMinor);
+        Assert.Equal(0, snapshot.Balance.ReservedMinor);
+    }
+
+    [Fact]
     public async Task RepeatedRequestReturnsPreviousResultWithoutSecondDebit()
     {
         var wallet = await FundedWalletAsync();

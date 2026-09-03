@@ -37,7 +37,11 @@ public sealed class PostgresFarmKnowledgeSearchService(
             .Take(100)
             .Select(x => new
             {
-                x.Id, x.Label, x.InputPayload, x.OutputPayload, x.OutputDigest,
+                x.Id,
+                x.Label,
+                x.InputPayload,
+                x.OutputPayload,
+                x.OutputDigest,
                 IndexedAtUtc = x.FinishedAtUtc ?? x.UpdatedAtUtc
             })
             .ToArrayAsync(cancellationToken);
