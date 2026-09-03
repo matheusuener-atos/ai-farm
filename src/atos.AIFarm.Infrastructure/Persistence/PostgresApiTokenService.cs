@@ -38,11 +38,14 @@ public sealed class PostgresApiTokenService(
             var secret = $"{TokenPrefix}{prefix}_{secretPart}";
             var record = new ApiTokenRecord
             {
-                Id = Guid.NewGuid(), AccountId = identity.AccountId,
-                Name = normalized.Name, Prefix = prefix,
+                Id = Guid.NewGuid(),
+                AccountId = identity.AccountId,
+                Name = normalized.Name,
+                Prefix = prefix,
                 SecretHash = SHA256.HashData(Encoding.UTF8.GetBytes(secret)),
                 Scopes = (int)normalized.Scopes,
-                CreatedAtUtc = now, ExpiresAtUtc = normalized.ExpiresAtUtc
+                CreatedAtUtc = now,
+                ExpiresAtUtc = normalized.ExpiresAtUtc
             };
             db.ApiTokens.Add(record);
             try

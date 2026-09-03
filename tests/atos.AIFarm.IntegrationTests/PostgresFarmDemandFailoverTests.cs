@@ -9,12 +9,11 @@ namespace atos.AIFarm.IntegrationTests;
 [Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmDemandFailoverTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task FailedShardRetriesOnAnotherNodeAndPreservesAttemptHistory()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "demand failover test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -105,12 +104,11 @@ public sealed class PostgresFarmDemandFailoverTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task DemandFailsAfterPersistedShardAttemptBudgetIsExhausted()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "demand retry budget test");
         var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
@@ -215,24 +213,7 @@ public sealed class PostgresFarmDemandFailoverTests
         await db.SaveChangesAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var value = Environment.GetEnvironmentVariable(key);
-        if (!string.IsNullOrWhiteSpace(value)) return value;
-        var path = Path.Combine(FindRepositoryRoot(), ".env.local");
-        if (!File.Exists(path)) return null;
-        var prefix = key + "=";
-        return File.ReadLines(path).FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal))?
-            [prefix.Length..].Trim().Trim('"', '\'');
-    }
 
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "atos.AIFarm.slnx")))
-            directory = directory.Parent;
-        return directory?.FullName ?? Directory.GetCurrentDirectory();
-    }
 
     private sealed class AdjustableTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

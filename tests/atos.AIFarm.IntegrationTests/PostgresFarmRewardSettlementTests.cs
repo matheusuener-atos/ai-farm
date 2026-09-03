@@ -9,12 +9,11 @@ namespace atos.AIFarm.IntegrationTests;
 
 public sealed class PostgresFarmRewardSettlementTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task SettlementIsVerifiedIdempotentBudgetedAndAccountScoped()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var otherAccountId = Guid.NewGuid();
@@ -90,12 +89,11 @@ public sealed class PostgresFarmRewardSettlementTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task DisabledPolicyExposesZeroPoolAndRejectsSettlement()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         try
@@ -193,19 +191,4 @@ public sealed class PostgresFarmRewardSettlementTests
         await db.SaveChangesAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var path = Path.Combine(directory.FullName, ".env.local");
-            if (File.Exists(path))
-                return File.ReadLines(path)
-                    .Select(line => line.Split('=', 2))
-                    .Where(parts => parts.Length == 2)
-                    .FirstOrDefault(parts => parts[0].Trim() == key)?[1].Trim().Trim('"');
-            directory = directory.Parent;
-        }
-        return null;
-    }
 }

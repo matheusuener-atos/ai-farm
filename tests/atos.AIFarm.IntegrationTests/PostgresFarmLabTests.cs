@@ -10,12 +10,11 @@ namespace atos.AIFarm.IntegrationTests;
 [Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmLabTests
 {
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task BenchmarkPersistsVerifiedJobAndAppendOnlyStateEvents()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos farm lab test");
@@ -150,12 +149,11 @@ public sealed class PostgresFarmLabTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task FarmSchedulesDispatchExactlyOnceAndPreserveAttribution()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos schedule test");
@@ -229,12 +227,11 @@ public sealed class PostgresFarmLabTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task UsefulTextJobPersistsVerifiedOutputAndRejectsTampering()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos useful job test");
         try
@@ -270,12 +267,11 @@ public sealed class PostgresFarmLabTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task PausedNodeRejectsNewJobs()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos paused farm test");
@@ -294,12 +290,11 @@ public sealed class PostgresFarmLabTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task DatabasePersistsIndependentResourceReservationsForConcurrentJobs()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos concurrent farm test");
@@ -329,12 +324,11 @@ public sealed class PostgresFarmLabTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task ComputePoolDispatchesConcurrentJobsToDistinctAgents()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos compute pool test");
         try
@@ -394,12 +388,11 @@ public sealed class PostgresFarmLabTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task AgentEnrollmentIsOneTimeAndHeartbeatExpiresOffline()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos agent protocol test");
@@ -753,17 +746,17 @@ public sealed class PostgresFarmLabTests
         Guid accountId,
         Guid nodeId,
         DateTimeOffset createdAtUtc) => new()
-    {
-        Id = Guid.NewGuid(),
-        AccountId = accountId,
-        NodeId = nodeId,
-        Workload = "SHA256_CHAIN",
-        WorkloadVersion = "atos-sha256-chain-v1",
-        VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
-        Nonce = Guid.NewGuid().ToString("N"),
-        Status = FarmJobStatus.Queued.ToString(),
-        CreatedAtUtc = createdAtUtc
-    };
+        {
+            Id = Guid.NewGuid(),
+            AccountId = accountId,
+            NodeId = nodeId,
+            Workload = "SHA256_CHAIN",
+            WorkloadVersion = "atos-sha256-chain-v1",
+            VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
+            Nonce = Guid.NewGuid().ToString("N"),
+            Status = FarmJobStatus.Queued.ToString(),
+            CreatedAtUtc = createdAtUtc
+        };
 
     private static async Task CleanupAsync(string connectionString, Guid accountId)
     {
@@ -807,19 +800,4 @@ public sealed class PostgresFarmLabTests
         public void Advance(TimeSpan value) => current = current.Add(value);
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var path = Path.Combine(directory.FullName, ".env.local");
-            if (File.Exists(path))
-                return File.ReadLines(path)
-                    .Select(line => line.Split('=', 2))
-                    .Where(parts => parts.Length == 2)
-                    .FirstOrDefault(parts => parts[0].Trim() == key)?[1].Trim().Trim('"');
-            directory = directory.Parent;
-        }
-        return null;
-    }
 }

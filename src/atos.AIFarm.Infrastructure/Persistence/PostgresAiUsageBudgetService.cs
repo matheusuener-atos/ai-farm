@@ -98,9 +98,14 @@ public sealed class PostgresAiUsageBudgetService(
 
         db.AiUsageBudgetReservations.Add(new AiUsageBudgetReservationRecord
         {
-            Id = Guid.NewGuid(), AccountId = identity.AccountId, OperationId = operationId,
-            IdempotencyKey = idempotencyKey, ReservedMinor = estimatedCostMinor,
-            Status = "Active", CreatedAtUtc = now, ExpiresAtUtc = now.Add(ReservationLifetime)
+            Id = Guid.NewGuid(),
+            AccountId = identity.AccountId,
+            OperationId = operationId,
+            IdempotencyKey = idempotencyKey,
+            ReservedMinor = estimatedCostMinor,
+            Status = "Active",
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.Add(ReservationLifetime)
         });
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

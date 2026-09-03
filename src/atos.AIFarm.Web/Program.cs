@@ -684,8 +684,11 @@ personalApi.MapPost("/farm/schedules/{scheduleId:guid}/pause", async (
     IFarmScheduleService schedules,
     CancellationToken cancellationToken) =>
 {
-    try { return Results.Ok(await schedules.SetStatusAsync(
-        scheduleId, FarmScheduleStatus.Paused, cancellationToken)); }
+    try
+    {
+        return Results.Ok(await schedules.SetStatusAsync(
+        scheduleId, FarmScheduleStatus.Paused, cancellationToken));
+    }
     catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
@@ -696,8 +699,11 @@ personalApi.MapPost("/farm/schedules/{scheduleId:guid}/resume", async (
     IFarmScheduleService schedules,
     CancellationToken cancellationToken) =>
 {
-    try { return Results.Ok(await schedules.SetStatusAsync(
-        scheduleId, FarmScheduleStatus.Active, cancellationToken)); }
+    try
+    {
+        return Results.Ok(await schedules.SetStatusAsync(
+        scheduleId, FarmScheduleStatus.Active, cancellationToken));
+    }
     catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
