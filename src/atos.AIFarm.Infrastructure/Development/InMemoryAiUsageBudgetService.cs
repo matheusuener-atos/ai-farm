@@ -3,8 +3,11 @@ using atos.AIFarm.Core.Wallet;
 
 namespace atos.AIFarm.Infrastructure.Development;
 
-public sealed class InMemoryAiUsageBudgetService(TimeProvider timeProvider) : IAiUsageBudgetService
+public sealed class InMemoryAiUsageBudgetService(
+    TimeProvider timeProvider,
+    AiUsageSafetyCapPolicy? safetyCap = null) : IAiUsageBudgetService
 {
+    private readonly AiUsageSafetyCapPolicy _safetyCap = safetyCap ?? AiUsageSafetyCapPolicy.Disabled;
     private readonly object _gate = new();
     private AiUsageBudgetPolicy _policy = AiUsageBudgetPolicy.Disabled;
     private DateTimeOffset _updatedAtUtc = timeProvider.GetUtcNow();
@@ -47,15 +50,20 @@ public sealed class InMemoryAiUsageBudgetService(TimeProvider timeProvider) : IA
                 return Task.FromResult(new AiUsageBudgetReservation(operationId, estimatedCostMinor, _policy.IsEnabled));
             }
             var snapshot = Snapshot();
+            var projectedToday = snapshot.UsedTodayMinor + snapshot.ReservedMinor + estimatedCostMinor;
             if (_policy.IsEnabled)
             {
                 if (estimatedCostMinor > _policy.MaximumPerRequestMinor)
                     throw Exceeded("por tarefa", _policy.MaximumPerRequestMinor, estimatedCostMinor);
-                if (snapshot.UsedTodayMinor + snapshot.ReservedMinor + estimatedCostMinor > _policy.DailyLimitMinor)
-                    throw Exceeded("diário", _policy.DailyLimitMinor, snapshot.UsedTodayMinor + snapshot.ReservedMinor + estimatedCostMinor);
+                if (projectedToday > _policy.DailyLimitMinor)
+                    throw Exceeded("diário", _policy.DailyLimitMinor, projectedToday);
                 if (snapshot.UsedThisMonthMinor + snapshot.ReservedMinor + estimatedCostMinor > _policy.MonthlyLimitMinor)
                     throw Exceeded("mensal", _policy.MonthlyLimitMinor, snapshot.UsedThisMonthMinor + snapshot.ReservedMinor + estimatedCostMinor);
             }
+            if (_safetyCap.IsEnabled && projectedToday > _safetyCap.DailyCapMinor)
+                throw new AiUsageBudgetExceededException(
+                    $"Teto diário de segurança do provider real atingido: limite {Aic.Format(_safetyCap.DailyCapMinor)}, projeção {Aic.Format(projectedToday)}.",
+                    "DailySafetyCapReached");
             var entry = new Entry(operationId, idempotencyKey, estimatedCostMinor, 0, "Active",
                 timeProvider.GetUtcNow(), timeProvider.GetUtcNow().AddMinutes(15));
             _entries.Add(operationId, entry);
