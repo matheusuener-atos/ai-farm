@@ -7,6 +7,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>atos-agent</AssemblyName>
     <RootNamespace>atos.AIFarm.Agent</RootNamespace>
+    <!-- O restore da solução precisa trazer os assets win-x64 para o publish
+         self-contained com "no-restore" do Dockerfile (NETSDK1047). -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
