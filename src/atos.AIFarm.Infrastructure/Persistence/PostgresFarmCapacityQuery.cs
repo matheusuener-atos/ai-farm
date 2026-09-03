@@ -7,7 +7,8 @@ internal sealed class PostgresFarmCapacityQuery(
     IDbContextFactory<AIFarmDbContext> factory,
     IAIFarmIdentityAccessor identityAccessor,
     IFarmLabService farmLab,
-    TimeProvider timeProvider) : IFarmCapacityQuery
+    TimeProvider timeProvider,
+    FarmNodeReliabilityPolicy nodeReliabilityPolicy) : IFarmCapacityQuery
 {
     public async Task<FarmCapacityDashboard> GetAsync(CancellationToken cancellationToken = default)
     {
@@ -31,6 +32,10 @@ internal sealed class PostgresFarmCapacityQuery(
                   x.Status == FarmDemandStatus.Processing.ToString() ||
                   x.Status == FarmDemandStatus.Submitted.ToString()), cancellationToken);
         var hasAgents = farm.Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent);
+        var now = timeProvider.GetUtcNow();
+        var reliabilities = await FarmNodeReliabilityProjection.LoadAsync(
+            db, farm.Nodes.Select(x => x.Id).ToArray(), now, nodeReliabilityPolicy,
+            cancellationToken);
         var nodes = farm.Nodes.Select(node =>
         {
             reservations.TryGetValue(node.Id, out var reserved);
@@ -40,16 +45,18 @@ internal sealed class PostgresFarmCapacityQuery(
             var availableMemory = Math.Max(0,
                 node.AuthorizedMemoryBytes - (reserved?.MemoryBytes ?? 0));
             var busy = activeJobCount > 0;
+            var reliability = reliabilities[node.Id];
             var workloads = FarmWorkloadCatalog.Definitions.Select(definition =>
             {
                 var blocker = FarmCapacityEvaluator.Evaluate(
-                    node, definition, availableProcessors, availableMemory, hasAgents);
+                    node, definition, availableProcessors, availableMemory, hasAgents,
+                    reliability.IsQuarantined);
                 return new FarmNodeWorkloadCapacity(
                     definition.Id, definition.Version,
                     blocker == FarmCapacityBlocker.None, blocker);
             }).ToArray();
             return new FarmNodeCapacitySnapshot(
-                node, busy, availableProcessors, availableMemory, workloads, activeJobCount);
+                node, busy, availableProcessors, availableMemory, workloads, activeJobCount, reliability);
         }).ToArray();
         var workloadsSummary = FarmWorkloadCatalog.Definitions.Select(definition =>
         {
@@ -63,6 +70,6 @@ internal sealed class PostgresFarmCapacityQuery(
                     .GroupBy(x => x.Blocker)
                     .ToDictionary(x => x.Key, x => x.Count()) as IReadOnlyDictionary<FarmCapacityBlocker, int>);
         }).ToArray();
-        return new(nodes, workloadsSummary, queued, timeProvider.GetUtcNow());
+        return new(nodes, workloadsSummary, queued, now);
     }
 }

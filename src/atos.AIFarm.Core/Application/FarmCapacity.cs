@@ -10,6 +10,7 @@ public enum FarmCapacityBlocker
     JobsDisabled,
     AgentVersionMismatch,
     InsufficientProcessors,
+    Quarantined,
     InsufficientMemory,
     Busy
 }
@@ -26,7 +27,8 @@ public sealed record FarmNodeCapacitySnapshot(
     int AvailableLogicalProcessors,
     long AvailableMemoryBytes,
     IReadOnlyList<FarmNodeWorkloadCapacity> Workloads,
-    int ActiveJobCount = 0)
+    int ActiveJobCount = 0,
+    FarmNodeReliabilitySnapshot? Reliability = null)
 {
     public int EligibleWorkloadCount => Workloads.Count(x => x.Eligible);
 }
@@ -57,18 +59,21 @@ public static class FarmCapacityEvaluator
         FarmNodeSnapshot node,
         FarmWorkloadDefinition definition,
         bool busy,
-        bool poolHasAgents) => Evaluate(
+        bool poolHasAgents,
+        bool quarantined = false) => Evaluate(
             node, definition,
             busy ? 0 : node.AuthorizedLogicalProcessors,
             busy ? 0 : node.AuthorizedMemoryBytes,
-            poolHasAgents);
+            poolHasAgents,
+            quarantined);
 
     public static FarmCapacityBlocker Evaluate(
         FarmNodeSnapshot node,
         FarmWorkloadDefinition definition,
         int availableLogicalProcessors,
         long availableMemoryBytes,
-        bool poolHasAgents)
+        bool poolHasAgents,
+        bool quarantined = false)
     {
         definition.ValidateResources();
         if (poolHasAgents && node.ConnectionKind == FarmNodeConnectionKind.Embedded)
@@ -81,6 +86,7 @@ public static class FarmCapacityEvaluator
         if (node.ConnectionKind == FarmNodeConnectionKind.Agent &&
             node.AgentVersion != FarmAgentProtocol.CurrentAgentVersion)
             return FarmCapacityBlocker.AgentVersionMismatch;
+        if (quarantined) return FarmCapacityBlocker.Quarantined;
         if (node.AuthorizedLogicalProcessors < definition.RequiredLogicalProcessors)
             return FarmCapacityBlocker.InsufficientProcessors;
         if (node.AuthorizedMemoryBytes < definition.RequiredMemoryBytes)
