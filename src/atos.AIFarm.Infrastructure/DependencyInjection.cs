@@ -82,7 +82,8 @@ public static class DependencyInjection
         AIFarmIdentity? identity = null,
         NeonObjectStorageOptions? objectStorage = null,
         FarmManifestSigningOptions? farmManifestSigning = null,
-        FarmNodeReliabilityPolicy? nodeReliabilityPolicy = null)
+        FarmNodeReliabilityPolicy? nodeReliabilityPolicy = null,
+        FarmRewardPolicy? rewardPolicy = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
@@ -90,6 +91,8 @@ public static class DependencyInjection
             farmManifestSigning ?? FarmManifestSigningOptions.Development);
         services.TryAddSingleton(
             (nodeReliabilityPolicy ?? FarmNodeReliabilityPolicy.Default).Validate());
+        services.TryAddSingleton(
+            (rewardPolicy ?? FarmRewardPolicy.Disabled).Validate());
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)
@@ -111,6 +114,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmEconomicsScenarioStore>();
         services.RemoveAll<IFarmBalanceQuery>();
         services.RemoveAll<IFarmRewardProposalStore>();
+        services.RemoveAll<IFarmRewardSettlementService>();
         services.RemoveAll<IFarmAnalyticsQuery>();
         services.RemoveAll<IFarmJobHistoryService>();
         services.RemoveAll<IFarmScheduleService>();
@@ -137,6 +141,7 @@ public static class DependencyInjection
         services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
         services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
         services.AddScoped<IFarmRewardProposalStore, PostgresFarmRewardProposalStore>();
+        services.AddScoped<IFarmRewardSettlementService, PostgresFarmRewardSettlementService>();
         services.AddScoped<IFarmAnalyticsQuery, PostgresFarmAnalyticsQuery>();
         services.AddScoped<IFarmJobHistoryService, PostgresFarmJobHistoryService>();
         services.AddScoped<PostgresFarmScheduleService>();

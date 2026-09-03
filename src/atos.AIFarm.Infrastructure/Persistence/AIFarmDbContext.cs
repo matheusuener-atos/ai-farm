@@ -29,6 +29,8 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmDemandShardRecord> FarmDemandShards => Set<FarmDemandShardRecord>();
     public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
     public DbSet<FarmRewardProposalRecord> FarmRewardProposals => Set<FarmRewardProposalRecord>();
+    public DbSet<FarmRewardBudgetPeriodRecord> FarmRewardBudgetPeriods => Set<FarmRewardBudgetPeriodRecord>();
+    public DbSet<FarmRewardSettlementRecord> FarmRewardSettlements => Set<FarmRewardSettlementRecord>();
     public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
     public DbSet<AiUsageBudgetPolicyRecord> AiUsageBudgetPolicies => Set<AiUsageBudgetPolicyRecord>();
     public DbSet<AiUsageBudgetReservationRecord> AiUsageBudgetReservations => Set<AiUsageBudgetReservationRecord>();
@@ -513,6 +515,42 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<FarmEconomicsScenarioRecord>().WithMany().HasForeignKey(x => x.ScenarioId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<FarmRewardBudgetPeriodRecord>(entity =>
+        {
+            entity.ToTable("farm_reward_budget_periods", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_farm_reward_budget_period_amounts",
+                    "\"BudgetMinor\" > 0 AND \"SpentMinor\" >= 0 AND \"SpentMinor\" <= \"BudgetMinor\"");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.PolicyVersion, x.PeriodStartUtc }).IsUnique();
+            entity.Property(x => x.PolicyVersion).HasMaxLength(80);
+        });
+
+        modelBuilder.Entity<FarmRewardSettlementRecord>(entity =>
+        {
+            entity.ToTable("farm_reward_settlements", table =>
+            {
+                table.HasCheckConstraint("CK_farm_reward_settlement_points", "\"ProcessingPointsMilli\" > 0");
+                table.HasCheckConstraint("CK_farm_reward_settlement_rate", "\"AicMinorPerThousandCp\" > 0");
+                table.HasCheckConstraint("CK_farm_reward_settlement_amount", "\"RewardAmountMinor\" > 0");
+                table.HasCheckConstraint("CK_farm_reward_settlement_digest", "length(\"Digest\") = 64");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.ProposalId).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.SettledAtUtc });
+            entity.Property(x => x.PolicyVersion).HasMaxLength(80);
+            entity.Property(x => x.ProposalDigest).HasMaxLength(64);
+            entity.Property(x => x.SourceEvidenceDigest).HasMaxLength(64);
+            entity.Property(x => x.Digest).HasMaxLength(64);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmRewardProposalRecord>().WithMany().HasForeignKey(x => x.ProposalId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<LedgerTransactionRecord>().WithMany().HasForeignKey(x => x.LedgerTransactionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmRewardBudgetPeriodRecord>().WithMany().HasForeignKey(x => x.BudgetPeriodId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<OperationalIncidentAcknowledgementRecord>(entity =>
         {
             entity.ToTable("operational_incident_acknowledgements");
@@ -786,6 +824,36 @@ public sealed class FarmRewardProposalRecord
     public string Version { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
+    public string Digest { get; set; } = string.Empty;
+}
+
+public sealed class FarmRewardBudgetPeriodRecord
+{
+    public Guid Id { get; set; }
+    public string PolicyVersion { get; set; } = string.Empty;
+    public DateTimeOffset PeriodStartUtc { get; set; }
+    public long BudgetMinor { get; set; }
+    public long SpentMinor { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class FarmRewardSettlementRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid ProposalId { get; set; }
+    public Guid JobId { get; set; }
+    public Guid LedgerTransactionId { get; set; }
+    public Guid BudgetPeriodId { get; set; }
+    public string PolicyVersion { get; set; } = string.Empty;
+    public DateTimeOffset PeriodStartUtc { get; set; }
+    public long ProcessingPointsMilli { get; set; }
+    public long AicMinorPerThousandCp { get; set; }
+    public long RewardAmountMinor { get; set; }
+    public string ProposalDigest { get; set; } = string.Empty;
+    public string SourceEvidenceDigest { get; set; } = string.Empty;
+    public DateTimeOffset SettledAtUtc { get; set; }
     public string Digest { get; set; } = string.Empty;
 }
 
