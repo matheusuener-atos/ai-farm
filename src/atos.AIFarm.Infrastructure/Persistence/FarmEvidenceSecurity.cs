@@ -154,7 +154,11 @@ internal static class FarmEvidenceSecurity
         out FarmJobEvidencePayload? evidence)
     {
         evidence = null;
-        var key = rootOptions.DeriveForAgent(job.NodeId);
+        // Seleciona a chave pelo KeyId persistido na evidência (ativa ou
+        // aposentada), para que a rotação não invalide jobs históricos; sem
+        // correspondência, a chave ativa mantém o comportamento fail-closed.
+        var key = rootOptions.FindAgentKey(job.NodeId, job.EvidenceKeyId) ??
+            rootOptions.DeriveForAgent(job.NodeId);
         var signatureValid = job.EvidenceVersion == Version &&
             job.EvidenceKeyId == key.KeyId &&
             TryVerify(
