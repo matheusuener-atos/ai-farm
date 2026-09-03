@@ -243,6 +243,15 @@ else
 {
     farmManifestSigning = new FarmManifestSigningOptions(manifestSigningKey);
 }
+var nodeReliabilityPolicy = new FarmNodeReliabilityPolicy(
+    builder.Configuration.GetValue("AIFarm:Farm:Reliability:SampleSize", 20),
+    builder.Configuration.GetValue("AIFarm:Farm:Reliability:PriorSuccesses", 4),
+    builder.Configuration.GetValue("AIFarm:Farm:Reliability:PriorFailures", 1),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Reliability:ConsecutiveFailureThreshold", 3),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Reliability:QuarantineMinutes", 30)).Validate();
+
 var rewardPolicy = new FarmRewardPolicy(
     builder.Configuration.GetValue("AIFarm:Farm:Rewards:Enabled", false),
     builder.Configuration.GetValue(
@@ -258,6 +267,7 @@ builder.Services.AddAIFarmPostgres(
     postgresConnection,
     objectStorage: objectStorage,
     farmManifestSigning: farmManifestSigning,
+    nodeReliabilityPolicy: nodeReliabilityPolicy,
     rewardPolicy: rewardPolicy);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {

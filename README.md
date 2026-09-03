@@ -85,6 +85,13 @@ informe no Dashboard do Render as variáveis secretas da branch Neon
 - `DATABASE_URL_UNPOOLED`: URL direta de `production`, usada nas migrations.
 - `AIFarm__Farm__ManifestSigningKey`: segredo Base64 de 256 bits usado para
   assinar manifests do Compute Lab.
+- `AIFarm__Farm__Reliability__SampleSize`: tamanho da janela recente (padrão `20`);
+- `AIFarm__Farm__Reliability__PriorSuccesses`: sucessos iniciais conservadores (padrão `4`);
+- `AIFarm__Farm__Reliability__PriorFailures`: falhas iniciais conservadoras (padrão `1`);
+- `AIFarm__Farm__Reliability__ConsecutiveFailureThreshold`: falhas seguidas para
+  abrir quarentena (padrão `3`);
+- `AIFarm__Farm__Reliability__QuarantineMinutes`: duração da quarentena automática
+  (padrão `30`).
 
 Gere o segredo localmente e copie somente o resultado para o Environment do
 Render:
@@ -391,6 +398,17 @@ visão está disponível em `GET /api/v1/farm/capacity` com escopo de leitura da
 Farm. A fila mostra o contrato de recursos congelado em cada demanda e utiliza
 os diagnósticos do scheduler nas retentativas.
 
+O **Reliability-Aware Scheduler v1** calcula um score reproduzível a partir da
+janela recente de Jobs de cada Node. Conclusões elevam a confiança; falhas,
+timeouts e rejeições a reduzem; cancelamentos não penalizam a máquina. Três
+falhas consecutivas abrem, por padrão, quarentena de 30 minutos, impedindo novos
+Jobs sem ocultar ou pausar manualmente o Node. A expiração é automática.
+
+Entre Nodes elegíveis, a maior confiabilidade precede o best-fit de recursos. A
+matriz e `GET /api/v1/farm/capacity` expõem score, faixa, amostra, sequência de
+falhas e retorno previsto. Quarentenas ativas também geram incidente crítico.
+O cálculo usa o histórico existente e não requer migration.
+
 A **Distributed Demand v1** permite que uma única entrada de texto seja
 processada por até oito Nodes. Ao aceitar a demanda, o servidor divide tokens
 contíguos em shards determinísticos e persiste cada parte com digest próprio.
@@ -499,6 +517,9 @@ Implementado:
 - Compute Lab persistente com node por conta, pausa/retomada, benchmark determinístico, CP técnico e trilha de estados.
 - protocolo inicial de Compute Agent com vínculo único, credencial rotacionável, heartbeat e detecção de offline.
 - executável Windows do Compute Agent com inventário, Credential Manager, heartbeat contínuo, retry e desligamento controlado.
+- score determinístico de confiabilidade por Node, calculado em lote sobre o histórico recente;
+- quarentena automática após falhas consecutivas, com expiração, diagnóstico de capacidade e incidente crítico;
+- seleção de capacidade priorizada por confiabilidade antes do best-fit de CPU e memória.
 - despacho remoto assinado por Node, execução allowlisted no Agent e verificação determinística independente no servidor.
 - cancelamento remoto idempotente, rejeição explícita e watchdog de ofertas/runtimes abandonados.
 - política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.

@@ -36,6 +36,8 @@ public sealed class FarmCapacityTests
             FarmCapacityEvaluator.Evaluate(Node(memory: definition.RequiredMemoryBytes - 1), definition, false, true));
         Assert.Equal(FarmCapacityBlocker.StaleHeartbeat,
             FarmCapacityEvaluator.Evaluate(node with { IsHeartbeatFresh = false, Status = FarmNodeStatus.Offline }, definition, false, true));
+        Assert.Equal(FarmCapacityBlocker.Quarantined,
+            FarmCapacityEvaluator.Evaluate(node, definition, false, true, quarantined: true));
         Assert.Equal(FarmCapacityBlocker.EmbeddedSuppressed,
             FarmCapacityEvaluator.Evaluate(node with { ConnectionKind = FarmNodeConnectionKind.Embedded }, definition, false, true));
     }
