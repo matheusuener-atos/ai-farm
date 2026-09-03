@@ -12,11 +12,13 @@ RUN dotnet restore "atos.AIFarm.slnx"
 
 COPY . .
 RUN dotnet publish "src/atos.AIFarm.Web/atos.AIFarm.Web.csproj" --configuration Release --output /app/publish --no-restore /p:UseAppHost=false
+RUN dotnet publish "src/atos.AIFarm.Agent/atos.AIFarm.Agent.csproj" --configuration Release --runtime win-x64 --self-contained true --output /app/agent --no-restore /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
 
+COPY --from=build /app/agent/atos-agent.exe ./wwwroot/downloads/atos-compute-agent-win-x64.exe
 ENV ASPNETCORE_URLS=http://0.0.0.0:10000
 ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
 EXPOSE 10000
