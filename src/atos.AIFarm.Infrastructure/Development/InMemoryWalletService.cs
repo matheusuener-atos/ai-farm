@@ -24,7 +24,54 @@ public sealed class InMemoryWalletService : IWalletService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            return new WalletSnapshot(_wallet.Id, _wallet.GetBalance(), [.. _wallet.Transactions]);
+            var openReservations = _wallet.Reservations
+                .Where(x => x.Status == ReservationStatus.Active)
+                .OrderBy(x => x.ExpiresAtUtc)
+                .Select(x => new WalletReservationSnapshot(
+                    x.Id,
+                    x.Bucket,
+                    x.ReservedAmountMinor,
+                    x.ExpiresAtUtc))
+                .ToArray();
+            return new WalletSnapshot(
+                _wallet.Id,
+                _wallet.GetBalance(),
+                [.. _wallet.Transactions],
+                openReservations);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<PurchasedCreditResult> GrantPurchasedAsync(
+        long amountMinor,
+        Guid correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (correlationId == Guid.Empty)
+        {
+            throw new ArgumentException("O CorrelationId é obrigatório.", nameof(correlationId));
+        }
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var (transaction, wasReplayed) = _wallet.GrantPurchased(
+                amountMinor,
+                correlationId,
+                _timeProvider.GetUtcNow());
+            var originalAmount = transaction.Entries.Max(x => x.AmountMinor);
+            if (wasReplayed && originalAmount != amountMinor)
+            {
+                throw new InvalidOperationException(
+                    "O CorrelationId já foi usado por um crédito de valor diferente.");
+            }
+            return new PurchasedCreditResult(
+                transaction.Id,
+                correlationId,
+                originalAmount,
+                wasReplayed);
         }
         finally
         {

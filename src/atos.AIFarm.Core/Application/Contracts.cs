@@ -5,14 +5,30 @@ namespace atos.AIFarm.Core.Application;
 public sealed record WalletSnapshot(
     Guid WalletId,
     WalletBalance Balance,
-    IReadOnlyList<LedgerTransaction> Transactions);
+    IReadOnlyList<LedgerTransaction> Transactions,
+    IReadOnlyList<WalletReservationSnapshot> OpenReservations);
+
+public sealed record WalletReservationSnapshot(
+    Guid ReservationId,
+    CreditBucket Bucket,
+    long ReservedAmountMinor,
+    DateTimeOffset ExpiresAtUtc);
 
 public sealed record ReservationResult(Guid ReservationId, long ReservedAmountMinor);
+
+public sealed record PurchasedCreditResult(
+    Guid TransactionId,
+    Guid CorrelationId,
+    long AmountMinor,
+    bool WasReplayed);
+
+public sealed record WalletCreditApiRequest(long AmountMinor, Guid CorrelationId);
 
 public interface IWalletService
 {
     Task<WalletSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
     Task GrantPromotionalAsync(long amountMinor, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task<PurchasedCreditResult> GrantPurchasedAsync(long amountMinor, Guid correlationId, CancellationToken cancellationToken = default);
     Task<ReservationResult> ReservePromotionalAsync(Guid operationId, long amountMinor, string idempotencyKey, CancellationToken cancellationToken = default);
     Task CaptureAsync(Guid reservationId, long actualAmountMinor, string idempotencyKey, CancellationToken cancellationToken = default);
     Task ReleaseAsync(Guid reservationId, string idempotencyKey, string reason, CancellationToken cancellationToken = default);

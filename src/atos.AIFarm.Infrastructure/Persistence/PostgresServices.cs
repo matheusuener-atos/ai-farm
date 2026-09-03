@@ -52,10 +52,73 @@ public sealed class PostgresWalletService(
             bucket => BalanceFor(entryRecords, AvailableAccount(identity, bucket)));
         var reserved = Enum.GetValues<CreditBucket>()
             .Sum(bucket => BalanceFor(entryRecords, ReservedAccount(identity, bucket)));
+        var openReservations = await db.BalanceReservations
+            .Where(x => x.WalletId == identity.WalletId &&
+                x.Status == nameof(ReservationStatus.Active))
+            .OrderBy(x => x.ExpiresAtUtc)
+            .Select(x => new WalletReservationSnapshot(
+                x.Id,
+                Enum.Parse<CreditBucket>(x.Bucket),
+                x.ReservedAmountMinor,
+                x.ExpiresAtUtc))
+            .ToListAsync(cancellationToken);
         return new WalletSnapshot(
             identity.WalletId,
             new WalletBalance(availableByBucket.Values.Sum(), reserved, availableByBucket),
-            transactions);
+            transactions,
+            openReservations);
+    }
+
+    public async Task<PurchasedCreditResult> GrantPurchasedAsync(
+        long amountMinor,
+        Guid correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        EnsurePositive(amountMinor);
+        if (amountMinor > WalletLimits.MaximumAdministrativeCreditMinor)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(amountMinor),
+                "O crédito administrativo excede o teto por requisição.");
+        }
+        if (correlationId == Guid.Empty)
+        {
+            throw new ArgumentException("O CorrelationId é obrigatório.", nameof(correlationId));
+        }
+
+        var idempotencyKey = WalletAggregate.PurchasedCreditKey(correlationId);
+        await using var db = await OpenLockedAsync(identity, cancellationToken);
+        var existing = await db.LedgerTransactions.SingleOrDefaultAsync(
+            x => x.WalletId == identity.WalletId &&
+                 x.IdempotencyKey == idempotencyKey,
+            cancellationToken);
+        if (existing is not null)
+        {
+            var originalAmount = await db.LedgerEntries
+                .Where(x => x.TransactionId == existing.Id)
+                .MaxAsync(x => x.AmountMinor, cancellationToken);
+            if (originalAmount != amountMinor)
+            {
+                throw new InvalidOperationException(
+                    "O CorrelationId já foi usado por um crédito de valor diferente.");
+            }
+            await db.Database.CommitTransactionAsync(cancellationToken);
+            return new PurchasedCreditResult(existing.Id, correlationId, originalAmount, true);
+        }
+
+        var transactionId = AddBalancedTransaction(
+            db,
+            identity,
+            LedgerTransactionType.Grant,
+            correlationId,
+            idempotencyKey,
+            "Crédito administrativo no bucket Purchased",
+            timeProvider.GetUtcNow(),
+            (AvailableAccount(identity, CreditBucket.Purchased), CreditBucket.Purchased, LedgerDirection.Debit, amountMinor),
+            ("atos:PURCHASED_POOL:ADMIN:v1", CreditBucket.Purchased, LedgerDirection.Credit, amountMinor));
+        await SaveAndCommitAsync(db, cancellationToken);
+        return new PurchasedCreditResult(transactionId, correlationId, amountMinor, false);
     }
 
     public async Task GrantPromotionalAsync(
@@ -339,7 +402,7 @@ public sealed class PostgresWalletService(
                  x.IdempotencyKey == idempotencyKey,
             cancellationToken);
 
-    private void AddBalancedTransaction(
+    private Guid AddBalancedTransaction(
         AIFarmDbContext db,
         AIFarmIdentity identity,
         LedgerTransactionType type,
@@ -376,6 +439,7 @@ public sealed class PostgresWalletService(
             AmountMinor = entry.Amount,
             CreatedAtUtc = now
         }));
+        return transactionId;
     }
 
     private static LedgerEntry ToDomain(LedgerEntryRecord entry) => new(
