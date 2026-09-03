@@ -19,11 +19,17 @@ services:
         value: "true"
       - key: NEON_BRANCH
         value: production
+      - key: AIFarm__AI__Provider
+        value: OpenAI
+      - key: OPENAI_API_KEY
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_UNPOOLED
         sync: false
       - key: AIFarm__Farm__ManifestSigningKey
+        sync: false
+      - key: AIFarm__Farm__RetiredManifestSigningKeys
         sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false

@@ -34,6 +34,40 @@ public sealed class AiUsageBudgetTests
     }
 
     [Fact]
+    public void EnabledSafetyCapRequiresPositiveDailyCap()
+    {
+        Assert.Throws<ArgumentException>(() => new AiUsageSafetyCapPolicy(true, 0).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AiUsageSafetyCapPolicy(false, -1).Validate());
+        Assert.Equal(Aic.FromAic(50), new AiUsageSafetyCapPolicy(true, Aic.FromAic(50)).Validate().DailyCapMinor);
+    }
+
+    [Fact]
+    public async Task DailySafetyCapBlocksProjectedSpendEvenWithoutAccountPolicy()
+    {
+        var service = new InMemoryAiUsageBudgetService(
+            TimeProvider.System,
+            new AiUsageSafetyCapPolicy(true, Aic.FromAic(50)));
+        await service.ReserveAsync(Guid.NewGuid(), Aic.FromAic(40), "first");
+
+        var error = await Assert.ThrowsAsync<AiUsageBudgetExceededException>(() =>
+            service.ReserveAsync(Guid.NewGuid(), Aic.FromAic(20), "second"));
+        Assert.Equal("DailySafetyCapReached", error.FailureCode);
+        Assert.Contains("Teto diário de segurança", error.Message);
+        Assert.False(error.IsRetryable);
+
+        await service.ReserveAsync(Guid.NewGuid(), Aic.FromAic(10), "third");
+        Assert.Equal(Aic.FromAic(50), (await service.GetSnapshotAsync()).ReservedMinor);
+    }
+
+    [Fact]
+    public async Task DisabledSafetyCapKeepsLegacyBehaviour()
+    {
+        var service = new InMemoryAiUsageBudgetService(TimeProvider.System);
+        await service.ReserveAsync(Guid.NewGuid(), Aic.FromAic(500), "large");
+        Assert.Equal(Aic.FromAic(500), (await service.GetSnapshotAsync()).ReservedMinor);
+    }
+
+    [Fact]
     public async Task SettlementUsesActualCostAndIsIdempotent()
     {
         var service = new InMemoryAiUsageBudgetService(TimeProvider.System);

@@ -8,8 +8,16 @@ public sealed class FarmManifestSigningOptions
 {
     private const int MinimumKeyBytes = 32;
     private readonly byte[] key;
+    private readonly FarmManifestSigningOptions[] retired;
 
-    public FarmManifestSigningOptions(string base64Key)
+    /// <param name="base64Key">Chave ativa: assina manifestos e evidências novos.</param>
+    /// <param name="retiredBase64Keys">
+    /// Chaves aposentadas pela rotação: nunca assinam, mas continuam válidas
+    /// para revalidar manifestos e evidências históricos (ADR 0025).
+    /// </param>
+    public FarmManifestSigningOptions(
+        string base64Key,
+        IReadOnlyList<string>? retiredBase64Keys = null)
     {
         if (string.IsNullOrWhiteSpace(base64Key))
             throw new ArgumentException("A chave de assinatura do Compute Lab é obrigatória.", nameof(base64Key));
@@ -22,9 +30,26 @@ public sealed class FarmManifestSigningOptions
 
         if (key.Length < MinimumKeyBytes)
             throw new ArgumentException("A chave de assinatura do Compute Lab deve ter pelo menos 256 bits.", nameof(base64Key));
+
+        retired = retiredBase64Keys is { Count: > 0 }
+            ? [.. retiredBase64Keys.Select(x => new FarmManifestSigningOptions(x))]
+            : [];
     }
 
     internal ReadOnlySpan<byte> Key => key;
+
+    /// <summary>Chave ativa primeiro, depois as aposentadas, na ordem configurada.</summary>
+    internal IEnumerable<FarmManifestSigningOptions> VerificationCandidates
+    {
+        get
+        {
+            yield return this;
+            foreach (var candidate in retired)
+            {
+                yield return candidate;
+            }
+        }
+    }
 
     internal FarmAgentManifestKey DeriveForAgent(Guid nodeId)
     {
@@ -38,6 +63,21 @@ public sealed class FarmManifestSigningOptions
             new FarmManifestSigningOptions(verificationKey),
             verificationKey,
             keyId);
+    }
+
+    /// <summary>
+    /// Localiza, entre a chave ativa e as aposentadas, aquela cujo KeyId
+    /// derivado para o Node coincide com o KeyId persistido na evidência.
+    /// </summary>
+    internal FarmAgentManifestKey? FindAgentKey(Guid nodeId, string? keyId)
+    {
+        if (string.IsNullOrWhiteSpace(keyId)) return null;
+        foreach (var candidate in VerificationCandidates)
+        {
+            var derived = candidate.DeriveForAgent(nodeId);
+            if (derived.KeyId == keyId) return derived;
+        }
+        return null;
     }
 
     public static FarmManifestSigningOptions Development { get; } = new(
@@ -123,19 +163,30 @@ internal static class FarmManifestSecurity
         FarmManifestSigningOptions rootOptions,
         out FarmJobManifest? manifest)
     {
-        var verification = job.ManifestVersion is AgentProfileVersion or LegacyAgentVersion
-            ? rootOptions.DeriveForAgent(job.NodeId).Signing
-            : rootOptions;
-        if (!TryVerify(
-                job.ManifestPayload,
-                job.ManifestDigest,
-                job.ManifestSignature,
-                verification,
-                out manifest) ||
-            manifest is null)
-            return false;
+        // O manifesto não persiste KeyId; tenta a chave ativa e depois as
+        // aposentadas, para que a rotação não invalide jobs históricos.
+        manifest = null;
+        foreach (var root in rootOptions.VerificationCandidates)
+        {
+            var verification = job.ManifestVersion is AgentProfileVersion or LegacyAgentVersion
+                ? root.DeriveForAgent(job.NodeId).Signing
+                : root;
+            if (TryVerify(
+                    job.ManifestPayload,
+                    job.ManifestDigest,
+                    job.ManifestSignature,
+                    verification,
+                    out manifest) &&
+                manifest is not null)
+            {
+                return MatchesJobBinding(manifest, job);
+            }
+        }
+        return false;
+    }
 
-        return manifest.Version is EmbeddedVersion or AgentProfileVersion or LegacyAgentVersion &&
+    private static bool MatchesJobBinding(FarmJobManifest manifest, FarmJobRecord job) =>
+        manifest.Version is EmbeddedVersion or AgentProfileVersion or LegacyAgentVersion &&
             manifest.Version == job.ManifestVersion &&
             manifest.JobId == job.Id &&
             manifest.AttemptId == job.AttemptId &&
@@ -149,7 +200,6 @@ internal static class FarmManifestSecurity
             manifest.InputDigest == job.InputDigest &&
             SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
             SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
-    }
 
     private static bool TryHex(string? value, out byte[] bytes)
     {

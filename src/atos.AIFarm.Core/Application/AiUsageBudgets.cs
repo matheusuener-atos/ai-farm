@@ -41,6 +41,24 @@ public sealed record AiUsageBudgetSnapshot(
 
 public sealed record AiUsageBudgetReservation(Guid OperationId, long ReservedMinor, bool IsEnforced);
 
+/// <summary>
+/// Teto de segurança da instalação, por conta e por dia UTC, aplicado somente
+/// quando o Provider real está ativo. Independe da política opcional por conta.
+/// </summary>
+public sealed record AiUsageSafetyCapPolicy(bool IsEnabled, long DailyCapMinor)
+{
+    public static AiUsageSafetyCapPolicy Disabled { get; } = new(false, 0);
+
+    public AiUsageSafetyCapPolicy Validate()
+    {
+        if (DailyCapMinor < 0)
+            throw new ArgumentOutOfRangeException(nameof(DailyCapMinor), "O teto diário não pode ser negativo.");
+        if (IsEnabled && DailyCapMinor <= 0)
+            throw new ArgumentException("O teto diário deve ser positivo quando o teto de segurança estiver ativo.");
+        return this;
+    }
+}
+
 public interface IAiUsageBudgetService
 {
     Task<AiUsageBudgetSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
@@ -56,4 +74,13 @@ public interface IAiUsageBudgetService
     Task ReleaseAsync(Guid operationId, CancellationToken cancellationToken = default);
 }
 
-public sealed class AiUsageBudgetExceededException(string message) : InvalidOperationException(message);
+public sealed class AiUsageBudgetExceededException(
+    string message,
+    string failureCode = "BudgetExceeded")
+    : InvalidOperationException(message), IAiFailureDetails
+{
+    public string FailureCode { get; } = failureCode;
+    public bool IsRetryable => false;
+    public string UserMessage => Message;
+    public string? DiagnosticId => null;
+}
