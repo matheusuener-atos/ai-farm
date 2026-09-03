@@ -2,61 +2,185 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IWalletService Wallet
+@inject IAiUsageQuery Usage
+@inject IFarmLabService FarmLab
 
 <PageTitle>atos AI Farm</PageTitle>
 
-<header class="page-head dashboard-head">
-    <div>
-        <p class="eyebrow">atos:/COMMAND_CENTER</p>
-        <h1>VISÃO GERAL</h1>
-        <p>CONTROLE TÉCNICO E FINANCEIRO DA SUA INFRAESTRUTURA DE IA</p>
+<h1 class="sr-only">Início</h1>
+
+<div class="home-desk">
+    <div class="home-main">
+        <section class="win" aria-label="Saldo">
+            <div class="win-title"><span>Saldo</span><small>promotional · 1.000 AIC concedidos</small></div>
+            <div class="win-body home-balance">
+                <div class="home-balance-head">
+                    <div>
+                        <span class="label">Saldo disponível</span>
+                        <strong class="home-balance-value">@BalanceValue</strong>
+                        <span class="muted">Reservado @Format(_snapshot?.Balance.ReservedMinor) · Consumido @Format(ConsumedMinor) · @(_usage?.Totals.ExecutionCount.ToString() ?? "—") execuções nesta conta</span>
+                    </div>
+                    <div class="page-actions">
+                        <a class="btn primary" href="/chat">Nova conversa</a>
+                        <a class="btn" href="/farm">Executar benchmark</a>
+                    </div>
+                </div>
+
+                <div class="home-cycle">
+                    <div class="home-cycle-head">
+                        <b>Ciclo de uma execução</b>
+                        <span class="muted">@LastExecutionLabel</span>
+                    </div>
+                    <div class="cycle-row"><span>Reserva</span><div class="cycle-bar cycle-amber"><i style="width: 100%"></i></div><span class="num">20 AIC</span></div>
+                    <div class="cycle-row"><span>Captura</span><div class="cycle-bar cycle-purple"><i style="width: 60%"></i></div><span class="num">12 AIC</span></div>
+                    <div class="cycle-row"><span>Liberação</span><div class="cycle-bar cycle-green"><i style="width: 40%"></i></div><span class="num">8 AIC</span></div>
+                    <p class="muted">A estimativa reservada que não é consumida volta ao saldo. Nada é convertido entre CP e AIC.</p>
+                </div>
+
+                <div class="home-stats">
+                    <div><span class="label">Execuções</span><strong>@(_usage?.Totals.ExecutionCount.ToString() ?? "—")</strong><span class="muted">@(_usage?.Totals.ConversationCount.ToString() ?? "—") conversas</span></div>
+                    <div><span class="label">Unidades medidas</span><strong>@(_usage is null ? "—" : (_usage.Totals.InputUnits + _usage.Totals.OutputUnits).ToString("N0"))</strong><span class="muted">@(_usage?.Totals.InputUnits.ToString("N0") ?? "—") in · @(_usage?.Totals.OutputUnits.ToString("N0") ?? "—") out</span></div>
+                    <div><span class="label">CP verificado</span><strong>@(_farm is null ? "—" : FormatCp(_farm.VerifiedComputeUnitsMilli))</strong><span class="muted">@(_farm?.RecentJobs.Count(x => x.Status == FarmJobStatus.Completed).ToString() ?? "—") jobs concluídos</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="win inactive" aria-label="Compute Lab">
+            <div class="win-title"><span>Compute Lab</span></div>
+            <div class="win-body home-node">
+                @if (_farm is null)
+                {
+                    <p class="muted">Conectando ao node…</p>
+                }
+                else
+                {
+                    <div class="home-node-head">
+                        <span class="dot @(_farm.Node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
+                        <b>@_farm.Node.Name</b>
+                        <span class="muted">· @NodeStatusLabel(_farm.Node.Status) · @(_farm.Node.ConnectionKind == FarmNodeConnectionKind.Agent ? "agent" : "embedded") · @_farm.Nodes.Count node(s)</span>
+                        <a class="btn" href="/farm">Abrir</a>
+                    </div>
+                    <div class="cycle-row"><span>CPU</span><div class="cycle-bar"><i style="width: @Percent(_farm.Node.AuthorizedLogicalProcessors, _farm.Node.LogicalProcessors)%"></i></div><span class="num">@_farm.Node.AuthorizedLogicalProcessors / @_farm.Node.LogicalProcessors</span></div>
+                    <div class="cycle-row"><span>Memória</span><div class="cycle-bar"><i style="width: @Percent(_farm.Node.AuthorizedMemoryBytes, _farm.Node.MemoryBytes)%"></i></div><span class="num">@FormatBytes(_farm.Node.AuthorizedMemoryBytes) / @FormatBytes(_farm.Node.MemoryBytes)</span></div>
+                    <div class="home-node-last"><span class="muted">Último job</span><span class="mono">@LastJobLabel</span></div>
+                }
+            </div>
+        </section>
     </div>
-    <span class="tag tag-online"><i aria-hidden="true"></i>SISTEMA ONLINE</span>
-</header>
 
-<section class="kpi-grid cols-3" aria-live="polite">
-    <article class="kpi kpi-purple">
-        <span>SALDO DISPONÍVEL</span>
-        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong>
-        <small>CRÉDITOS PARA USO IMEDIATO</small>
-    </article>
-    <article class="kpi kpi-amber">
-        <span>SALDO RESERVADO</span>
-        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.ReservedMinor))</strong>
-        <small>OPERAÇÕES EM PROCESSAMENTO</small>
-    </article>
-    <article class="kpi">
-        <span>CRÉDITO PROMOCIONAL</span>
-        <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableByBucket[CreditBucket.Promotional]))</strong>
-        <small>AMBIENTE OPERACIONAL</small>
-    </article>
-</section>
-
-<section class="dashboard-grid">
-    <a class="command-card command-ai" href="/chat">
-        <span class="command-index">01 // IRIS</span>
-        <div><strong>CONVERSAR</strong><p>Use seus créditos para executar tarefas com inteligência artificial.</p></div>
-        <span class="command-arrow">→</span>
-    </a>
-    <a class="command-card command-farm" href="/farm">
-        <span class="command-index">02 // COMPUTE</span>
-        <div><strong>FARMAR</strong><p>Valide capacidade computacional em um ambiente controlado e auditável.</p></div>
-        <span class="command-arrow">→</span>
-    </a>
-</section>
-
-<section class="panel system-panel">
-    <header class="panel-head"><h2>ESTADO DA PLATAFORMA</h2><span class="tag">OPERATIONAL</span></header>
-    <div class="check-list">
-        <span><i></i>LEDGER COM PARTIDAS DOBRADAS</span>
-        <span><i></i>PERSISTÊNCIA ISOLADA POR CONTA</span>
-        <span><i></i>EXECUÇÕES E EVIDÊNCIAS AUDITÁVEIS</span>
+    <div class="home-side">
+        <section class="win" aria-label="Ledger">
+            <div class="win-title"><span>Ledger</span><small>@(_snapshot?.Transactions.Count.ToString() ?? "—") transações</small></div>
+            <div class="home-ledger">
+                @if (_snapshot is null)
+                {
+                    <p class="muted">Carregando…</p>
+                }
+                else if (_snapshot.Transactions.Count == 0)
+                {
+                    <p class="muted">Nenhuma movimentação ainda.</p>
+                }
+                else
+                {
+                    @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc).Take(10))
+                    {
+                        <div class="home-ledger-row">
+                            <span class="mono muted">@transaction.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
+                            <span class="tag @TypeClass(transaction.Type)">@TypeLabel(transaction.Type)</span>
+                            <span class="mono num">@Aic.Format(transaction.Entries.Max(x => x.AmountMinor))</span>
+                        </div>
+                    }
+                }
+                <div class="home-ledger-foot">
+                    <span class="muted">Partidas dobradas · imutável</span>
+                    <a class="btn" href="/wallet">Abrir Wallet</a>
+                </div>
+            </div>
+        </section>
     </div>
-</section>
+
+    <nav class="desk-icons" aria-label="Atalhos">
+        <a class="desk-icon" href="/chat"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H8l-4 3v-3H3z" /></svg></span><span>Chat</span></a>
+        <a class="desk-icon" href="/wallet"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="15" height="11" /><path d="M13 10.5h3.5M2.5 8h12" /></svg></span><span>Wallet</span></a>
+        <a class="desk-icon" href="/operations"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l4-6 3 4 3-7 4 9" /></svg></span><span>Operações</span></a>
+        <a class="desk-icon" href="/farm"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="14" height="14" /><rect x="7" y="7" width="6" height="6" /></svg></span><span>Compute Lab</span></a>
+        <a class="desk-icon" href="/farm/economy"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 16h14M5 13v-4M9 13V5M13 13V8M17 13V3" /></svg></span><span>Economia</span></a>
+        <a class="desk-icon" href="/audit"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2l6 3v5c0 4-2.5 7-6 8-3.5-1-6-4-6-8V5z" /><path d="M7.5 10l2 2 3.5-4" /></svg></span><span>Auditoria</span></a>
+    </nav>
+</div>
 
 @code {
     private WalletSnapshot? _snapshot;
+    private AiUsageDashboard? _usage;
+    private FarmDashboard? _farm;
 
-    protected override async Task OnInitializedAsync() =>
+    protected override async Task OnInitializedAsync()
+    {
         _snapshot = await Wallet.GetSnapshotAsync();
+
+        try { _usage = await Usage.GetDashboardAsync(recentLimit: 1); }
+        catch (Exception) { _usage = null; }
+
+        try { _farm = await FarmLab.GetDashboardAsync(); }
+        catch (Exception) { _farm = null; }
+    }
+
+    private string BalanceValue => _snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor);
+
+    private long ConsumedMinor =>
+        _snapshot?.Transactions
+            .Where(x => x.Type == LedgerTransactionType.Capture)
+            .Sum(x => x.Entries.Max(e => e.AmountMinor)) ?? 0;
+
+    private string LastExecutionLabel =>
+        _usage is { RecentExecutions.Count: > 0 } usage
+            ? $"última: {usage.RecentExecutions[0].StartedAtUtc.ToLocalTime():dd/MM HH:mm} · {usage.RecentExecutions[0].Provider} / {usage.RecentExecutions[0].Model}"
+            : "exemplo com o Fake Provider";
+
+    private string LastJobLabel =>
+        _farm is { RecentJobs.Count: > 0 } farm
+            ? $"{farm.RecentJobs[0].Workload} · {(farm.RecentJobs[0].DurationMilliseconds is long ms ? $"{ms} ms" : "—")} · {JobStatusLabel(farm.RecentJobs[0].Status)}"
+            : "nenhum job ainda";
+
+    private static string Format(long? minor) => minor is long value ? Aic.Format(value) : "—";
+    private static string FormatCp(long milli) => $"{milli / 1000d:0.000} CP";
+    private static int Percent(long part, long total) => total <= 0 ? 0 : (int)Math.Clamp(part * 100d / total, 0, 100);
+
+    private static string FormatBytes(long bytes) =>
+        bytes <= 0 ? "—" :
+        bytes < 1024L * 1024 * 1024 ? $"{bytes / 1024d / 1024d:0} MB" : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";
+
+    private static string NodeStatusLabel(FarmNodeStatus status) => status switch
+    {
+        FarmNodeStatus.Online => "online",
+        FarmNodeStatus.Paused => "pausado",
+        _ => "offline"
+    };
+
+    private static string JobStatusLabel(FarmJobStatus status) => status switch
+    {
+        FarmJobStatus.Completed => "verificado",
+        FarmJobStatus.Running => "executando",
+        FarmJobStatus.Failed => "falhou",
+        FarmJobStatus.Cancelled => "cancelado",
+        FarmJobStatus.TimedOut => "timeout",
+        _ => status.ToString().ToLowerInvariant()
+    };
+
+    private static string TypeLabel(LedgerTransactionType type) => type switch
+    {
+        LedgerTransactionType.Grant => "Grant",
+        LedgerTransactionType.Reserve => "Reserve",
+        LedgerTransactionType.Capture => "Capture",
+        LedgerTransactionType.Release => "Release",
+        _ => type.ToString()
+    };
+
+    private static string TypeClass(LedgerTransactionType type) => type switch
+    {
+        LedgerTransactionType.Grant => "green",
+        LedgerTransactionType.Capture => "purple",
+        LedgerTransactionType.Reserve => "amber",
+        _ => string.Empty
+    };
 }

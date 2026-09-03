@@ -1,6 +1,6 @@
 .farm-value-equation { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: stretch; gap: .8rem; margin-bottom: 1rem; }
 .farm-value-equation > article { display: grid; gap: .7rem; padding: 1.2rem; border: 1px solid var(--amber); background: var(--amber-deep); }
-.farm-value-equation > article:nth-of-type(2) { border-color: var(--green); background: #061100; }
+.farm-value-equation > article:nth-of-type(2) { border-color: var(--green); background: #EEF7EE; }
 .farm-value-equation > article:nth-of-type(3) { border-color: var(--purple); background: var(--purple-deep); }
 .farm-value-equation > span { align-self: center; color: var(--muted); font-size: 1.5rem; }
 .farm-value-equation article > span, .farm-value-equation small { color: var(--muted); font-size: .68rem; }
@@ -10,11 +10,11 @@
 .farm-no-reward p { margin: .7rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.6; }
 .farm-balance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
 .farm-balance-audit { margin-top: 1rem; }
-.farm-balance-audit dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #343432; }
+.farm-balance-audit dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #111111; }
 .farm-balance-audit dl > div { padding: 1rem; background: var(--black); }
 .farm-balance-audit dt { color: var(--muted); font-size: .62rem; }
 .farm-balance-audit dd { margin: .4rem 0 0; overflow-wrap: anywhere; }
-.farm-balance-audit > p { margin: 0; padding: 1rem; border-top: 1px solid #343432; color: var(--amber-bright); font-size: .68rem; }
+.farm-balance-audit > p { margin: 0; padding: 1rem; border-top: 1px solid #111111; color: var(--amber-bright); font-size: .68rem; }
 .farm-balance-links { display: flex; justify-content: space-between; gap: 1rem; }
 
 @media (max-width: 760px) {

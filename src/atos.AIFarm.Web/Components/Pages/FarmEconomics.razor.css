@@ -10,40 +10,40 @@
 
 .economics-warning strong { color: var(--amber-bright); }
 .economics-warning span { color: var(--muted); font-size: .72rem; text-align: right; }
-.benchmark-source { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--green); background: #061100; }
-.benchmark-source.unavailable { border-color: #494946; background: #090909; }
+.benchmark-source { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--green); background: #EEF7EE; }
+.benchmark-source.unavailable { border-color: #111111; background: #FFFFFF; }
 .benchmark-source > div { display: grid; gap: .35rem; }
 .benchmark-source strong { color: var(--green); }
 .benchmark-source span, .benchmark-source small { color: var(--muted); font-size: .68rem; overflow-wrap: anywhere; }
 .benchmark-source > button { flex: 0 0 auto; }
 .economics-inputs { margin-bottom: 1rem; }
-.economics-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #343432; }
+.economics-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #111111; }
 .economics-form label { display: grid; gap: .55rem; padding: 1rem; color: var(--muted); background: var(--black); font-size: .68rem; }
-.economics-form input { width: 100%; min-width: 0; border: 1px solid #494946; padding: .7rem; color: var(--white); background: #090909; font: inherit; }
+.economics-form input { width: 100%; min-width: 0; border: 1px solid #111111; padding: .7rem; color: var(--white); background: #FFFFFF; font: inherit; }
 .economics-form input:focus { outline: 1px solid var(--amber); }
-.economics-actions { display: flex; flex-wrap: wrap; gap: .6rem; padding: 1rem; border-top: 1px solid #494946; }
-.economics-save { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .7rem; padding: 1rem; border-top: 1px solid #494946; }
+.economics-actions { display: flex; flex-wrap: wrap; gap: .6rem; padding: 1rem; border-top: 1px solid #111111; }
+.economics-save { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .7rem; padding: 1rem; border-top: 1px solid #111111; }
 .economics-save label { display: grid; gap: .45rem; color: var(--muted); font-size: .68rem; }
-.economics-save input { width: 100%; border: 1px solid #494946; padding: .7rem; color: var(--white); background: #090909; font: inherit; }
+.economics-save input { width: 100%; border: 1px solid #111111; padding: .7rem; color: var(--white); background: #FFFFFF; font: inherit; }
 .economics-save > span { grid-column: 1 / -1; color: var(--green); font-size: .68rem; }
 .economics-result { margin-bottom: 1rem; border: 1px solid; }
-.economics-result.viable { border-color: var(--green); background: #061100; }
-.economics-result.unviable { border-color: #ff6767; background: #130505; }
-.economics-result > header { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem; border-bottom: 1px solid #343432; }
+.economics-result.viable { border-color: var(--green); background: #EEF7EE; }
+.economics-result.unviable { border-color: #C6281C; background: #FFF0EE; }
+.economics-result > header { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem; border-bottom: 1px solid #111111; }
 .economics-result > header > div { display: grid; gap: .4rem; }
 .economics-result > header span { color: var(--muted); font-size: .68rem; }
 .economics-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.economics-summary article { display: grid; gap: .55rem; padding: 1rem; border-right: 1px solid #343432; border-bottom: 1px solid #343432; }
+.economics-summary article { display: grid; gap: .55rem; padding: 1rem; border-right: 1px solid #111111; border-bottom: 1px solid #111111; }
 .economics-summary span, .economics-breakdown dt { color: var(--muted); font-size: .65rem; }
 .economics-summary strong { overflow-wrap: anywhere; }
-.economics-breakdown dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #343432; }
+.economics-breakdown dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #111111; }
 .economics-breakdown dl > div { display: grid; gap: .45rem; padding: 1rem; background: var(--black); }
 .economics-breakdown dd { margin: 0; overflow-wrap: anywhere; }
 .economics-breakdown > p { margin: 0; padding: 1rem; color: var(--amber-bright); font-size: .68rem; line-height: 1.6; }
 .economics-sensitivity { margin-top: 1rem; }
-.sensitivity-notice { padding: .8rem 1rem; border-bottom: 1px solid #494946; color: var(--muted); font-size: .65rem; line-height: 1.6; }
+.sensitivity-notice { padding: .8rem 1rem; border-bottom: 1px solid #111111; color: var(--muted); font-size: .65rem; line-height: 1.6; }
 .sensitivity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.sensitivity-grid article { min-width: 0; padding: 1rem; border-right: 1px solid #343432; }
+.sensitivity-grid article { min-width: 0; padding: 1rem; border-right: 1px solid #111111; }
 .sensitivity-grid article:last-child { border-right: 0; }
 .sensitivity-grid header { display: flex; justify-content: space-between; gap: .6rem; margin-bottom: .8rem; }
 .sensitivity-grid dl { display: grid; gap: .6rem; margin: 0; }
@@ -52,7 +52,7 @@
 .sensitivity-grid dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .economics-history { margin-top: 1rem; }
 .economics-history > .muted { margin: 0; padding: 1rem; }
-.economics-history > article { padding: 1rem; border-top: 1px solid #292927; }
+.economics-history > article { padding: 1rem; border-top: 1px solid #E6E4DE; }
 .economics-history article > header { display: flex; justify-content: space-between; gap: 1rem; }
 .economics-history header > div { display: grid; gap: .35rem; }
 .economics-history header small { color: var(--muted); }
@@ -85,7 +85,7 @@
     .economics-save > span { grid-column: auto; }
     .economics-breakdown dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sensitivity-grid { grid-template-columns: 1fr; }
-    .sensitivity-grid article { border-right: 0; border-bottom: 1px solid #343432; }
+    .sensitivity-grid article { border-right: 0; border-bottom: 1px solid #111111; }
     .economics-history article > header { flex-direction: column; }
     .economics-history dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

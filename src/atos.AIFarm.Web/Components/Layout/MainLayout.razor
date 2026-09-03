@@ -7,96 +7,135 @@
 
 <AuthorizeView Context="auth">
     <Authorized>
-        <div class="shell">
-            <aside class="sidebar">
-                <a class="brand" href="/" aria-label="atos AI Farm - início">atos<span>::AI_FARM</span></a>
-                <span class="sidebar-section-label">NAVEGAÇÃO</span>
-                <nav class="sidebar-nav" aria-label="Navegação principal">
-                    <NavLink href="/" Match="NavLinkMatch.All"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" /></svg><span>INÍCIO</span></NavLink>
-                    <NavLink href="/chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H8l-4 4z" /></svg><span>CHAT</span></NavLink>
-                    <NavLink href="/wallet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h16a2 2 0 0 1 2 2v11H3zM3 6l3-3h12v3m-2 7h5" /></svg><span>WALLET</span></NavLink>
-                    <NavLink href="/operations"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m8 10V4m8 15v-7M2 19h20" /></svg><span>OPS</span></NavLink>
-                    <NavLink href="/iris/analytics"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M5 17l4-5 4 3 6-9M17 6h2v2" /></svg><span>ANÁLISE</span></NavLink>
-                    <NavLink href="/iris/budget"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M17 7.5c0-2-2-3-5-3s-5 1.2-5 3 1.7 2.7 5 3.5 5 1.7 5 3.8-2 3.7-5 3.7-5-1.3-5-3.5" /></svg><span>LIMITES</span></NavLink>
-                    <NavLink href="/account/api-tokens"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 7a5 5 0 1 0-4 4l2 2h3v3h3v3h3v-4l-7-7m-7-1h.01" /></svg><span>API</span></NavLink>
-                    <NavLink href="/audit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.8 8 7 10 4.2-2 7-5.5 7-10V6zM9 12l2 2 4-5" /></svg><span>AUDIT</span></NavLink>
-                    <NavLink href="/incidents"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20zm0 6v5m0 3v1" /></svg><span>ALERTAS</span></NavLink>
-                    <NavLink href="/farm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4zM8 3v4m8-4v4M8 12h8m-8 4h5" /></svg><span>FARM</span></NavLink>
+        <div class="desk">
+            <header class="menubar">
+                <a class="brand" href="/" aria-label="AI Farm - início">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16c0-7 4-11 12-12-1 8-5 12-12 12z" /><path d="M4 16l7-7" /></svg>
+                    <span>AI Farm</span>
+                </a>
+                <nav class="menubar-nav" aria-label="Navegação principal">
+                    <NavLink href="/" Match="NavLinkMatch.All">Início</NavLink>
+                    <NavLink href="/chat">Chat</NavLink>
+                    <NavLink href="/wallet">Wallet</NavLink>
+                    <NavLink href="/operations">Operações</NavLink>
+                    <details class="@(IsSection("iris") ? "active" : null)">
+                        <summary>Iris ▾</summary>
+                        <div>
+                            <NavLink href="/iris/analytics">Centro analítico</NavLink>
+                            <NavLink href="/iris/budget">Limites de uso</NavLink>
+                        </div>
+                    </details>
+                    <details class="@(IsSection("farm", "saldo-farm") ? "active" : null)">
+                        <summary>Farm ▾</summary>
+                        <div>
+                            <NavLink href="/farm" Match="NavLinkMatch.All">Compute Lab</NavLink>
+                            <NavLink href="/farm/jobs">Centro de jobs</NavLink>
+                            <NavLink href="/farm/demands">Demandas úteis</NavLink>
+                            <NavLink href="/farm/capacity">Capacidade</NavLink>
+                            <NavLink href="/farm/schedules">Agendamentos</NavLink>
+                            <hr />
+                            <NavLink href="/farm/analytics">Análise da Farm</NavLink>
+                            <NavLink href="/farm/economy">Economia</NavLink>
+                            <NavLink href="/farm/rewards">Recompensas</NavLink>
+                            <NavLink href="/saldo-farm">Saldo Farm</NavLink>
+                        </div>
+                    </details>
+                    <details class="@(IsSection("audit", "incidents", "account") ? "active" : null)">
+                        <summary>Conta ▾</summary>
+                        <div>
+                            <NavLink href="/audit">Auditoria</NavLink>
+                            <NavLink href="/incidents">Alertas</NavLink>
+                            <NavLink href="/account/api-tokens">Tokens de API</NavLink>
+                        </div>
+                    </details>
                 </nav>
-                <nav class="sidebar-subnav" aria-label="Recursos da Farm">
-                    <NavLink href="/farm/jobs">CENTRO DE JOBS</NavLink>
-                    <NavLink href="/farm/demands">DEMANDAS ÚTEIS</NavLink>
-                    <NavLink href="/farm/capacity">CAPACIDADE</NavLink>
-                    <NavLink href="/farm/schedules">AGENDAMENTOS</NavLink>
-                    <NavLink href="/farm/analytics">ANÁLISE FARM</NavLink>
-                    <NavLink href="/farm/economy">ECONOMIA</NavLink>
-                    <NavLink href="/farm/rewards">RECOMPENSAS</NavLink>
-                    <NavLink href="/saldo-farm">SALDO FARM</NavLink>
-                </nav>
-                <div class="sidebar-spacer"></div>
-                <section class="sidebar-balance" aria-label="Saldo disponível">
-                    <span>SALDO DISPONÍVEL</span>
-                    <strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong>
-                    <small>CONTA OPERACIONAL</small>
-                </section>
-                <section class="sidebar-account">
-                    <span class="account-dot" aria-hidden="true"></span>
-                    <div><strong>@auth.User.Identity?.Name</strong><span>CONTA ATIVA</span></div>
-                    <form method="post" action="/account/logout">
-                        <AntiforgeryToken />
-                        <input type="hidden" name="returnUrl" value="" />
-                        <button class="nav-button" type="submit" title="Sair" aria-label="Sair">
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5m4-4 4-3-4-3m4 3H9" /></svg>
-                        </button>
-                    </form>
-                </section>
-            </aside>
-            <section class="workspace">
-                <header class="statusbar">
-                    <span class="status-path">atos:/@CurrentPath</span>
-                    <div class="status-items">
-                        <span><i class="online-dot" aria-hidden="true"></i>ONLINE</span>
-                        <span>PROVIDER_@(Configuration["AIFarm:AI:Provider"]?.ToUpperInvariant() ?? "FAKE")</span>
-                        <UtcClock />
-                    </div>
-                </header>
-                <main class="content">@Body</main>
-            </section>
+                <div class="menubar-right">
+                    <span class="status"><span class="status-dot" aria-hidden="true"></span>Online · Provider @ProviderName</span>
+                    <UtcClock />
+                    <span class="menubar-balance" title="Saldo disponível"><strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong></span>
+                    <span class="menubar-account">
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="7" r="3.5" /><path d="M3.5 17c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5" /></svg>
+                        <span title="@auth.User.Identity?.Name">@AccountLabel(auth.User.Identity?.Name)</span>
+                        <form method="post" action="/account/logout">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="returnUrl" value="" />
+                            <button class="nav-button" type="submit" title="Sair">Sair</button>
+                        </form>
+                    </span>
+                </div>
+            </header>
+            <main class="content">@Body</main>
         </div>
     </Authorized>
     <NotAuthorized>
-        <div class="auth-shell">
-            <section class="auth-hero">
-                <a class="brand" href="/">atos<span>::AI_FARM</span></a>
-                <div>
-                    <p class="eyebrow">atos:/ACCESS_GATEWAY</p>
-                    <h1>COMPUTE.<br /><span>INTELIGÊNCIA.</span><br />AUTONOMIA.</h1>
-                    <p>Infraestrutura técnica para transformar capacidade computacional em acesso auditável à Iris.</p>
-                </div>
-                <small>SECURE SESSION // TLS ACTIVE</small>
-            </section>
-            <main class="auth-content">@Body</main>
+        <div class="desk">
+            <header class="menubar">
+                <a class="brand" href="/" aria-label="AI Farm">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16c0-7 4-11 12-12-1 8-5 12-12 12z" /><path d="M4 16l7-7" /></svg>
+                    <span>AI Farm</span>
+                </a>
+                <div class="menubar-right"><UtcClock /></div>
+            </header>
+            <div class="auth-shell">
+                <section class="win inactive auth-hero-window">
+                    <div class="win-title"><span>Sobre a AI Farm</span></div>
+                    <div class="auth-hero">
+                        <div class="brand">
+                            <i><svg viewBox="0 0 20 20" fill="none" stroke="#111111" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16c0-7 4-11 12-12-1 8-5 12-12 12z" /><path d="M4 16l7-7" /></svg></i>
+                            <span>AI Farm<small>atos · provider @ProviderName.ToLowerInvariant()</small></span>
+                        </div>
+                        <h2>Seu computador.<br /><span>Sua inteligência.</span></h2>
+                        <p class="thesis">Eu farmo créditos com o computador que já tenho e gasto esses créditos nas ferramentas de IA que realmente quero usar.</p>
+                        <div class="auth-facts">
+                            <div><span class="label">AIC</span><span>Ledger imutável de partidas dobradas</span></div>
+                            <div><span class="label">CP</span><span>Trabalho computacional comprovado</span></div>
+                            <div><span class="label">Evidência</span><span>Manifests, digests e assinaturas HMAC</span></div>
+                        </div>
+                    </div>
+                </section>
+                <main class="auth-content">@Body</main>
+            </div>
         </div>
     </NotAuthorized>
 </AuthorizeView>
 
 <div id="blazor-error-ui" data-nosnippet>
     Ocorreu um erro inesperado.
-    <a href="." class="reload">RECARREGAR</a>
+    <a href="." class="reload">Recarregar</a>
     <span class="dismiss">×</span>
 </div>
 
 @code {
     private WalletSnapshot? _snapshot;
 
-    private string CurrentPath
+    private string ProviderName =>
+        Configuration["AIFarm:AI:Provider"] is { Length: > 0 } provider
+            ? char.ToUpperInvariant(provider[0]) + provider[1..].ToLowerInvariant()
+            : "Fake";
+
+    private string CurrentPath =>
+        Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+
+    private bool IsSection(params string[] prefixes)
     {
-        get
+        var path = CurrentPath;
+        foreach (var prefix in prefixes)
         {
-            var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
-            var path = relative.Split('?', '#')[0].Trim('/');
-            return string.IsNullOrWhiteSpace(path) ? "HOME" : path.ToUpperInvariant();
+            if (path.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
         }
+
+        return false;
+    }
+
+    private static string AccountLabel(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "conta";
+        var at = name.IndexOf('@');
+        return at > 0 ? name[..at] : name;
     }
 
     protected override async Task OnInitializedAsync()

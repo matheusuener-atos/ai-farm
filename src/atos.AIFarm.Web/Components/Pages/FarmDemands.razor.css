@@ -1,7 +1,7 @@
 .useful-form { display: grid; gap: 1rem; padding: 1rem; }
 .useful-form label { display: grid; gap: .4rem; color: var(--muted); font-size: .75rem; }
 .useful-form input, .useful-form select, .useful-form textarea {
-    width: 100%; background: #080808; color: var(--text); border: 1px solid var(--border);
+    width: 100%; background: #FFFFFF; color: var(--text); border: 1px solid var(--border);
     padding: .75rem; font: inherit;
 }
 .useful-form textarea { resize: vertical; line-height: 1.5; }

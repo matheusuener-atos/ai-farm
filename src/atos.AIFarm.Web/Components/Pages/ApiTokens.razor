@@ -8,7 +8,7 @@
 
 <div class="page-head">
     <p class="eyebrow">atos:/ACCOUNT/API_TOKENS</p>
-    <h1>ACESSO PROGRAMÁTICO</h1>
+    <h1>Acesso programático</h1>
     <p>SEGREDO ÚNICO // ESCOPOS MÍNIMOS // REVOGAÇÃO IMEDIATA</p>
 </div>
 
@@ -20,11 +20,11 @@
 @if (_createdSecret is not null)
 {
     <section class="token-secret" role="status">
-        <strong>[ COPIE AGORA — O SEGREDO NÃO SERÁ EXIBIDO NOVAMENTE ]</strong>
+        <strong>Copie agora — o segredo não será exibido novamente</strong>
         <code>@_createdSecret</code>
         <div>
-            <button type="button" @onclick="CopySecretAsync">[ COPIAR TOKEN ]</button>
-            <button type="button" class="button-secondary" @onclick="DismissSecret">[ JÁ GUARDEI ]</button>
+            <button type="button" @onclick="CopySecretAsync">Copiar token</button>
+            <button type="button" class="button-secondary" @onclick="DismissSecret">Já guardei</button>
         </div>
     </section>
 }
@@ -32,7 +32,7 @@
 <section class="panel token-create">
     <div class="panel-head section-heading">
         <div>
-            <h2>EMITIR TOKEN</h2>
+            <h2>Emitir token</h2>
             <p class="muted">USE SOMENTE OS ESCOPOS NECESSÁRIOS PARA A INTEGRAÇÃO</p>
         </div>
     </div>
@@ -65,14 +65,14 @@
         <p class="muted">ATENÇÃO // EXECUTAR IRIS PODE CONSUMIR AIC. EXECUTAR FARM CONSOME PROCESSAMENTO, SEM CONVERSÃO AUTOMÁTICA DE CP EM AIC.</p>
     </fieldset>
     <button type="button" @onclick="CreateAsync" disabled="@_working">
-        @(_working ? "[ EMITINDO... ]" : "[ EMITIR TOKEN ]")
+        @(_working ? "Emitindo..." : "Emitir token")
     </button>
 </section>
 
 <section class="panel token-list">
     <div class="panel-head section-heading">
-        <div><h2>TOKENS DA CONTA</h2><p class="muted">SEGREDOS NÃO SÃO ARMAZENADOS EM TEXTO PURO</p></div>
-        <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button>
+        <div><h2>Tokens da conta</h2><p class="muted">SEGREDOS NÃO SÃO ARMAZENADOS EM TEXTO PURO</p></div>
+        <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_working">Atualizar</button>
     </div>
     @if (_loading)
     {
@@ -89,7 +89,7 @@
             <article>
                 <header>
                     <div><strong>@token.Name</strong><code>@token.Prefix</code></div>
-                    <span class="@StatusClass(token)">[ @Status(token) ]</span>
+                    <span class="@StatusClass(token)">@Status(token)</span>
                 </header>
                 <dl>
                     <div><dt>ESCOPOS</dt><dd>@FormatScopes(token.Scopes)</dd></div>
@@ -99,7 +99,7 @@
                 </dl>
                 @if (!token.IsRevoked && !token.IsExpired(DateTimeOffset.UtcNow))
                 {
-                    <button type="button" class="danger-button" @onclick="() => RevokeAsync(token.Id)" disabled="@_working">[ REVOGAR ]</button>
+                    <button type="button" class="danger-button" @onclick="() => RevokeAsync(token.Id)" disabled="@_working">Revogar</button>
                 }
             </article>
         }

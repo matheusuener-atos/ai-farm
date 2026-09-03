@@ -17,7 +17,7 @@
 
 <div class="page-head">
     <p class="eyebrow">atos:/USAR/CHAT</p>
-    <h1>CONVERSAR</h1>
+    <h1>Conversar</h1>
     <p>ROTA // MELHOR DISPONÍVEL</p>
 </div>
 
@@ -25,21 +25,21 @@
     <aside class="conversation-panel" aria-label="Histórico de conversas">
         <div class="conversation-panel-header">
             <span>CONVERSAS</span>
-            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">[ NOVA ]</button>
+            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">Nova</button>
         </div>
         <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
             <input aria-label="Buscar no histórico"
                    maxlength="120"
                    placeholder="BUSCAR TÍTULO OU MENSAGEM"
                    @bind="_conversationSearchDraft" />
-            <button type="submit" disabled="@_working">[ BUSCAR ]</button>
+            <button type="submit" disabled="@_working">Buscar</button>
             @if (!string.IsNullOrWhiteSpace(_conversationSearch))
             {
                 <button type="button"
                         class="button-secondary"
                         @onclick="ClearConversationSearchAsync"
                         disabled="@_working">
-                    [ LIMPAR ]
+                    Limpar
                 </button>
             }
         </form>
@@ -66,13 +66,13 @@
                 <button type="button"
                         @onclick="PreviousConversationPageAsync"
                         disabled="@(_working || !_conversationPage.HasPreviousPage)">
-                    [ &lt; ]
+                    ‹
                 </button>
                 <span>PÁG @_conversationPage.Page / @_conversationPage.TotalPages // @_conversationPage.TotalCount</span>
                 <button type="button"
                         @onclick="NextConversationPageAsync"
                         disabled="@(_working || !_conversationPage.HasNextPage)">
-                    [ &gt; ]
+                    ›
                 </button>
             </div>
         }
@@ -80,7 +80,7 @@
                 class="archive-toggle"
                 @onclick="ToggleArchivedAsync"
                 disabled="@_working">
-            @(_showArchived ? "[ OCULTAR ARQUIVADAS ]" : "[ VER ARQUIVADAS ]")
+            @(_showArchived ? "Ocultar arquivadas" : "Ver arquivadas")
         </button>
         @if (_showArchived)
         {
@@ -98,13 +98,13 @@
                         <button type="button"
                                 @onclick="() => RestoreConversationAsync(conversation.Id)"
                                 disabled="@_working">
-                            [ RESTAURAR ]
+                            Restaurar
                         </button>
                         <button type="button"
                                 class="danger-button"
                                 @onclick="() => RequestDeleteConversation(conversation.Id)"
                                 disabled="@_working">
-                            [ EXCLUIR ]
+                            Excluir
                         </button>
                     </article>
                 }
@@ -113,7 +113,7 @@
         @if (_deleteCandidateId is Guid deleteCandidateId)
         {
             <section class="delete-confirmation" role="alert">
-                <strong>[ CONFIRMAR EXCLUSÃO ]</strong>
+                <strong>Confirmar exclusão</strong>
                 <p>@DeleteCandidateLabel(deleteCandidateId)</p>
                 <small>O histórico sairá da interface, mas a auditoria financeira será preservada.</small>
                 <div>
@@ -121,13 +121,13 @@
                             class="danger-button"
                             @onclick="ConfirmDeleteConversationAsync"
                             disabled="@_working">
-                        [ SIM, EXCLUIR ]
+                        Sim, excluir
                     </button>
                     <button type="button"
                             class="button-secondary"
                             @onclick="CancelDeleteConversation"
                             disabled="@_working">
-                        [ CANCELAR ]
+                        Cancelar
                     </button>
                 </div>
             </section>
@@ -143,16 +143,16 @@
                        maxlength="@ConversationTitle.MaximumLength"
                        @bind="_titleDraft" />
                 <button type="button" @onclick="SaveTitleAsync" disabled="@_working">
-                    [ SALVAR ]
+                    Salvar
                 </button>
                 <button type="button" class="button-secondary" @onclick="CancelRename" disabled="@_working">
-                    [ CANCELAR ]
+                    Cancelar
                 </button>
             </div>
         }
         else
         {
-            <span>[ @CurrentConversationLabel ] @(_currentConversationParentId.HasValue ? "// RAMO" : null)</span>
+            <span>@CurrentConversationLabel @(_currentConversationParentId.HasValue ? "· ramo" : null)</span>
         }
         <div class="terminal-actions">
             <span class="@(_streaming ? "status streaming-status" : "status")">
@@ -164,31 +164,31 @@
                         class="rename-button"
                         @onclick="StartRename"
                         disabled="@(_working || _conversationId == Guid.Empty)">
-                    [ RENOMEAR ]
+                    Renomear
                 </button>
             }
             <button type="button"
                     class="configuration-button"
                     @onclick="ToggleConfiguration"
                     disabled="@(_working || _conversationId == Guid.Empty)">
-                @(_showConfiguration ? "[ FECHAR CONFIG ]" : "[ CONFIGURAR ]")
+                @(_showConfiguration ? "Fechar config" : "Configurar")
             </button>
             <button type="button"
                     class="archive-button"
                     @onclick="ArchiveCurrentConversationAsync"
                     disabled="@(_working || _conversationId == Guid.Empty)">
-                [ ARQUIVAR ]
+                Arquivar
             </button>
             <button type="button"
                     class="danger-button"
                     @onclick="() => RequestDeleteConversation(_conversationId)"
                     disabled="@(_working || _conversationId == Guid.Empty)">
-                [ EXCLUIR ]
+                Excluir
             </button>
             @if (_conversationId != Guid.Empty)
             {
-                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">[ EXPORTAR MD ]</a>
-                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">[ EXPORTAR JSON ]</a>
+                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">Exportar MD</a>
+                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
             }
         </div>
     </div>
@@ -198,7 +198,7 @@
         <section class="chat-configuration" aria-label="Configuração desta conversa">
             <div class="configuration-heading">
                 <div>
-                    <strong>[ PERFIL DE EXECUÇÃO DESTA CONVERSA ]</strong>
+                    <strong>Perfil de execução desta conversa</strong>
                     <small>Alterações afetam apenas as próximas execuções. Ramos herdam este perfil.</small>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(_configurationNotice))
@@ -241,10 +241,10 @@
             </div>
             <div class="configuration-actions">
                 <button type="button" @onclick="SaveConversationSettingsAsync" disabled="@_working">
-                    [ SALVAR NESTA CONVERSA ]
+                    Salvar nesta conversa
                 </button>
                 <button type="button" class="button-secondary" @onclick="ResetSettingsDraft" disabled="@_working">
-                    [ RESTAURAR SALVO ]
+                    Restaurar salvo
                 </button>
             </div>
             <div class="preset-panel">
@@ -253,7 +253,7 @@
                         SALVAR CONFIGURAÇÃO COMO PRESET
                         <input maxlength="80" placeholder="NOME DO PRESET" @bind="_presetName" disabled="@_working" />
                     </label>
-                    <button type="button" @onclick="SavePresetAsync" disabled="@_working">[ SALVAR PRESET ]</button>
+                    <button type="button" @onclick="SavePresetAsync" disabled="@_working">Salvar preset</button>
                 </div>
                 <div class="preset-list">
                     @if (_presets.Count == 0)
@@ -267,8 +267,8 @@
                                 <strong>@preset.Name</strong>
                                 <small>@PresetDescription(preset)</small>
                             </div>
-                            <button type="button" @onclick="() => ApplyPresetAsync(preset)" disabled="@_working">[ APLICAR ]</button>
-                            <button type="button" class="danger-button" @onclick="() => DeletePresetAsync(preset.Id)" disabled="@_working">[ REMOVER ]</button>
+                            <button type="button" @onclick="() => ApplyPresetAsync(preset)" disabled="@_working">Aplicar</button>
+                            <button type="button" class="danger-button" @onclick="() => DeletePresetAsync(preset.Id)" disabled="@_working">Remover</button>
                         </article>
                     }
                 </div>
@@ -304,13 +304,13 @@
                                 <img src="@AttachmentUrl(attachment.Id, preview: true)"
                                      alt="@attachment.FileName"
                                      loading="lazy" />
-                                <span>[ BAIXAR // @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]</span>
+                                <span>Baixar · @attachment.FileName · @FormatBytes(attachment.SizeBytes)</span>
                             </a>
                         }
                         else
                         {
                             <a href="@AttachmentUrl(attachment.Id)" download="@attachment.FileName">
-                                [ BAIXAR // @attachment.FileName // @FormatBytes(attachment.SizeBytes) ]
+                                Baixar · @attachment.FileName · @FormatBytes(attachment.SizeBytes)
                             </a>
                         }
                     }
@@ -335,7 +335,7 @@
                         class="message-action"
                         @onclick="() => CopyMessageAsync(message)"
                         disabled="@_working">
-                    @(_copiedMessageId == message.Id ? "[ COPIADO ]" : "[ COPIAR ]")
+                    @(_copiedMessageId == message.Id ? "Copiado" : "Copiar")
                 </button>
                 @if (message.Role == ChatMessageRole.User)
                 {
@@ -343,7 +343,7 @@
                             class="message-action"
                             @onclick="() => StartEditBranch(message)"
                             disabled="@_working">
-                        [ EDITAR / RAMIFICAR ]
+                        Editar / ramificar
                     </button>
                 }
                 @if (CanRegenerate(message))
@@ -352,7 +352,7 @@
                         class="message-action"
                         @onclick="() => PrepareRegenerationAsync(message.OperationId)"
                         disabled="@_working">
-                    [ GERAR OUTRA RESPOSTA ]
+                    Gerar outra resposta
                 </button>
                 }
                 @if (message.Role == ChatMessageRole.Assistant)
@@ -361,13 +361,13 @@
                             class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Positive ? "active-feedback" : null)"
                             @onclick="() => SetPositiveFeedbackAsync(message)"
                             disabled="@_working">
-                        [ ÚTIL ]
+                        Útil
                     </button>
                     <button type="button"
                             class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Negative ? "active-feedback" : null)"
                             @onclick="() => StartNegativeFeedback(message)"
                             disabled="@_working">
-                        [ NÃO ÚTIL ]
+                        Não útil
                     </button>
                 }
             </div>
@@ -379,12 +379,12 @@
                         <textarea rows="2" maxlength="500" @bind="_feedbackReason" disabled="@_working"></textarea>
                     </label>
                     <div>
-                        <button type="button" @onclick="() => SaveNegativeFeedbackAsync(message.Id)" disabled="@_working">[ SALVAR FEEDBACK ]</button>
+                        <button type="button" @onclick="() => SaveNegativeFeedbackAsync(message.Id)" disabled="@_working">Salvar feedback</button>
                         @if (message.Feedback is not null)
                         {
-                            <button type="button" class="button-secondary" @onclick="() => ClearFeedbackAsync(message.Id)" disabled="@_working">[ REMOVER ]</button>
+                            <button type="button" class="button-secondary" @onclick="() => ClearFeedbackAsync(message.Id)" disabled="@_working">Remover</button>
                         }
-                        <button type="button" class="button-secondary" @onclick="CancelFeedback" disabled="@_working">[ CANCELAR ]</button>
+                        <button type="button" class="button-secondary" @onclick="CancelFeedback" disabled="@_working">Cancelar</button>
                     </div>
                 </section>
             }
@@ -402,14 +402,14 @@
 
     @if (!string.IsNullOrWhiteSpace(_error))
     {
-        <p class="error" role="alert">[ ERRO ] @_error</p>
+        <p class="error" role="alert">Erro @_error</p>
     }
 
     @if (_lastFailure is not null)
     {
         <section class="recovery-panel" role="alert" aria-label="Recuperação da execução">
             <div>
-                <strong>[ EXECUÇÃO NÃO CONCLUÍDA ]</strong>
+                <strong>Execução não concluída</strong>
                 <p>@_lastFailure.Message</p>
                 <small>
                     CÓDIGO // @_lastFailure.Code
@@ -425,14 +425,14 @@
                     <button type="button"
                             @onclick="RetryAsync"
                             disabled="@(_working || !CanAffordPendingPlan)">
-                        [ TENTAR NOVAMENTE ]
+                        Tentar novamente
                     </button>
                 }
                 <button type="button"
                         class="button-secondary"
                         @onclick="CancelPlan"
                         disabled="@_working">
-                    [ ALTERAR MENSAGEM ]
+                    Alterar mensagem
                 </button>
             </div>
         </section>
@@ -448,7 +448,7 @@
                         disabled="@(_working || _pendingPlan is not null)">
                     @foreach (var option in ContextMessageOptions)
                     {
-                        <option value="@option">@(option == 0 ? "SÓ ESTA MENSAGEM" : $"ÚLTIMAS {option} MSG")</option>
+                        <option value="@option">@(option == 0 ? "Só esta mensagem" : $"Últimas {option} msg")</option>
                     }
                 </select>
             </label>
@@ -457,13 +457,13 @@
         {
             <section class="branch-draft" aria-live="polite">
                 <div>
-                    <strong>@(_regenerating ? "[ NOVA RESPOSTA EM UM RAMO ]" : "[ EDIÇÃO EM UM RAMO ]")</strong>
+                    <strong>@(_regenerating ? "Nova resposta em um ramo" : "Edição em um ramo")</strong>
                     <small>A conversa original será preservada integralmente.</small>
                 </div>
                 @if (_pendingPlan is null)
                 {
                     <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
-                        [ CANCELAR RAMO ]
+                        Cancelar ramo
                     </button>
                 }
             </section>
@@ -502,7 +502,7 @@
                 {
                     <span>
                         @attachment.FileName // @FormatBytes(attachment.SizeBytes)
-                        <button type="button" class="message-action" @onclick="() => DeleteAttachmentAsync(attachment.Id)" disabled="@(_working || _pendingPlan is not null)">[ REMOVER ]</button>
+                        <button type="button" class="message-action" @onclick="() => DeleteAttachmentAsync(attachment.Id)" disabled="@(_working || _pendingPlan is not null)">Remover</button>
                     </span>
                 }
             </div>
@@ -513,7 +513,7 @@
         {
             <section class="execution-plan" aria-live="polite" aria-label="Confirmação da execução">
                 <div class="execution-plan-header">
-                    <span class="amber">@(_regenerating ? "[ PRÉVIA DA REGENERAÇÃO ]" : "[ PRÉVIA DA EXECUÇÃO ]")</span>
+                    <span class="amber">@(_regenerating ? "Prévia da regeneração" : "Prévia da execução")</span>
                     <span>CATÁLOGO // @_pendingPlan.Route.PriceCatalogVersion</span>
                 </div>
                 <dl>
@@ -562,7 +562,7 @@
                 @if (_pendingPlan.Settings?.SystemInstruction is { Length: > 0 } instruction)
                 {
                     <details class="context-details">
-                        <summary>[ VER INSTRUÇÃO DO SISTEMA ]</summary>
+                        <summary>Ver instrução do sistema</summary>
                         <article>
                             <strong>INSTRUÇÃO</strong>
                             <pre>@instruction</pre>
@@ -572,7 +572,7 @@
                 @if (_pendingPlan.Context is { } plannedContext)
                 {
                     <details class="context-details">
-                        <summary>[ VER CONTEXTO EFETIVAMENTE ENVIADO ]</summary>
+                        <summary>Ver contexto efetivamente enviado</summary>
                         <p>
                             @plannedContext.IncludedMessageCount MSG INTEGRAIS //
                             @plannedContext.OmittedMessageCount MSG RESUMIDAS
@@ -591,12 +591,12 @@
                     </details>
                     @if (plannedContext.UsesSummary)
                     {
-                        <p class="context-note">[ RESUMO AUTOMÁTICO ] Mensagens antigas foram compactadas de forma extrativa.</p>
+                        <p class="context-note">Resumo automático Mensagens antigas foram compactadas de forma extrativa.</p>
                     }
                 }
                 @if (!CanAffordPendingPlan)
                 {
-                    <p class="plan-warning">[ SALDO INSUFICIENTE ] A execução não pode ser confirmada.</p>
+                    <p class="plan-warning">Saldo insuficiente A execução não pode ser confirmada.</p>
                 }
                 else if (_regenerating)
                 {
@@ -615,8 +615,8 @@
                             @onclick="CancelExecution"
                             disabled="@(_executionCancellation?.IsCancellationRequested ?? true)">
                         @((_executionCancellation?.IsCancellationRequested ?? false)
-                            ? "[ INTERROMPENDO... ]"
-                            : "[ INTERROMPER ]")
+                            ? "Interrompendo..."
+                            : "Interromper")
                     </button>
                 }
                 else if (_lastFailure is not null)
@@ -626,20 +626,20 @@
                 else if (_pendingPlan is null)
                 {
                     <button type="button" @onclick="PrepareAsync" disabled="@_working">
-                        @(_working ? "[ CALCULANDO... ]" : "[ CALCULAR CUSTO ]")
+                        @(_working ? "Calculando..." : "Calcular custo")
                     </button>
                 }
                 else
                 {
                     <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
-                        [ ALTERAR ]
+                        Alterar
                     </button>
                     <button type="button" @onclick="ConfirmAsync" disabled="@(_working || !CanAffordPendingPlan)">
                         @(_working
-                            ? "[ EXECUTANDO... ]"
+                            ? "Executando..."
                             : _regenerating
-                                ? $"[ CONFIRMAR REGENERAÇÃO {Aic.Format(_pendingPlan.MaximumCostMinor)} ]"
-                                : $"[ CONFIRMAR {Aic.Format(_pendingPlan.MaximumCostMinor)} ]")
+                                ? $"Confirmar regeneração {Aic.Format(_pendingPlan.MaximumCostMinor)}"
+                                : $"Confirmar {Aic.Format(_pendingPlan.MaximumCostMinor)}")
                     </button>
                 }
             </div>

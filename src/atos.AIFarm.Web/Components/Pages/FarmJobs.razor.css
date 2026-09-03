@@ -8,14 +8,14 @@
 .jobs-filter-grid .jobs-check input { width: auto; }
 .jobs-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
 .jobs-results .panel-head > span { font-size: .62rem; }
-.jobs-warning, .jobs-empty { margin: 0; padding: 1rem; border-bottom: 1px solid #343432; }
+.jobs-warning, .jobs-empty { margin: 0; padding: 1rem; border-bottom: 1px solid #111111; }
 .jobs-warning { color: var(--amber-bright); }
-.job-row { border-bottom: 1px solid #343432; }
+.job-row { border-bottom: 1px solid #111111; }
 .job-row > header { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem; }
 .job-row header div:first-child { display: grid; gap: .3rem; }
 .job-row small, .job-row dt { color: var(--muted); font-size: .62rem; }
 .job-badges { display: flex; align-items: flex-start; gap: .6rem; font-size: .68rem; }
-.job-row > dl, .job-detail > dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #343432; }
+.job-row > dl, .job-detail > dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #111111; }
 .job-row dl > div { min-width: 0; padding: .8rem 1rem; background: var(--black); }
 .job-row dd { margin: .35rem 0 0; overflow-wrap: anywhere; }
 .job-row details { border-top: 1px solid #222; }

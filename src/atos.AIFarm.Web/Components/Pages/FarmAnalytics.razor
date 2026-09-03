@@ -8,7 +8,7 @@
 <div class="page-head analytics-head">
     <div>
         <p class="eyebrow amber">atos:/FARM/ANALYTICS</p>
-        <h1>FARM ANALYTICS</h1>
+        <h1>Farm analytics</h1>
         <p>PROCESSAMENTO MEDIDO // EVIDÊNCIA PRESERVADA // SEM EMISSÃO DE AIC</p>
     </div>
     <label class="analytics-period">PERÍODO UTC
@@ -41,7 +41,7 @@ else
     </div>
 
     <section class="panel farm-analytics-node">
-        <div class="panel-head"><h2>NODE E AGENT</h2><button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "[ ATUALIZANDO... ]" : "[ ATUALIZAR ]")</button></div>
+        <div class="panel-head"><h2>Node e agent</h2><button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "Atualizando..." : "Atualizar")</button></div>
         @if (_analytics.Node is null)
         {
             <p class="analytics-empty muted">NODE AINDA NÃO INICIALIZADO NESTA CONTA.</p>
@@ -59,7 +59,7 @@ else
     </section>
 
     <section class="panel analytics-timeline farm-analytics-timeline">
-        <div class="panel-head section-heading"><div><h2>CP VERIFICADO POR DIA</h2><p class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</p></div></div>
+        <div class="panel-head section-heading"><div><h2>CP verificado por dia</h2><p class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</p></div></div>
         <div class="analytics-bars" role="img" aria-label="Processamento verificado diariamente na Farm">
             @foreach (var day in _analytics.Daily)
             {
@@ -75,7 +75,7 @@ else
 
     <div class="analytics-detail-grid">
         <section class="panel">
-            <div class="panel-head"><h2>WORKLOADS</h2></div>
+            <div class="panel-head"><h2>Workloads</h2></div>
             @if (_analytics.Workloads.Count == 0)
             {
                 <p class="analytics-empty muted">SEM JOBS NO PERÍODO.</p>
@@ -91,7 +91,7 @@ else
             }
         </section>
         <section class="panel analytics-statuses">
-            <div class="panel-head"><h2>PIPELINE</h2></div>
+            <div class="panel-head"><h2>Pipeline</h2></div>
             @foreach (var status in _analytics.Statuses)
             {
                 <div><span class="@StatusClass(status.Status)">@status.Status.ToString().ToUpperInvariant()</span><strong>@status.JobCount</strong><small>@status.Percentage.ToString("0.0")%</small></div>
@@ -100,7 +100,7 @@ else
     </div>
 
     <section class="panel farm-economics-summary">
-        <div class="panel-head"><h2>PIPELINE ECONÔMICO // NÃO LIQUIDADO</h2></div>
+        <div class="panel-head"><h2>Pipeline econômico</h2><small>não liquidado</small></div>
         <div class="farm-analytics-node-grid">
             <div><span>CENÁRIOS</span><strong>@_analytics.Economics.ScenarioCount</strong><small>FOTOGRAFIAS ECONÔMICAS</small></div>
             <div><span>PROPOSTAS</span><strong>@_analytics.Economics.RewardProposalCount</strong><small>AGUARDANDO POLÍTICA E FUNDING</small></div>
