@@ -51,10 +51,14 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
 
         modelBuilder.Entity<AccountRecord>(entity =>
         {
-            entity.ToTable("accounts");
+            entity.ToTable("accounts", table =>
+                table.HasCheckConstraint(
+                    "CK_accounts_interface_mode",
+                    "\"InterfaceMode\" IN ('Lite', 'Pro')"));
             entity.HasKey(x => x.Id);
             entity.Property(x => x.DisplayName).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.InterfaceMode).HasMaxLength(8).HasDefaultValue("Lite");
         });
 
         modelBuilder.Entity<WalletRecord>(entity =>
@@ -912,6 +916,9 @@ public sealed class AccountRecord
     public Guid Id { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string Status { get; set; } = "Active";
+    // Contas novas nascem no Farmer Lite; as existentes foram preservadas em
+    // Pro pelo backfill da migration (ADR 0030).
+    public string InterfaceMode { get; set; } = "Lite";
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 

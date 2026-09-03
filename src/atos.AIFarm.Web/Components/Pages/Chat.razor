@@ -11,6 +11,7 @@
 @inject ChatContextLimits ContextLimits
 @inject IAiModelCatalog ModelCatalog
 @inject IChatAttachmentService AttachmentService
+@inject IInterfaceModeService InterfaceMode
 @implements IDisposable
 
 <PageTitle>Iris // atos AI Farm</PageTitle>
@@ -188,7 +189,10 @@
             @if (_conversationId != Guid.Empty)
             {
                 <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">Exportar MD</a>
-                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
+                @if (!IsLite)
+                {
+                    <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
+                }
             }
         </div>
     </div>
@@ -441,23 +445,26 @@
     <div class="composer">
         <div class="composer-heading">
             <label for="prompt">MENSAGEM</label>
-            <label class="context-selector" for="context-message-limit">
-                CONTEXTO
-                <select id="context-message-limit"
-                        @bind="_contextMessageLimit"
-                        disabled="@(_working || _pendingPlan is not null)">
-                    @foreach (var option in ContextMessageOptions)
-                    {
-                        <option value="@option">@(option == 0 ? "Só esta mensagem" : $"Últimas {option} msg")</option>
-                    }
-                </select>
-            </label>
-            <label class="farm-knowledge-toggle">
-                <input type="checkbox" @bind="_useFarmKnowledge"
-                       disabled="@(_working || _pendingPlan is not null)" />
-                MEMÓRIA DA FARM
-                <small>Usar índices computados · somente provider local</small>
-            </label>
+            @if (!IsLite)
+            {
+                <label class="context-selector" for="context-message-limit">
+                    CONTEXTO
+                    <select id="context-message-limit"
+                            @bind="_contextMessageLimit"
+                            disabled="@(_working || _pendingPlan is not null)">
+                        @foreach (var option in ContextMessageOptions)
+                        {
+                            <option value="@option">@(option == 0 ? "Só esta mensagem" : $"Últimas {option} msg")</option>
+                        }
+                    </select>
+                </label>
+                <label class="farm-knowledge-toggle">
+                    <input type="checkbox" @bind="_useFarmKnowledge"
+                           disabled="@(_working || _pendingPlan is not null)" />
+                    MEMÓRIA DA FARM
+                    <small>Usar índices computados · somente provider local</small>
+                </label>
+            }
         </div>
         @if (_editingBranch || _regenerating)
         {
@@ -475,14 +482,17 @@
             </section>
         }
         <div class="attachment-composer">
-            <label>
-                CLASSIFICAÇÃO DOS DADOS
-                <select @bind="_dataClassification" disabled="@(_working || _pendingPlan is not null)">
-                    <option value="@AiDataClassification.Standard">PADRÃO</option>
-                    <option value="@AiDataClassification.Trusted">CONFIÁVEL</option>
-                    <option value="@AiDataClassification.Private">PRIVADO</option>
-                </select>
-            </label>
+            @if (!IsLite)
+            {
+                <label>
+                    CLASSIFICAÇÃO DOS DADOS
+                    <select @bind="_dataClassification" disabled="@(_working || _pendingPlan is not null)">
+                        <option value="@AiDataClassification.Standard">PADRÃO</option>
+                        <option value="@AiDataClassification.Trusted">CONFIÁVEL</option>
+                        <option value="@AiDataClassification.Private">PRIVADO</option>
+                    </select>
+                </label>
+            }
             @if (AttachmentService.IsAvailable)
             {
                 <label class="attachment-picker">
@@ -498,9 +508,12 @@
                 <small class="muted">ANEXOS INDISPONÍVEIS // OBJECT STORAGE NÃO CONFIGURADO</small>
             }
         </div>
-        <small class="classification-note">
-            PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida no preflight. PADRÃO é indicado para conteúdo não sensível.
-        </small>
+        @if (!IsLite)
+        {
+            <small class="classification-note">
+                PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida no preflight. PADRÃO é indicado para conteúdo não sensível.
+            </small>
+        }
         @if (_attachments.Count > 0)
         {
             <div class="attachment-drafts" aria-label="Anexos desta execução">
@@ -683,6 +696,10 @@
     [Parameter]
     public Guid? ConversationId { get; set; }
 
+    private AIFarmInterfaceMode Mode { get; set; } = AIFarmInterfaceMode.Pro;
+
+    private bool IsLite => Mode == AIFarmInterfaceMode.Lite;
+
     private readonly List<ChatMessageSnapshot> _messages = [];
     private readonly List<ConversationSummary> _conversations = [];
     private readonly List<ConversationSummary> _archivedConversations = [];
@@ -765,6 +782,7 @@
     {
         if (!_contextMessageLimitInitialized)
         {
+            Mode = await InterfaceMode.GetAsync();
             _contextMessageLimit = ContextLimits.DefaultMessageCount;
             _contextMessageLimitInitialized = true;
         }

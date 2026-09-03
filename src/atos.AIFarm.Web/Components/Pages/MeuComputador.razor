@@ -1,0 +1,166 @@
+@page "/meu-computador"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmLabService FarmLab
+@inject IFarmAgentService FarmAgent
+@inject NavigationManager Navigation
+
+<PageTitle>Meu computador // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow">atos:/MEU_COMPUTADOR</p>
+    <h1>Meu computador</h1>
+    <p>ELE TRABALHA // O SISTEMA CONFERE // VOCÊ ACOMPANHA</p>
+</div>
+
+@if (_error is not null)
+{
+    <p class="error">@_error</p>
+}
+@if (_notice is not null)
+{
+    <p class="muted">@_notice</p>
+}
+
+<div class="home-lite">
+    <section class="win" aria-label="Situação">
+        <div class="win-title"><span>Situação agora</span></div>
+        <div class="win-body home-node">
+            @if (_farm is null)
+            {
+                <p class="muted">Verificando…</p>
+            }
+            else
+            {
+                <div class="home-node-head">
+                    <span class="dot @(_farm.Node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
+                    <b>@(_farm.Node.Status == FarmNodeStatus.Online ? "Pronto para trabalhar" : "Parado agora")</b>
+                    <span class="muted">· @_farm.Node.Name</span>
+                    <button class="btn" type="button" @onclick="RunTaskAsync" disabled="@(_working || _farm.Node.Status != FarmNodeStatus.Online)">
+                        @(_working ? "Trabalhando…" : "Fazer uma tarefa agora")
+                    </button>
+                </div>
+                <div class="home-stats">
+                    <div>
+                        <span class="label">Pontos de trabalho</span>
+                        <strong>@($"{_farm.VerifiedComputeUnitsMilli / 1000d:0.###}")</strong>
+                        <span class="muted">conferidos um a um pelo sistema</span>
+                    </div>
+                    <div>
+                        <span class="label">Tarefas concluídas</span>
+                        <strong>@_farm.RecentJobs.Count(x => x.Status == FarmJobStatus.Completed)</strong>
+                        <span class="muted">entre as mais recentes</span>
+                    </div>
+                    <div>
+                        <span class="label">Computadores ligados</span>
+                        <strong>@_farm.Nodes.Count</strong>
+                        <span class="muted">nesta conta</span>
+                    </div>
+                </div>
+                <p class="muted">
+                    Cada tarefa roda isolada, sem acessar seus arquivos nem a internet,
+                    e o resultado é conferido antes de valer ponto. Pontos de trabalho
+                    ainda não viram créditos — quando isso for ativado, você verá tudo
+                    registrado.
+                </p>
+            }
+        </div>
+    </section>
+
+    <section class="win" aria-label="Ligar outro computador">
+        <div class="win-title"><span>Colocar um computador para trabalhar</span></div>
+        <div class="win-body">
+            <ol class="lite-steps">
+                <li><b>Baixe o programa</b> no computador que vai trabalhar (Windows). Não precisa instalar mais nada.</li>
+                <li><b>Gere o código</b> aqui embaixo e digite no programa quando ele pedir. O código vale uma única vez.</li>
+                <li><b>Deixe rodando.</b> O computador busca tarefas sozinho e você acompanha tudo por aqui.</li>
+            </ol>
+            <div class="page-actions">
+                <a class="btn primary" href="/downloads/atos-compute-agent-win-x64.exe" download="atos-compute-agent-win-x64.exe">Baixar o programa</a>
+                <button class="btn" type="button" @onclick="CreateCodeAsync" disabled="@_working">Gerar código</button>
+            </div>
+            @if (_enrollment is not null)
+            {
+                <div class="farm-enrollment-secret" role="status">
+                    <strong>SEU CÓDIGO // VALE ATÉ @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm")</strong>
+                    <code>@_enrollment.Token</code>
+                    <p>Copie agora: ele não aparece de novo. No programa, use: <code>atos-compute-agent-win-x64.exe enroll @FarmUrl</code></p>
+                </div>
+            }
+            <p class="muted lite-footnote">
+                Detalhes técnicos (catálogo, evidências, agendamentos) ficam no modo
+                completo, no menu Conta.
+            </p>
+        </div>
+    </section>
+</div>
+
+@code {
+    private FarmDashboard? _farm;
+    private FarmAgentEnrollment? _enrollment;
+    private bool _working;
+    private string? _error;
+    private string? _notice;
+
+    private string FarmUrl => Navigation.BaseUri.TrimEnd('/');
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            _farm = await FarmLab.GetDashboardAsync();
+            _error = null;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível verificar seu computador agora. Tente de novo em instantes.";
+        }
+    }
+
+    private async Task RunTaskAsync()
+    {
+        _working = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var job = await FarmLab.RunBenchmarkAsync();
+            _notice = job.Status == FarmJobStatus.Completed
+                ? $"Pronto! Seu computador fez uma tarefa e ganhou {job.ComputeUnitsMilli / 1000d:0.###} ponto(s) de trabalho."
+                : "A tarefa foi enviada. Acompanhe a situação nesta tela.";
+            await ReloadAsync();
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "A tarefa não pôde ser feita agora. Tente de novo em instantes.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task CreateCodeAsync()
+    {
+        _working = true;
+        _error = null;
+        try
+        {
+            _enrollment = await FarmAgent.CreateEnrollmentAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível gerar o código agora. Tente de novo em instantes.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+}

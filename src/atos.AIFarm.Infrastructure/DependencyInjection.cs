@@ -45,6 +45,7 @@ public static class DependencyInjection
         services.AddSingleton<IAiUsageQuery>(provider =>
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageBudgetService, InMemoryAiUsageBudgetService>();
+        services.AddSingleton<IInterfaceModeService, InMemoryInterfaceModeService>();
         services.TryAddScoped<IConversationExportService, ConversationExportService>();
         if (openAi is null)
         {
@@ -133,6 +134,8 @@ public static class DependencyInjection
         services.RemoveAll<IAiUsageBudgetService>();
         services.RemoveAll<IApiTokenService>();
         services.RemoveAll<IApiTokenAuthenticator>();
+        services.RemoveAll<IInterfaceModeService>();
+        services.AddScoped<IInterfaceModeService, PostgresInterfaceModeService>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
