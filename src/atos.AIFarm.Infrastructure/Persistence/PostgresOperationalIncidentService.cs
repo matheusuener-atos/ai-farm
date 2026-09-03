@@ -7,17 +7,22 @@ public sealed class PostgresOperationalIncidentService(
     IDbContextFactory<AIFarmDbContext> dbFactory,
     IAIFarmIdentityAccessor identityAccessor,
     IAuditTrail auditTrail,
-    IAiUsageQuery usageQuery,
     IFarmLabService farmLab,
     IFarmCapacityQuery capacityQuery,
     TimeProvider timeProvider) : IOperationalIncidentService
 {
+    // Teto de varredura por fonte dentro da janela; ao atingi-lo o dashboard
+    // reporta IsTruncated em vez de omitir silenciosamente (ADR 0029).
+    private const int SourceScanLimit = 500;
+    private const int AuditPageSize = 100;
+
     public async Task<IncidentDashboard> SearchAsync(
         IncidentQuery query,
         CancellationToken cancellationToken = default)
     {
         var normalized = query.Normalize();
-        var incidents = await DetectAsync(cancellationToken);
+        var (fromUtc, toUtc) = normalized.ResolveWindow(timeProvider.GetUtcNow());
+        var (incidents, truncated) = await DetectAsync(fromUtc, toUtc, cancellationToken);
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var keys = incidents.Select(x => x.Key).ToArray();
@@ -43,7 +48,10 @@ public sealed class PostgresOperationalIncidentService(
             hydrated.Count(x => !x.IsAcknowledged),
             hydrated.Count(x => x.Severity == IncidentSeverity.Critical),
             hydrated.Count(x => x.Severity == IncidentSeverity.Warning),
-            hydrated.Count(x => x.IsAcknowledged));
+            hydrated.Count(x => x.IsAcknowledged),
+            fromUtc,
+            toUtc,
+            truncated);
     }
 
     public async Task<bool> AcknowledgeAsync(
@@ -51,7 +59,11 @@ public sealed class PostgresOperationalIncidentService(
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(incidentKey) || incidentKey.Length > 200) return false;
-        var incidents = await DetectAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        var (incidents, _) = await DetectAsync(
+            now.AddDays(-IncidentQuery.MaximumWindowDays),
+            now,
+            cancellationToken);
         if (!incidents.Any(x => x.Key == incidentKey)) return false;
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
@@ -75,38 +87,19 @@ public sealed class PostgresOperationalIncidentService(
         return true;
     }
 
-    private async Task<IReadOnlyList<OperationalIncidentSnapshot>> DetectAsync(
+    private async Task<(IReadOnlyList<OperationalIncidentSnapshot> Incidents, bool Truncated)> DetectAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
         CancellationToken cancellationToken)
     {
-        var audit = await auditTrail.SearchAsync(new AuditQuery(PageSize: 100), cancellationToken);
-        var usage = await usageQuery.GetDashboardAsync(50, cancellationToken);
-        var farm = await farmLab.GetDashboardAsync(cancellationToken);
-        var capacity = await capacityQuery.GetAsync(cancellationToken);
+        var truncated = false;
         var incidents = new List<OperationalIncidentSnapshot>();
 
-        incidents.AddRange(audit.Events
-            .Where(x => x.Integrity == AuditIntegrityStatus.Invalid)
-            .Select(x => New(
-                $"integrity:{x.Category}:{x.Id:N}", IncidentSource.Integrity,
-                IncidentSeverity.Critical, "INTEGRITY_FAILURE",
-                $"Falha de integridade em {x.Category}",
-                $"{x.Action} // {x.Description}", x.Reference, x.OccurredAtUtc)));
-        incidents.AddRange(usage.RecentExecutions
-            .Where(x => !x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
-            .Select(x => New(
-                $"iris:{x.OperationId:N}:{x.Status}", IncidentSource.Iris,
-                IncidentSeverity.Critical, "AI_EXECUTION_FAILURE",
-                $"Execução da Iris terminou como {x.Status}",
-                $"{x.Provider} // {x.Model}", x.OperationId.ToString("N")[..8], x.StartedAtUtc)));
-        incidents.AddRange(farm.RecentJobs
-            .Where(x => x.Status is FarmJobStatus.Failed or FarmJobStatus.TimedOut or FarmJobStatus.Rejected or FarmJobStatus.Cancelled)
-            .Select(x => New(
-                $"farm:{x.Id:N}:{x.Status}", IncidentSource.Farm,
-                x.Status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? IncidentSeverity.Critical : IncidentSeverity.Warning,
-                $"FARM_JOB_{x.Status.ToString().ToUpperInvariant()}",
-                $"Job da Farm terminou como {x.Status}",
-                $"{x.Workload} // {x.WorkloadVersion} // {x.VerificationPolicy}",
-                x.Id.ToString("N")[..8], x.FinishedAtUtc ?? x.CreatedAtUtc)));
+        truncated |= await AddIntegrityIncidentsAsync(incidents, fromUtc, toUtc, cancellationToken);
+        truncated |= await AddIrisIncidentsAsync(incidents, fromUtc, toUtc, cancellationToken);
+        truncated |= await AddFarmJobIncidentsAsync(incidents, fromUtc, toUtc, cancellationToken);
+
+        var farm = await farmLab.GetDashboardAsync(cancellationToken);
         if (farm.Node.Status is FarmNodeStatus.Offline or FarmNodeStatus.Paused)
         {
             incidents.Add(New(
@@ -117,6 +110,7 @@ public sealed class PostgresOperationalIncidentService(
                 $"{farm.Node.Name} // último sinal {farm.Node.LastSeenAtUtc:O}",
                 farm.Node.Id.ToString("N")[..8], farm.Node.LastSeenAtUtc));
         }
+        var capacity = await capacityQuery.GetAsync(cancellationToken);
         incidents.AddRange(capacity.Nodes
             .Where(x => x.Reliability?.IsQuarantined == true)
             .Select(x => New(
@@ -128,7 +122,127 @@ public sealed class PostgresOperationalIncidentService(
                 $"Score {x.Reliability.Score}/100 // {x.Reliability.ConsecutiveFailures} falhas consecutivas // retorno {x.Reliability.QuarantinedUntilUtc:O}",
                 x.Node.Id.ToString("N")[..8],
                 x.Reliability.LastOutcomeAtUtc ?? capacity.CalculatedAtUtc)));
-        return incidents.GroupBy(x => x.Key).Select(x => x.First()).ToArray();
+        return (incidents.GroupBy(x => x.Key).Select(x => x.First()).ToArray(), truncated);
+    }
+
+    private async Task<bool> AddIntegrityIncidentsAsync(
+        List<OperationalIncidentSnapshot> incidents,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
+    {
+        var scanned = 0;
+        var maximumPages = SourceScanLimit / AuditPageSize;
+        for (var page = 1; page <= maximumPages; page++)
+        {
+            var audit = await auditTrail.SearchAsync(
+                new AuditQuery(FromUtc: fromUtc, ToUtc: toUtc, Page: page, PageSize: AuditPageSize),
+                cancellationToken);
+            incidents.AddRange(audit.Events
+                .Where(x => x.Integrity == AuditIntegrityStatus.Invalid)
+                .Select(x => New(
+                    $"integrity:{x.Category}:{x.Id:N}", IncidentSource.Integrity,
+                    IncidentSeverity.Critical, "INTEGRITY_FAILURE",
+                    $"Falha de integridade em {x.Category}",
+                    $"{x.Action} // {x.Description}", x.Reference, x.OccurredAtUtc)));
+            scanned += audit.Events.Count;
+            if (audit.Events.Count < AuditPageSize)
+            {
+                return audit.IsScanTruncated;
+            }
+            if (page == maximumPages)
+            {
+                return audit.IsScanTruncated || audit.Totals.Total > scanned;
+            }
+        }
+        return false;
+    }
+
+    private async Task<bool> AddIrisIncidentsAsync(
+        List<OperationalIncidentSnapshot> incidents,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var failures = await (
+            from request in db.AiRequests.AsNoTracking()
+            join execution in db.AiExecutions.AsNoTracking() on request.Id equals execution.AiRequestId
+            where request.AccountId == identity.AccountId &&
+                  execution.Status != "Completed" &&
+                  execution.StartedAtUtc >= fromUtc &&
+                  execution.StartedAtUtc <= toUtc
+            orderby execution.StartedAtUtc descending
+            select new
+            {
+                request.OperationId,
+                execution.Status,
+                execution.Provider,
+                execution.Model,
+                execution.StartedAtUtc
+            })
+            .Take(SourceScanLimit + 1)
+            .ToArrayAsync(cancellationToken);
+        incidents.AddRange(failures
+            .Take(SourceScanLimit)
+            .Select(x => New(
+                $"iris:{x.OperationId:N}:{x.Status}", IncidentSource.Iris,
+                IncidentSeverity.Critical, "AI_EXECUTION_FAILURE",
+                $"Execução da Iris terminou como {x.Status}",
+                $"{x.Provider} // {x.Model}", x.OperationId.ToString("N")[..8], x.StartedAtUtc)));
+        return failures.Length > SourceScanLimit;
+    }
+
+    private async Task<bool> AddFarmJobIncidentsAsync(
+        List<OperationalIncidentSnapshot> incidents,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        string[] failureStatuses =
+        [
+            nameof(FarmJobStatus.Failed),
+            nameof(FarmJobStatus.TimedOut),
+            nameof(FarmJobStatus.Rejected),
+            nameof(FarmJobStatus.Cancelled)
+        ];
+        var jobs = await db.FarmJobs.AsNoTracking()
+            .Where(x => x.AccountId == identity.AccountId &&
+                failureStatuses.Contains(x.Status) &&
+                (x.FinishedAtUtc ?? x.CreatedAtUtc) >= fromUtc &&
+                (x.FinishedAtUtc ?? x.CreatedAtUtc) <= toUtc)
+            .OrderByDescending(x => x.FinishedAtUtc ?? x.CreatedAtUtc)
+            .Select(x => new
+            {
+                x.Id,
+                x.Status,
+                x.Workload,
+                x.WorkloadVersion,
+                x.VerificationPolicy,
+                x.FinishedAtUtc,
+                x.CreatedAtUtc
+            })
+            .Take(SourceScanLimit + 1)
+            .ToArrayAsync(cancellationToken);
+        incidents.AddRange(jobs
+            .Take(SourceScanLimit)
+            .Select(x =>
+            {
+                var status = Enum.Parse<FarmJobStatus>(x.Status);
+                return New(
+                    $"farm:{x.Id:N}:{status}", IncidentSource.Farm,
+                    status is FarmJobStatus.Failed or FarmJobStatus.TimedOut
+                        ? IncidentSeverity.Critical
+                        : IncidentSeverity.Warning,
+                    $"FARM_JOB_{status.ToString().ToUpperInvariant()}",
+                    $"Job da Farm terminou como {status}",
+                    $"{x.Workload} // {x.WorkloadVersion} // {x.VerificationPolicy}",
+                    x.Id.ToString("N")[..8], x.FinishedAtUtc ?? x.CreatedAtUtc);
+            }));
+        return jobs.Length > SourceScanLimit;
     }
 
     private static OperationalIncidentSnapshot New(

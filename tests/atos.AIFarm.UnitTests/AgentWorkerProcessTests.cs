@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using atos.AIFarm.Agent;
 using atos.AIFarm.Core.Application;
@@ -136,6 +137,47 @@ public sealed class AgentWorkerProcessTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             runner.RunAsync(Manifest(), cancellation.Token));
+    }
+
+    [Fact]
+    public async Task ResourceGuardTerminateStopsUncooperativeWorker()
+    {
+        var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = dotnet,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.StartInfo.ArgumentList.Add(typeof(AgentApplication).Assembly.Location);
+        process.StartInfo.ArgumentList.Add("__worker");
+        Assert.True(process.Start());
+        using var resources = AgentWorkerResourceGuard.Attach(
+            process,
+            1,
+            256L * 1024 * 1024);
+
+        // Sem EOF no stdin o worker aguarda indefinidamente: um filho que não
+        // coopera. Terminate deve encerrar a árvore pelo Job Object.
+        resources.Terminate();
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(
+                process.WaitForExit(10_000),
+                "O Job Object não encerrou o worker dentro do prazo.");
+            Assert.NotEqual(0, process.ExitCode);
+        }
+        else
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+        }
     }
 
     private static AgentWorkerProcessRunner CreateRunner()

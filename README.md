@@ -509,11 +509,13 @@ aceitos quando apresentam exatamente a mesma evidência já concluída. O watchd
 terminaliza ofertas abandonadas ao fim da validade assinada e runtimes que
 ultrapassam 30 segundos, liberando o índice de Job ativo para um novo despacho.
 Enquanto a oferta estiver em `OFFERED`, `ACCEPTED` ou `RUNNING`, o usuário pode
-cancelá-la no painel. Uma oferta ainda não aceita é encerrada imediatamente; um
-Job já aceito recebe um pedido cooperativo, permanece ativo até o Agent
-confirmar o cancelamento e é encerrado pelo watchdog se a confirmação ou o
-lease não chegar. O painel atualiza esses estados automaticamente a cada 2
-segundos, e a transição condicional impede corrida com o envio da evidência.
+cancelá-la no painel. Uma oferta ainda não aceita é encerrada imediatamente; em
+um Job já aceito, o Agent recebe o aviso no próximo heartbeat ativo (1–10 s) e
+mata a árvore do worker via Job Object, e o watchdog encerra pelo servidor se a
+confirmação ou o lease não chegar. A partir do pedido de cancelamento nenhum
+upload de evidência é aceito: o Job termina `Cancelled` com resultado,
+telemetria e saída tipada descartados (ADR 0027). O painel atualiza esses
+estados automaticamente a cada 2 segundos.
 
 ## Estado do Marco 1
 
