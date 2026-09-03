@@ -846,6 +846,61 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task FarmKnowledgeIsInjectedLocallyAndProvenanceIsPersisted()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var provider = new CapturingProvider();
+        var knowledge = new StubFarmKnowledgeSearch();
+        var workflow = new ChatWorkflow(
+            await FundedWalletAsync(),
+            new FixedPriceEstimator(),
+            new BestAvailableRouteSelector(),
+            provider,
+            chat,
+            farmKnowledge: knowledge);
+
+        var plan = await workflow.PrepareAsync(
+            conversation.Id,
+            "como nasce o crédito?",
+            useFarmKnowledge: true);
+        var result = await workflow.SendAsync(conversation.Id, plan, "rag-local");
+        var saved = await chat.GetConversationAsync(conversation.Id);
+
+        var hit = Assert.Single(plan.Knowledge!.Hits);
+        Assert.Equal(1, knowledge.CallCount);
+        Assert.Contains("dados não confiáveis", provider.LastRequest!.SystemInstruction);
+        Assert.Contains(hit.Reference, provider.LastRequest.SystemInstruction);
+        Assert.Contains("Fontes da Farm", result.Response);
+        Assert.Contains(hit.Reference, result.Response);
+        Assert.Contains(hit.Reference, saved!.Messages.Last().Content);
+    }
+
+    [Fact]
+    public async Task FarmKnowledgeCannotBeSentToAnExternalProvider()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var knowledge = new StubFarmKnowledgeSearch();
+        var workflow = new ChatWorkflow(
+            await FundedWalletAsync(),
+            new FixedPriceEstimator(),
+            new ExternalRouteSelector(),
+            new CountingProvider(),
+            chat,
+            farmKnowledge: knowledge);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.PrepareAsync(
+                conversation.Id,
+                "não envie a base",
+                useFarmKnowledge: true));
+
+        Assert.Contains("provider externo", exception.Message);
+        Assert.Equal(0, knowledge.CallCount);
+    }
+
+    [Fact]
     public async Task FeedbackIsUpdatedAggregatedAndIncludedInExports()
     {
         var chat = new InMemoryChatStore();
@@ -937,6 +992,29 @@ public sealed class ChatWorkflowTests
     {
         public Task<AiRoute> SelectAsync(string prompt, CancellationToken cancellationToken) =>
             Task.FromResult(new AiRoute("OpenAI", "external", "v1"));
+    }
+
+    private sealed class StubFarmKnowledgeSearch : IFarmKnowledgeSearchService
+    {
+        public int CallCount { get; private set; }
+
+        public Task<FarmKnowledgeSearchResult> SearchAsync(
+            string query,
+            int maximumHits = 4,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            var hit = new FarmKnowledgeHit(
+                Guid.Parse("92cc8e27-c762-424f-8675-bc92d6687f97"),
+                "Política de créditos",
+                new string('b', 64),
+                DateTimeOffset.Parse("2026-09-03T12:00:00Z"),
+                1,
+                "O crédito nasce do processamento verificado.",
+                12,
+                ["credito"]);
+            return Task.FromResult(new FarmKnowledgeSearchResult(query, 1, [hit]));
+        }
     }
 
     private sealed class CapturingProvider : IAiProvider
