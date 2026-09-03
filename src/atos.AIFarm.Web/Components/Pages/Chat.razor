@@ -30,7 +30,7 @@
         <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
             <input aria-label="Buscar no histórico"
                    maxlength="120"
-                   placeholder="BUSCAR TÍTULO OU MENSAGEM"
+                   placeholder="Buscar título ou mensagem"
                    @bind="_conversationSearchDraft" />
             <button type="submit" disabled="@_working">Buscar</button>
             @if (!string.IsNullOrWhiteSpace(_conversationSearch))
@@ -507,7 +507,7 @@
                 }
             </div>
         }
-        <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Digite sua tarefa..." rows="3"></textarea>
+        <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Escreva a próxima mensagem…" rows="3"></textarea>
 
         @if (_pendingPlan is not null)
         {
