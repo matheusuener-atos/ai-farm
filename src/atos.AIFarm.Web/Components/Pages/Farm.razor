@@ -4,6 +4,7 @@
 @implements IAsyncDisposable
 @inject IFarmLabService FarmLab
 @inject IFarmAgentService FarmAgent
+@inject NavigationManager Navigation
 
 <PageTitle>Compute Lab // atos AI Farm</PageTitle>
 
@@ -161,6 +162,15 @@ else
 
     <section class="terminal farm-agent-panel">
         <div class="terminal-title"><span>Compute agent</span><small>vínculo da máquina</small></div>
+        <div class="farm-agent-download">
+            <div>
+                <strong>Windows x64</strong>
+                <small>Executável autônomo // não exige .NET nem acesso ao repositório</small>
+            </div>
+            <a class="button-primary" href="/downloads/atos-compute-agent-win-x64.exe" download="atos-compute-agent-win-x64.exe">
+                Baixar Agent
+            </a>
+        </div>
         <p>
             @if (IsEmbedded)
             {
@@ -174,6 +184,12 @@ else
         <button type="button" class="button-secondary" @onclick="CreateEnrollmentAsync" disabled="@_working">
             Gerar código para novo/re-vínculo
         </button>
+        <ol class="farm-agent-steps">
+            <li>Salve o arquivo em uma pasta própria, por exemplo <code>C:\atos-agent</code>.</li>
+            <li>Gere o código único abaixo.</li>
+            <li>No PowerShell, execute <code>.\atos-compute-agent-win-x64.exe enroll @FarmUrl</code> e cole o código quando solicitado.</li>
+            <li>Depois execute <code>.\atos-compute-agent-win-x64.exe run</code> para a máquina começar a buscar jobs permitidos.</li>
+        </ol>
         @if (_enrollment is not null)
         {
             <div class="farm-enrollment-secret" role="status">
@@ -320,6 +336,8 @@ else
     private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
     private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
     private FarmWorkloadDefinition SelectedWorkload => FarmWorkloadCatalog.GetRequired(_selectedWorkloadId);
+
+    private string FarmUrl => Navigation.BaseUri.TrimEnd('/');
 
     protected override async Task OnInitializedAsync()
     {

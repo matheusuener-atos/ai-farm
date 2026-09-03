@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Text.Json;
 using atos.AIFarm.Core.Application;
 
@@ -258,8 +257,8 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
                 StringComparison.OrdinalIgnoreCase))
             return new AgentWorkerLaunch(executable, []);
 
-        var assembly = Assembly.GetEntryAssembly()?.Location;
-        if (string.IsNullOrWhiteSpace(assembly))
+        var assembly = Path.Combine(AppContext.BaseDirectory, "atos-agent.dll");
+        if (!File.Exists(assembly))
             throw new InvalidOperationException("O assembly de entrada do Agent não foi localizado.");
         return new AgentWorkerLaunch(executable, [assembly]);
     }
