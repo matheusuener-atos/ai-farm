@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      # Formato keyword (não URL) para o Postgres do job não exigir SSL:
+      # NeonPostgresConnection.Normalize só força SslMode=Require em URLs.
+      DATABASE_URL: "Host=localhost;Port=5432;Database=aifarm_ci;Username=postgres;Password=postgres"
+      DATABASE_URL_UNPOOLED: "Host=localhost;Port=5432;Database=aifarm_ci;Username=postgres;Password=postgres"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aifarm_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore atos.AIFarm.slnx
+
+      - name: Verify formatting
+        run: dotnet format atos.AIFarm.slnx --verify-no-changes --no-restore
+
+      - name: Build (warnings as errors)
+        run: dotnet build atos.AIFarm.slnx -warnaserror --no-restore --configuration Release
+
+      - name: Apply migrations
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.0.*
+          dotnet ef database update \
+            --project src/atos.AIFarm.Infrastructure/atos.AIFarm.Infrastructure.csproj \
+            --configuration Release
+
+      - name: Test
+        run: >-
+          dotnet test atos.AIFarm.slnx
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Fail on skipped tests
+        run: |
+          skipped=$(grep -rho 'outcome="NotExecuted"' TestResults --include='*.trx' | wc -l)
+          if [ "$skipped" -gt 0 ]; then
+            echo "::error::$skipped teste(s) pulado(s) no CI; testes de integração Postgres são obrigatórios."
+            exit 1
+          fi
+          echo "Nenhum teste pulado."
