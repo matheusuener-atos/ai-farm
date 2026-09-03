@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IWalletService Wallet
+@inject IInterfaceModeService InterfaceMode
 @inject IConfiguration Configuration
 @inject NavigationManager Navigation
 
@@ -14,41 +15,68 @@
                     <span>AI Farm</span>
                 </a>
                 <nav class="menubar-nav" aria-label="Navegação principal">
-                    <NavLink href="/" Match="NavLinkMatch.All">Início</NavLink>
-                    <NavLink href="/chat">Chat</NavLink>
-                    <NavLink href="/wallet">Wallet</NavLink>
-                    <NavLink href="/operations">Operações</NavLink>
-                    <details class="@(IsSection("iris") ? "active" : null)">
-                        <summary>Iris ▾</summary>
-                        <div>
-                            <NavLink href="/iris/analytics">Centro analítico</NavLink>
-                            <NavLink href="/iris/budget">Limites de uso</NavLink>
-                        </div>
-                    </details>
-                    <details class="@(IsSection("farm", "saldo-farm") ? "active" : null)">
-                        <summary>Farm ▾</summary>
-                        <div>
-                            <NavLink href="/farm" Match="NavLinkMatch.All">Compute Lab</NavLink>
-                            <NavLink href="/farm/jobs">Centro de jobs</NavLink>
-                            <NavLink href="/farm/demands">Demandas úteis</NavLink>
-                            <NavLink href="/farm/knowledge">Conhecimento</NavLink>
-                            <NavLink href="/farm/capacity">Capacidade</NavLink>
-                            <NavLink href="/farm/schedules">Agendamentos</NavLink>
-                            <hr />
-                            <NavLink href="/farm/analytics">Análise da Farm</NavLink>
-                            <NavLink href="/farm/economy">Economia</NavLink>
-                            <NavLink href="/farm/rewards">Recompensas</NavLink>
-                            <NavLink href="/saldo-farm">Saldo Farm</NavLink>
-                        </div>
-                    </details>
-                    <details class="@(IsSection("audit", "incidents", "account") ? "active" : null)">
-                        <summary>Conta ▾</summary>
-                        <div>
-                            <NavLink href="/audit">Auditoria</NavLink>
-                            <NavLink href="/incidents">Alertas</NavLink>
-                            <NavLink href="/account/api-tokens">Tokens de API</NavLink>
-                        </div>
-                    </details>
+                    @if (IsLite)
+                    {
+                        <NavLink href="/" Match="NavLinkMatch.All">Início</NavLink>
+                        <NavLink href="/chat">Conversar</NavLink>
+                        <NavLink href="/wallet">Créditos</NavLink>
+                        <NavLink href="/meu-computador">Meu computador</NavLink>
+                        <details class="@(IsSection("account") ? "active" : null)">
+                            <summary>Conta ▾</summary>
+                            <div>
+                                <form method="post" action="/account/interface-mode">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="mode" value="Pro" />
+                                    <button class="nav-button" type="submit">Ativar modo completo</button>
+                                </form>
+                            </div>
+                        </details>
+                    }
+                    else
+                    {
+                        <NavLink href="/" Match="NavLinkMatch.All">Início</NavLink>
+                        <NavLink href="/chat">Chat</NavLink>
+                        <NavLink href="/wallet">Wallet</NavLink>
+                        <NavLink href="/operations">Operações</NavLink>
+                        <details class="@(IsSection("iris") ? "active" : null)">
+                            <summary>Iris ▾</summary>
+                            <div>
+                                <NavLink href="/iris/analytics">Centro analítico</NavLink>
+                                <NavLink href="/iris/budget">Limites de uso</NavLink>
+                            </div>
+                        </details>
+                        <details class="@(IsSection("farm", "saldo-farm", "meu-computador") ? "active" : null)">
+                            <summary>Farm ▾</summary>
+                            <div>
+                                <NavLink href="/farm" Match="NavLinkMatch.All">Compute Lab</NavLink>
+                                <NavLink href="/meu-computador">Meu computador</NavLink>
+                                <NavLink href="/farm/jobs">Centro de jobs</NavLink>
+                                <NavLink href="/farm/demands">Demandas úteis</NavLink>
+                                <NavLink href="/farm/knowledge">Conhecimento</NavLink>
+                                <NavLink href="/farm/capacity">Capacidade</NavLink>
+                                <NavLink href="/farm/schedules">Agendamentos</NavLink>
+                                <hr />
+                                <NavLink href="/farm/analytics">Análise da Farm</NavLink>
+                                <NavLink href="/farm/economy">Economia</NavLink>
+                                <NavLink href="/farm/rewards">Recompensas</NavLink>
+                                <NavLink href="/saldo-farm">Saldo Farm</NavLink>
+                            </div>
+                        </details>
+                        <details class="@(IsSection("audit", "incidents", "account") ? "active" : null)">
+                            <summary>Conta ▾</summary>
+                            <div>
+                                <NavLink href="/audit">Auditoria</NavLink>
+                                <NavLink href="/incidents">Alertas</NavLink>
+                                <NavLink href="/account/api-tokens">Tokens de API</NavLink>
+                                <hr />
+                                <form method="post" action="/account/interface-mode">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="mode" value="Lite" />
+                                    <button class="nav-button" type="submit">Ativar modo simples</button>
+                                </form>
+                            </div>
+                        </details>
+                    }
                 </nav>
                 <div class="menubar-right">
                     <span class="status"><span class="status-dot" aria-hidden="true"></span>Online · Provider @ProviderName</span>
@@ -108,6 +136,9 @@
 
 @code {
     private WalletSnapshot? _snapshot;
+    private AIFarmInterfaceMode _mode = AIFarmInterfaceMode.Pro;
+
+    private bool IsLite => _mode == AIFarmInterfaceMode.Lite;
 
     private string ProviderName =>
         Configuration["AIFarm:AI:Provider"] is { Length: > 0 } provider
@@ -148,6 +179,7 @@
             await Wallet.GrantPromotionalAsync(Aic.FromAic(1_000), "account:promotional-grant:v1");
             await Wallet.ExpireReservationsAsync(TimeProvider.System.GetUtcNow());
             _snapshot = await Wallet.GetSnapshotAsync();
+            _mode = await InterfaceMode.GetAsync();
         }
     }
 

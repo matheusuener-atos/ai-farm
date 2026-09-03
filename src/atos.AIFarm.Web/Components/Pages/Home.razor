@@ -4,11 +4,72 @@
 @inject IWalletService Wallet
 @inject IAiUsageQuery Usage
 @inject IFarmLabService FarmLab
+@inject IInterfaceModeService InterfaceMode
 
 <PageTitle>atos AI Farm</PageTitle>
 
 <h1 class="sr-only">Início</h1>
 
+@if (IsLite)
+{
+    <div class="home-lite">
+        <section class="win" aria-label="Seus créditos">
+            <div class="win-title"><span>Seus créditos</span></div>
+            <div class="win-body home-balance">
+                <div class="home-balance-head">
+                    <div>
+                        <span class="label">Créditos disponíveis</span>
+                        <strong class="home-balance-value">@BalanceValue</strong>
+                        <span class="muted">Você começa com 1.000 créditos de boas-vindas. Cada conversa usa um pouco — e mostra o valor antes de gastar.</span>
+                    </div>
+                    <div class="page-actions">
+                        <a class="btn primary" href="/chat">Conversar com a Iris</a>
+                        <a class="btn" href="/wallet">Ver meus créditos</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="win" aria-label="Seu computador">
+            <div class="win-title"><span>Seu computador</span></div>
+            <div class="win-body home-node">
+                @if (_farm is null)
+                {
+                    <p class="muted">Verificando…</p>
+                }
+                else
+                {
+                    <div class="home-node-head">
+                        <span class="dot @(_farm.Node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
+                        <b>@(_farm.Node.Status == FarmNodeStatus.Online ? "Pronto para trabalhar" : "Parado agora")</b>
+                        <span class="muted">· @_farm.Node.Name</span>
+                        <a class="btn" href="/meu-computador">Abrir</a>
+                    </div>
+                    <p class="muted">
+                        Seu computador pode fazer tarefas seguras e acumular pontos de
+                        trabalho enquanto você não o usa. Tudo é conferido pelo sistema.
+                    </p>
+                }
+            </div>
+        </section>
+
+        <section class="win inactive" aria-label="Como funciona">
+            <div class="win-title"><span>Como funciona</span></div>
+            <div class="win-body">
+                <ol class="lite-steps">
+                    <li><b>Converse com a Iris.</b> Cada resposta usa um pouco dos seus créditos, e você sempre confirma o valor antes.</li>
+                    <li><b>Ligue seu computador.</b> Ele recebe tarefas seguras, o sistema confere o resultado e registra pontos de trabalho.</li>
+                    <li><b>Tudo fica anotado.</b> Cada crédito e cada tarefa têm registro permanente — nada se perde nem muda sozinho.</li>
+                </ol>
+                <p class="muted lite-footnote">
+                    Quer ver os detalhes técnicos? Ative o modo completo no menu Conta.
+                </p>
+            </div>
+        </section>
+    </div>
+}
+else
+{
 <div class="home-desk">
     <div class="home-main">
         <section class="win" aria-label="Saldo">
@@ -108,14 +169,20 @@
         <a class="desk-icon" href="/audit"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2l6 3v5c0 4-2.5 7-6 8-3.5-1-6-4-6-8V5z" /><path d="M7.5 10l2 2 3.5-4" /></svg></span><span>Auditoria</span></a>
     </nav>
 </div>
+}
 
 @code {
+    private AIFarmInterfaceMode Mode { get; set; } = AIFarmInterfaceMode.Pro;
+
+    private bool IsLite => Mode == AIFarmInterfaceMode.Lite;
+
     private WalletSnapshot? _snapshot;
     private AiUsageDashboard? _usage;
     private FarmDashboard? _farm;
 
     protected override async Task OnInitializedAsync()
     {
+        Mode = await InterfaceMode.GetAsync();
         _snapshot = await Wallet.GetSnapshotAsync();
 
         try { _usage = await Usage.GetDashboardAsync(recentLimit: 1); }
