@@ -67,6 +67,12 @@ public sealed class FarmUsefulWorkloadTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new FarmDemandRequest(
             "iris-text-index-v1", "Fila Iris", "Trabalho útil",
             (FarmDemandPriority)99, 60).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new FarmDemandRequest(
+            "iris-text-index-v1", "Fila Iris", "Trabalho útil",
+            FarmDemandPriority.Normal, 60, 1, 0).Validate());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new FarmDemandRequest(
+            "iris-text-index-v1", "Fila Iris", "Trabalho útil",
+            FarmDemandPriority.Normal, 60, 1, 6).Validate());
     }
 
     [Fact]

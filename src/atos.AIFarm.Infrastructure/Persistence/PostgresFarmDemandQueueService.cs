@@ -60,7 +60,7 @@ internal sealed class PostgresFarmDemandQueueService(
                      x.ApiIdempotencyKey == idempotencyKey, cancellationToken);
             if (replay is not null)
             {
-                ValidateReplay(replay, validated.Submission, parts.Count);
+                ValidateReplay(replay, validated.Submission, parts.Count, request.MaxAttemptsPerShard);
                 return await LoadSnapshotAsync(db, replay, cancellationToken);
             }
         }
@@ -73,6 +73,7 @@ internal sealed class PostgresFarmDemandQueueService(
             RequiredLogicalProcessors = validated.Submission.Definition.RequiredLogicalProcessors,
             RequiredMemoryBytes = validated.Submission.Definition.RequiredMemoryBytes,
             TargetShards = parts.Count,
+            MaxAttemptsPerShard = request.MaxAttemptsPerShard,
             Label = validated.Submission.Label,
             InputVersion = validated.Submission.InputVersion,
             InputPayload = validated.Submission.InputPayload,
@@ -99,7 +100,7 @@ internal sealed class PostgresFarmDemandQueueService(
                 x => x.AccountId == identity.AccountId && x.ApiTokenId == tokenId &&
                      x.ApiIdempotencyKey == idempotencyKey, cancellationToken);
             if (replay is null) throw;
-            ValidateReplay(replay, validated.Submission, parts.Count, exception);
+            ValidateReplay(replay, validated.Submission, parts.Count, request.MaxAttemptsPerShard, exception);
             return await LoadSnapshotAsync(replayDb, replay, cancellationToken);
         }
         return await LoadSnapshotAsync(db, record, cancellationToken);
@@ -137,11 +138,13 @@ internal sealed class PostgresFarmDemandQueueService(
         if (!CryptographicOperations.FixedTimeEquals(
                 Encoding.ASCII.GetBytes(digest), Encoding.ASCII.GetBytes(demand.OutputDigest)))
             throw new InvalidOperationException("O resultado consolidado da demanda não passou na verificação de integridade.");
-        var jobs = await db.FarmJobs.AsNoTracking().Where(x => x.DemandId == demand.Id).ToArrayAsync(cancellationToken);
-        var jobIds = jobs.Select(x => x.Id).ToArray();
+        var shards = await db.FarmDemandShards.AsNoTracking()
+            .Where(x => x.DemandId == demand.Id && x.JobId != null).ToArrayAsync(cancellationToken);
+        var jobIds = shards.Select(x => x.JobId!.Value).ToArray();
+        var jobs = await db.FarmJobs.AsNoTracking().Where(x => jobIds.Contains(x.Id)).ToArrayAsync(cancellationToken);
         var events = await db.FarmJobEvents.AsNoTracking().Where(x => jobIds.Contains(x.JobId))
             .OrderBy(x => x.Sequence).ToArrayAsync(cancellationToken);
-        if (jobs.Length != demand.TargetShards || jobs.Any(job =>
+        if (jobIds.Length != demand.TargetShards || jobs.Length != demand.TargetShards || jobs.Any(job =>
                 !FarmEvidenceSecurity.Verify(job, events.Where(x => x.JobId == job.Id).ToArray(), signingOptions, out _).IsValid))
             throw new InvalidOperationException("Um ou mais shards não possuem evidência válida.");
         return new FarmUsefulJobOutput(
@@ -205,30 +208,72 @@ internal sealed class PostgresFarmDemandQueueService(
                 .ToArrayAsync(cancellationToken);
             foreach (var shard in shards.Where(x => x.JobId is null))
             {
-                var recovered = jobs.SingleOrDefault(x => x.DemandShardIndex == shard.Sequence);
+                var recovered = jobs.Where(x => x.DemandShardIndex == shard.Sequence &&
+                                                !IsTerminalFailure(x.Status))
+                    .OrderByDescending(x => x.DemandShardAttempt).ThenByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefault();
                 if (recovered is not null) shard.JobId = recovered.Id;
             }
             if (db.ChangeTracker.HasChanges()) await db.SaveChangesAsync(cancellationToken);
             jobs = await db.FarmJobs.AsNoTracking().Where(x => x.DemandId == demand.Id).ToArrayAsync(cancellationToken);
-            if (jobs.Length == demand.TargetShards)
+            var currentJobs = shards.Where(x => x.JobId.HasValue)
+                .Select(shard => jobs.Single(x => x.Id == shard.JobId!.Value)).ToArray();
+            var failedCurrent = currentJobs.Where(x => IsTerminalFailure(x.Status)).ToArray();
+            var exhausted = failedCurrent.Where(x =>
+                (x.DemandShardAttempt ?? 1) >= demand.MaxAttemptsPerShard ||
+                timeProvider.GetUtcNow() >= demand.ExpiresAtUtc).ToArray();
+            if (exhausted.Length > 0)
             {
-                await ReconcileAsync(demand, shards, jobs, cancellationToken);
+                if (currentJobs.Any(x => FarmJobLifecycle.ActiveStatuses.Contains(x.Status)))
+                {
+                    await SetStateAsync(demand.Id, FarmDemandStatus.Submitted,
+                        timeProvider.GetUtcNow().AddSeconds(5),
+                        $"{exhausted.Length} shard(s) esgotaram as tentativas; aguardando os demais Jobs.",
+                        cancellationToken);
+                }
+                else
+                {
+                    await FinishFailureAsync(demand.Id,
+                        $"{exhausted.Length} shard(s) esgotaram {demand.MaxAttemptsPerShard} tentativa(s) sem evidência aprovada.",
+                        cancellationToken);
+                }
+                return;
+            }
+            if (failedCurrent.Length > 0)
+            {
+                await ScheduleRetryAsync(demand, failedCurrent, cancellationToken);
+                return;
+            }
+            if (shards.All(x => x.JobId.HasValue))
+            {
+                await ReconcileAsync(demand, shards, currentJobs, cancellationToken);
                 return;
             }
 
             foreach (var shard in shards.Where(x => x.JobId is null))
             {
+                var previous = jobs.Where(x => x.DemandShardIndex == shard.Sequence)
+                    .OrderByDescending(x => x.DemandShardAttempt).ThenByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefault();
+                var attempt = (previous?.DemandShardAttempt ?? 0) + 1;
+                if (attempt > demand.MaxAttemptsPerShard)
+                {
+                    await FinishFailureAsync(demand.Id,
+                        $"Shard {shard.Sequence} esgotou {demand.MaxAttemptsPerShard} tentativa(s).",
+                        cancellationToken);
+                    return;
+                }
                 var submission = new FarmUsefulJobSubmission(
                     definition, ShardLabel(demand.Label, shard.Sequence, demand.TargetShards),
                     demand.InputVersion, shard.InputPayload, shard.InputSizeBytes, shard.InputDigest);
                 var job = await farmLab.RunQueuedDemandAsync(
                     demand.AccountId, demand.Id, shard.Sequence, demand.TargetShards,
-                    submission, cancellationToken);
+                    attempt, previous?.NodeId, submission, cancellationToken);
                 await LinkShardAsync(demand.Id, shard.Id, job.Id, cancellationToken);
                 shard.JobId = job.Id;
             }
             await SetStateAsync(demand.Id, FarmDemandStatus.Submitted, timeProvider.GetUtcNow().AddSeconds(5),
-                $"{demand.TargetShards}/{demand.TargetShards} shards despachados; aguardando evidências.", cancellationToken);
+                $"{demand.TargetShards}/{demand.TargetShards} shards ativos; aguardando evidências.", cancellationToken);
         }
         catch (InvalidOperationException exception)
         {
@@ -292,6 +337,30 @@ internal sealed class PostgresFarmDemandQueueService(
                 .SetProperty(x => x.UpdatedAtUtc, timeProvider.GetUtcNow()), cancellationToken);
     }
 
+    private async Task ScheduleRetryAsync(
+        FarmDemandRecord demand,
+        FarmJobRecord[] failedJobs,
+        CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var attempt = failedJobs.Max(x => x.DemandShardAttempt ?? 1);
+        var seconds = Math.Min(300, 5 * (1 << Math.Min(attempt - 1, 6)));
+        var failedJobIds = failedJobs.Select(x => x.Id).ToArray();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        await db.FarmDemandShards
+            .Where(x => x.DemandId == demand.Id && x.JobId != null && failedJobIds.Contains(x.JobId.Value))
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.JobId, (Guid?)null), cancellationToken);
+        await db.FarmDemands
+            .Where(x => x.Id == demand.Id && x.Status == FarmDemandStatus.Dispatching.ToString())
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.Status, FarmDemandStatus.Processing.ToString())
+                .SetProperty(x => x.NextAttemptAtUtc, now.AddSeconds(seconds))
+                .SetProperty(x => x.ClaimedAtUtc, (DateTimeOffset?)null)
+                .SetProperty(x => x.Detail,
+                    $"Failover agendado para {failedJobs.Length} shard(s) em {seconds}s; o Node anterior será evitado.")
+                .SetProperty(x => x.UpdatedAtUtc, now), cancellationToken);
+    }
+
     private async Task LinkShardAsync(Guid demandId, Guid shardId, Guid jobId, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -304,9 +373,9 @@ internal sealed class PostgresFarmDemandQueueService(
     private async Task DeferAsync(FarmDemandRecord demand, string detail, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var dispatched = await db.FarmDemandShards.CountAsync(x => x.DemandId == demand.Id && x.JobId != null, cancellationToken);
+        var attempted = await db.FarmJobs.AnyAsync(x => x.DemandId == demand.Id, cancellationToken);
         var now = timeProvider.GetUtcNow();
-        if (dispatched == 0 && now >= demand.ExpiresAtUtc)
+        if (!attempted && now >= demand.ExpiresAtUtc)
         {
             await SetStateAsync(demand.Id, FarmDemandStatus.Expired, now,
                 "A demanda expirou antes de despachar o primeiro shard.", cancellationToken);
@@ -314,7 +383,7 @@ internal sealed class PostgresFarmDemandQueueService(
         }
         var seconds = Math.Min(300, 5 * (1 << Math.Min(demand.Attempts - 1, 6)));
         await SetStateAsync(demand.Id,
-            dispatched == 0 ? FarmDemandStatus.Queued : FarmDemandStatus.Processing,
+            attempted ? FarmDemandStatus.Processing : FarmDemandStatus.Queued,
             now.AddSeconds(seconds), Limit(detail), cancellationToken);
     }
 
@@ -402,13 +471,24 @@ internal sealed class PostgresFarmDemandQueueService(
         IEnumerable<FarmJobRecord> jobRecords)
     {
         var definition = FarmWorkloadCatalog.GetRequired(record.WorkloadId);
-        var jobs = jobRecords.ToDictionary(x => x.DemandShardIndex ?? 0);
+        var jobs = jobRecords.ToArray();
         var shards = shardRecords.Select(shard =>
         {
-            jobs.TryGetValue(shard.Sequence, out var job);
+            var attempts = jobs.Where(x => x.DemandShardIndex == shard.Sequence)
+                .OrderBy(x => x.DemandShardAttempt).ThenBy(x => x.CreatedAtUtc).ToArray();
+            var job = shard.JobId.HasValue
+                ? attempts.SingleOrDefault(x => x.Id == shard.JobId.Value)
+                : attempts.LastOrDefault();
+            var history = attempts.Select(x => new FarmDemandShardAttemptSnapshot(
+                x.DemandShardAttempt ?? 1, x.Id, x.NodeId, Enum.Parse<FarmJobStatus>(x.Status),
+                x.FailureReason, x.CreatedAtUtc, x.FinishedAtUtc)).ToArray();
+            var retryPending = shard.JobId is null && job is not null && IsTerminalFailure(job.Status) &&
+                               attempts.Length < record.MaxAttemptsPerShard &&
+                               record.Status is not nameof(FarmDemandStatus.Failed) and not nameof(FarmDemandStatus.Expired);
             return new FarmDemandShardSnapshot(
-                shard.Sequence, shard.InputSizeBytes, shard.InputDigest, shard.JobId,
-                job is null ? null : Enum.Parse<FarmJobStatus>(job.Status), job?.OutputDigest);
+                shard.Sequence, shard.InputSizeBytes, shard.InputDigest, job?.Id,
+                job is null ? null : Enum.Parse<FarmJobStatus>(job.Status), job?.OutputDigest,
+                attempts.Length, record.MaxAttemptsPerShard, retryPending, history);
         }).ToArray();
         var primary = shards.FirstOrDefault(x => x.JobId.HasValue);
         return new(record.Id, record.WorkloadId, definition.Workload, record.WorkloadVersion,
@@ -416,6 +496,7 @@ internal sealed class PostgresFarmDemandQueueService(
             shards.Count(x => x.JobId.HasValue), shards.Count(x => x.JobStatus == FarmJobStatus.Completed),
             shards.Count(x => x.JobStatus is FarmJobStatus.Failed or FarmJobStatus.Cancelled or
                 FarmJobStatus.TimedOut or FarmJobStatus.Rejected),
+            record.MaxAttemptsPerShard,
             record.Label, record.InputSizeBytes, record.InputDigest,
             (FarmDemandPriority)record.Priority, Enum.Parse<FarmDemandStatus>(record.Status),
             record.Attempts, record.NextAttemptAtUtc, record.ExpiresAtUtc, primary?.JobId,
@@ -424,11 +505,11 @@ internal sealed class PostgresFarmDemandQueueService(
     }
 
     private static void ValidateReplay(
-        FarmDemandRecord replay, FarmUsefulJobSubmission submission, int targetShards,
+        FarmDemandRecord replay, FarmUsefulJobSubmission submission, int targetShards, int maxAttemptsPerShard,
         Exception? inner = null)
     {
         if (replay.InputDigest != submission.InputDigest || replay.WorkloadId != submission.Definition.Id ||
-            replay.TargetShards != targetShards)
+            replay.TargetShards != targetShards || replay.MaxAttemptsPerShard != maxAttemptsPerShard)
             throw new InvalidOperationException("A chave de idempotência já foi usada com outra demanda.", inner);
     }
 
@@ -438,6 +519,10 @@ internal sealed class PostgresFarmDemandQueueService(
         definition.RequiredMemoryBytes == demand.RequiredMemoryBytes;
 
     private static string Limit(string value) => value.Length <= 500 ? value : value[..500];
+
+    private static bool IsTerminalFailure(string status) => status is
+        nameof(FarmJobStatus.Failed) or nameof(FarmJobStatus.Cancelled) or
+        nameof(FarmJobStatus.TimedOut) or nameof(FarmJobStatus.Rejected);
 
     private static string ShardLabel(string label, int sequence, int total)
     {

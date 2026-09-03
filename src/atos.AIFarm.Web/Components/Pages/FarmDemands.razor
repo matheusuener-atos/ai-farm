@@ -62,6 +62,14 @@
                     <option value="8">8 SHARDS</option>
                 </select>
             </label>
+            <label>RESILIÊNCIA
+                <select @bind="_maxAttemptsPerShard" disabled="@_working">
+                    <option value="1">1 TENTATIVA</option>
+                    <option value="2">2 TENTATIVAS</option>
+                    <option value="3">3 TENTATIVAS</option>
+                    <option value="5">5 TENTATIVAS</option>
+                </select>
+            </label>
         </div>
         <label>TEXTO DA DEMANDA
             <textarea @bind="_input" rows="12" maxlength="32768" placeholder="Cole aqui o conteúdo STANDARD que será processado..." disabled="@_working"></textarea>
@@ -80,7 +88,7 @@
     {
         <article class="useful-job">
             <div><strong>@demand.Label</strong><small>@demand.WorkloadVersion // @demand.Id.ToString("N")[..8]</small></div>
-            <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>REQUER @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) // TENTATIVAS @demand.Attempts</small><small>INPUT @Short(demand.InputDigest)</small></div>
+            <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>REQUER @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) // CICLOS @demand.Attempts</small><small>ATÉ @demand.MaxAttemptsPerShard TENTATIVAS/SHARD // INPUT @Short(demand.InputDigest)</small></div>
             <div><span class="@StatusClass(demand.Status)">@Status(demand.Status)</span><small>SHARDS @demand.CompletedShards/@demand.TargetShards // DESPACHADOS @demand.DispatchedShards // FALHAS @demand.FailedShards</small><small>@demand.Detail</small></div>
             <div class="queue-actions">
                 @if (demand.Status == FarmDemandStatus.Queued)
@@ -102,7 +110,24 @@
             <div class="shard-row">
                 @foreach (var shard in demand.Shards)
                 {
-                    <span>#@shard.Sequence // @(shard.JobStatus?.ToString().ToUpperInvariant() ?? "AGUARDANDO") // @Short(shard.InputDigest)</span>
+                    <details class="shard-attempts" open="@shard.RetryPending">
+                        <summary>#@shard.Sequence // @(shard.JobStatus?.ToString().ToUpperInvariant() ?? "AGUARDANDO") // @shard.AttemptCount/@shard.MaxAttempts TENTATIVAS @(shard.RetryPending ? "// FAILOVER PENDENTE" : null)</summary>
+                        <small>INPUT @Short(shard.InputDigest)</small>
+                        @if (shard.AttemptHistory.Count == 0)
+                        {
+                            <span>AGUARDANDO PRIMEIRO DESPACHO</span>
+                        }
+                        @foreach (var attempt in shard.AttemptHistory)
+                        {
+                            <span class="attempt-line">
+                                #@attempt.Attempt // JOB @attempt.JobId.ToString("N")[..8] // NODE @attempt.NodeId.ToString("N")[..8] // @attempt.Status.ToString().ToUpperInvariant()
+                                @if (!string.IsNullOrWhiteSpace(attempt.FailureReason))
+                                {
+                                    <small>@attempt.FailureReason</small>
+                                }
+                            </span>
+                        }
+                    </details>
                 }
             </div>
         }
@@ -117,6 +142,7 @@
     private FarmDemandPriority _priority = FarmDemandPriority.Normal;
     private int _lifetimeMinutes = 1440;
     private int _targetShards = 1;
+    private int _maxAttemptsPerShard = 3;
     private bool _working;
     private bool _error;
     private string? _message;
@@ -149,7 +175,7 @@
         _working = true; _message = null;
         try
         {
-            await DemandQueue.SubmitAsync(new(_workloadId, _label, _input, _priority, _lifetimeMinutes, _targetShards));
+            await DemandQueue.SubmitAsync(new(_workloadId, _label, _input, _priority, _lifetimeMinutes, _targetShards, _maxAttemptsPerShard));
             _message = "Demanda aceita. A fila fará o despacho automaticamente quando houver capacidade.";
             _label = string.Empty; _input = string.Empty; _error = false;
             await LoadAsync();

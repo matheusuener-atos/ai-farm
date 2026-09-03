@@ -9,7 +9,8 @@ public sealed record FarmDemandRequest(
     string InputText,
     FarmDemandPriority Priority = FarmDemandPriority.Normal,
     int LifetimeMinutes = 1_440,
-    int TargetShards = 1)
+    int TargetShards = 1,
+    int MaxAttemptsPerShard = 3)
 {
     public (FarmUsefulJobSubmission Submission, FarmDemandPriority Priority, int LifetimeMinutes, int TargetShards) Validate()
     {
@@ -21,9 +22,21 @@ public sealed record FarmDemandRequest(
         if (TargetShards is < 1 or > 8)
             throw new ArgumentOutOfRangeException(nameof(TargetShards),
                 "O paralelismo deve ficar entre 1 e 8 shards.");
+        if (MaxAttemptsPerShard is < 1 or > 5)
+            throw new ArgumentOutOfRangeException(nameof(MaxAttemptsPerShard),
+                "Cada shard deve permitir entre 1 e 5 tentativas.");
         return (new FarmUsefulJobRequest(WorkloadId, Label, InputText).Validate(), Priority, LifetimeMinutes, TargetShards);
     }
 }
+
+public sealed record FarmDemandShardAttemptSnapshot(
+    int Attempt,
+    Guid JobId,
+    Guid NodeId,
+    FarmJobStatus Status,
+    string? FailureReason,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? FinishedAtUtc);
 
 public sealed record FarmDemandShardSnapshot(
     int Sequence,
@@ -31,7 +44,11 @@ public sealed record FarmDemandShardSnapshot(
     string InputDigest,
     Guid? JobId,
     FarmJobStatus? JobStatus,
-    string? OutputDigest);
+    string? OutputDigest,
+    int AttemptCount,
+    int MaxAttempts,
+    bool RetryPending,
+    IReadOnlyList<FarmDemandShardAttemptSnapshot> AttemptHistory);
 
 public sealed record FarmDemandSnapshot(
     Guid Id,
@@ -44,6 +61,7 @@ public sealed record FarmDemandSnapshot(
     int DispatchedShards,
     int CompletedShards,
     int FailedShards,
+    int MaxAttemptsPerShard,
     string Label,
     int InputSizeBytes,
     string InputDigest,
@@ -63,7 +81,8 @@ public sealed record FarmDemandSnapshot(
 public sealed record FarmDemandDashboard(IReadOnlyList<FarmDemandSnapshot> Demands)
 {
     public int QueuedCount => Demands.Count(x => x.Status == FarmDemandStatus.Queued);
-    public int InFlightCount => Demands.Count(x => x.Status == FarmDemandStatus.Dispatching);
+    public int InFlightCount => Demands.Count(x =>
+        x.Status is FarmDemandStatus.Dispatching or FarmDemandStatus.Processing);
     public int SubmittedCount => Demands.Count(x => x.Status == FarmDemandStatus.Submitted);
     public int CompletedCount => Demands.Count(x => x.Status == FarmDemandStatus.Completed);
 }
