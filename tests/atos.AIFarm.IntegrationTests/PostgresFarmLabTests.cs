@@ -730,7 +730,15 @@ public sealed class PostgresFarmLabTests
         services.AddLogging();
         if (timeProvider is not null) services.AddSingleton(timeProvider);
         services.AddAIFarmDevelopment();
-        services.AddAIFarmPostgres(connectionString, identity);
+        // Os cenários de falha deliberados destes testes não podem abrir a
+        // quarentena do ADR 0023 (coberta em PostgresFarmNodeReliabilityTests):
+        // sob relógio manual, FinishedAtUtc empata e o desempate da ordenação
+        // decidiria a quarentena de forma não determinística.
+        services.AddAIFarmPostgres(
+            connectionString,
+            identity,
+            nodeReliabilityPolicy: new FarmNodeReliabilityPolicy(
+                ConsecutiveFailureThreshold: 10));
         return services.BuildServiceProvider();
     }
 
