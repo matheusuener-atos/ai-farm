@@ -84,14 +84,14 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, null, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
         FarmUsefulJobSubmission submission,
@@ -100,7 +100,7 @@ internal sealed class PostgresFarmLabService(
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, null, tokenId, idempotencyKey,
-            null, null, null, null, null, submission, cancellationToken);
+            null, null, null, null, null, null, null, submission, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
         Guid accountId,
@@ -119,6 +119,8 @@ internal sealed class PostgresFarmLabService(
             null,
             null,
             null,
+            null,
+            null,
             cancellationToken);
 
     internal Task<FarmJobSnapshot> RunQueuedDemandAsync(
@@ -126,11 +128,14 @@ internal sealed class PostgresFarmLabService(
         Guid demandId,
         int shardIndex,
         int shardCount,
+        int shardAttempt,
+        Guid? excludedNodeId,
         FarmUsefulJobSubmission submission,
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, accountId, null, null, null, null,
-            demandId, shardIndex, shardCount, submission, cancellationToken);
+            demandId, shardIndex, shardCount, shardAttempt, excludedNodeId,
+            submission, cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
         string workloadId,
@@ -142,6 +147,8 @@ internal sealed class PostgresFarmLabService(
         Guid? demandId,
         int? demandShardIndex,
         int? demandShardCount,
+        int? demandShardAttempt,
+        Guid? excludedNodeId,
         FarmUsefulJobSubmission? useful,
         CancellationToken cancellationToken)
     {
@@ -151,7 +158,9 @@ internal sealed class PostgresFarmLabService(
         if (useful is null && definition.InputSchema is not null)
             throw new ArgumentException("Este workload exige uma demanda tipada.", nameof(workloadId));
         if (demandId.HasValue != demandShardIndex.HasValue || demandId.HasValue != demandShardCount.HasValue ||
-            (demandShardIndex.HasValue && (demandShardIndex < 1 || demandShardCount < demandShardIndex)))
+            demandId.HasValue != demandShardAttempt.HasValue ||
+            (demandShardIndex.HasValue && (demandShardIndex < 1 || demandShardCount < demandShardIndex ||
+                                           demandShardAttempt < 1)))
             throw new ArgumentException("A atribuição do shard da demanda é inválida.", nameof(demandId));
         var accountId = explicitAccountId ??
             (await identityAccessor.GetRequiredIdentityAsync(cancellationToken)).AccountId;
@@ -190,7 +199,8 @@ internal sealed class PostgresFarmLabService(
         {
             var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
                 x => x.AccountId == accountId && x.DemandId == queuedDemandId &&
-                     x.DemandShardIndex == demandShardIndex,
+                     x.DemandShardIndex == demandShardIndex &&
+                     x.DemandShardAttempt == demandShardAttempt,
                 cancellationToken);
             if (replay is not null)
                 return await LoadJobAsync(db, replay.Id, cancellationToken);
@@ -201,7 +211,8 @@ internal sealed class PostgresFarmLabService(
             timeProvider.GetUtcNow(),
             cancellationToken,
             accountId: accountId);
-        var node = await SelectExecutionNodeAsync(db, accountId, definition, cancellationToken);
+        var node = await SelectExecutionNodeAsync(
+            db, accountId, definition, excludedNodeId, cancellationToken);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
 
         var now = timeProvider.GetUtcNow();
@@ -249,6 +260,7 @@ internal sealed class PostgresFarmLabService(
             ScheduledForUtc = scheduledForUtc,
             DemandId = demandId,
             DemandShardIndex = demandShardIndex,
+            DemandShardAttempt = demandShardAttempt,
             DemandShardCount = demandShardCount,
             DemandLabel = useful?.Label,
             InputVersion = useful?.InputVersion,
@@ -320,7 +332,8 @@ internal sealed class PostgresFarmLabService(
                 await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
                 var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
                     x => x.AccountId == accountId && x.DemandId == replayDemandId &&
-                         x.DemandShardIndex == demandShardIndex,
+                         x.DemandShardIndex == demandShardIndex &&
+                         x.DemandShardAttempt == demandShardAttempt,
                     cancellationToken);
                 if (replay is not null)
                     return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
@@ -570,6 +583,7 @@ internal sealed class PostgresFarmLabService(
         AIFarmDbContext db,
         Guid accountId,
         FarmWorkloadDefinition definition,
+        Guid? excludedNodeId,
         CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
@@ -614,7 +628,8 @@ internal sealed class PostgresFarmLabService(
             };
         }).ToArray();
         var selected = evaluated
-            .Where(x => x.Blocker == FarmCapacityBlocker.None)
+            .Where(x => x.Blocker == FarmCapacityBlocker.None &&
+                        (!excludedNodeId.HasValue || x.Node.Id != excludedNodeId.Value))
             .OrderByDescending(x => x.Reliability.Score)
             .ThenBy(x => x.AvailableProcessors - definition.RequiredLogicalProcessors)
             .ThenBy(x => x.AvailableMemory - definition.RequiredMemoryBytes)

@@ -426,6 +426,18 @@ progresso por shard e libera o JSON consolidado; a API expõe
 seu CP técnico conforme o catálogo, mas este fan-in não cria reward extra nem
 define conversão CP → AIC.
 
+O **Shard Retry & Failover v1** permite congelar de uma a cinco tentativas por
+shard, com três por padrão. Falha, timeout, rejeição ou cancelamento terminal
+acionam backoff exponencial e uma nova tentativa que evita o Node anterior. Os
+shards já aprovados não são refeitos, e a consolidação considera somente a
+tentativa vencedora de cada parte.
+
+Cada tentativa permanece como Job imutável, com Node, status, falha e evidência
+próprios. A fila mostra a trilha completa e sinaliza failover pendente. Se não
+houver outro Node elegível, a demanda continua em processamento até surgir
+capacidade ou vencer sua validade; ao esgotar o orçamento persistido, termina
+como falha sem apagar os resultados parciais.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto
@@ -536,6 +548,8 @@ Implementado:
 - verificação profunda de evidências contra manifesto, Job e lifecycle persistido, integrada à UI, API, Auditoria, downloads e gate de rewards.
 - Centro de Jobs em `/farm/jobs`, com histórico paginado, filtros operacionais, origem API/painel, inspeção do lifecycle e exportação JSON digestada.
 - Centro de Agendamentos em `/farm/schedules`, com recorrência UTC persistente, pausa/retomada, despacho idempotente entre instâncias e histórico de ocorrências.
+- retentativa persistente por shard com backoff exponencial, limite congelado e histórico auditável.
+- failover automático que evita o último Node falho e preserva shards já aprovados.
 
 ### API pessoal da Iris
 
@@ -553,6 +567,10 @@ GET /api/v1/conversations?page=1&pageSize=25
 GET /api/v1/conversations/{conversationId}
 GET /api/v1/farm/analytics?days=30
 GET /api/v1/farm/workloads
+GET /api/v1/farm/capacity
+GET /api/v1/farm/demands
+POST /api/v1/farm/demands
+GET /api/v1/farm/demands/{demandId}/output
 GET /api/v1/farm/schedules
 GET /api/v1/farm/jobs?page=1&pageSize=20
 GET /api/v1/farm/jobs/export

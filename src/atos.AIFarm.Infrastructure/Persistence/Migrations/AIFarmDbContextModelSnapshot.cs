@@ -832,6 +832,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<int>("MaxAttemptsPerShard")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset>("NextAttemptAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -901,6 +904,8 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_demands_priority", "\"Priority\" >= 0 AND \"Priority\" <= 2");
 
                             t.HasCheckConstraint("CK_farm_demands_resources", "\"RequiredLogicalProcessors\" > 0 AND \"RequiredMemoryBytes\" > 0 AND length(\"WorkloadVersion\") > 0");
+
+                            t.HasCheckConstraint("CK_farm_demands_shard_attempts", "\"MaxAttemptsPerShard\" >= 1 AND \"MaxAttemptsPerShard\" <= 5");
 
                             t.HasCheckConstraint("CK_farm_demands_shards", "\"TargetShards\" >= 1 AND \"TargetShards\" <= 8");
 
@@ -1079,6 +1084,9 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<int?>("DemandShardAttempt")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("DemandShardCount")
                         .HasColumnType("integer");
 
@@ -1240,10 +1248,10 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.HasIndex("ApiTokenId", "ApiIdempotencyKey")
                         .IsUnique();
 
-                    b.HasIndex("DemandId", "DemandShardIndex")
+                    b.HasIndex("ScheduleId", "ScheduledForUtc")
                         .IsUnique();
 
-                    b.HasIndex("ScheduleId", "ScheduledForUtc")
+                    b.HasIndex("DemandId", "DemandShardIndex", "DemandShardAttempt")
                         .IsUnique();
 
                     b.ToTable("farm_jobs", "aifarm", t =>
@@ -1254,7 +1262,7 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
 
-                            t.HasCheckConstraint("CK_farm_jobs_demand_shard_complete", "(\"DemandId\" IS NULL AND \"DemandShardIndex\" IS NULL AND \"DemandShardCount\" IS NULL) OR (\"DemandId\" IS NOT NULL AND \"DemandShardIndex\" > 0 AND \"DemandShardCount\" >= \"DemandShardIndex\")");
+                            t.HasCheckConstraint("CK_farm_jobs_demand_shard_complete", "(\"DemandId\" IS NULL AND \"DemandShardIndex\" IS NULL AND \"DemandShardCount\" IS NULL AND \"DemandShardAttempt\" IS NULL) OR (\"DemandId\" IS NOT NULL AND \"DemandShardIndex\" > 0 AND \"DemandShardCount\" >= \"DemandShardIndex\" AND \"DemandShardAttempt\" > 0)");
 
                             t.HasCheckConstraint("CK_farm_jobs_evidence_complete", "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR (\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
 
