@@ -9,13 +9,13 @@
 
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/COMPUTE_LAB</p>
-    <h1>COMPUTE CONTROLADO</h1>
+    <h1>Compute controlado</h1>
     <p>Workloads determinísticos em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
-    <a class="farm-economics-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
-    <a class="farm-economics-link" href="/farm/demands">[ ENVIAR DEMANDA ÚTIL → ]</a>
-    <a class="farm-economics-link" href="/farm/schedules">[ AUTOMATIZAR WORKLOADS → ]</a>
-    <a class="farm-economics-link" href="/farm/economy">[ SIMULAR ECONOMIA → ]</a>
-    <a class="farm-economics-link" href="/saldo-farm">[ VER SALDO DA FARM → ]</a>
+    <a class="farm-economics-link" href="/farm/jobs">Abrir centro de jobs →</a>
+    <a class="farm-economics-link" href="/farm/demands">Enviar demanda útil →</a>
+    <a class="farm-economics-link" href="/farm/schedules">Automatizar workloads →</a>
+    <a class="farm-economics-link" href="/farm/economy">Simular economia →</a>
+    <a class="farm-economics-link" href="/saldo-farm">Ver saldo da farm →</a>
 </div>
 
 @if (_error is not null)
@@ -26,13 +26,13 @@
 @if (_dashboard is null)
 {
     <section class="terminal placeholder">
-        <div class="terminal-title">[ CONECTANDO AO NODE ]</div>
+        <div class="terminal-title"><span>Conectando ao node</span></div>
     </section>
 }
 else
 {
     <section class="terminal farm-workload-catalog">
-        <div class="terminal-title">CATÁLOGO DE WORKLOADS // @FarmWorkloadCatalog.Version</div>
+        <div class="terminal-title"><span>Catálogo de workloads</span><small>@FarmWorkloadCatalog.Version</small></div>
         <div class="farm-workload-grid">
             @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is null))
             {
@@ -51,12 +51,12 @@ else
     </section>
 
     <section class="terminal farm-pool">
-        <div class="terminal-title">COMPUTE POOL // @_dashboard.AvailableNodeCount DISPONÍVEIS // @_dashboard.Nodes.Count TOTAL</div>
+        <div class="terminal-title"><span>Compute pool</span><small>@_dashboard.AvailableNodeCount DISPONÍVEIS // @_dashboard.Nodes.Count TOTAL</small></div>
         <div class="farm-pool-grid">
             @foreach (var poolNode in _dashboard.Nodes)
             {
                 <article>
-                    <header><strong>@poolNode.Name</strong><span class="@(poolNode.AcceptJobs ? "green" : "amber")">[ @NodeStatusLabel(poolNode.Status) ]</span></header>
+                    <header><strong>@poolNode.Name</strong><span class="@(poolNode.AcceptJobs ? "green" : "amber")">@NodeStatusLabel(poolNode.Status)</span></header>
                     <small>@ConnectionLabel(poolNode.ConnectionKind) // @(poolNode.AgentVersion ?? "HOST WEB")</small>
                     <dl>
                         <div><dt>CPU</dt><dd>@poolNode.AuthorizedLogicalProcessors / @poolNode.LogicalProcessors</dd></div>
@@ -66,7 +66,7 @@ else
                     </dl>
                     <button type="button" class="button-secondary"
                             @onclick="() => ToggleNodeAsync(poolNode)" disabled="@_working">
-                        [ @(poolNode.Status == FarmNodeStatus.Paused ? "RETOMAR" : "PAUSAR") ]
+                        @(poolNode.Status == FarmNodeStatus.Paused ? "RETOMAR" : "PAUSAR")
                     </button>
                 </article>
             }
@@ -135,32 +135,32 @@ else
         <div class="farm-controls">
             @if (IsOnline && IsEmbedded)
             {
-                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR NODE ]</button>
+                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">Pausar node</button>
                 <button type="button" @onclick="RunWorkloadAsync" disabled="@_working">
-                    @(_working ? "[ EXECUTANDO... ]" : $"[ EXECUTAR {SelectedWorkload.DisplayName} ]")
+                    @(_working ? "Executando..." : $"Executar {SelectedWorkload.DisplayName}")
                 </button>
             }
             else if (IsOnline)
             {
-                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
+                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">Pausar agent</button>
                 <button type="button" @onclick="RunWorkloadAsync" disabled="@(_working || !CanAcceptJobs)">
-                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : $"[ DESPACHAR {SelectedWorkload.DisplayName} ]")
+                    @(!CanAcceptJobs ? "Política local pausada" : _working ? "Despachando..." : $"Despachar {SelectedWorkload.DisplayName}")
                 </button>
             }
             else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
             {
-                <button type="button" @onclick="ResumeAsync" disabled="@_working">[ RETOMAR NODE ]</button>
+                <button type="button" @onclick="ResumeAsync" disabled="@_working">Retomar node</button>
             }
             else
             {
-                <button type="button" disabled>[ AGUARDANDO HEARTBEAT ]</button>
+                <button type="button" disabled>Aguardando heartbeat</button>
             }
         </div>
         <small class="classification-note">ALLOWLIST // @SelectedWorkload.Workload // @SelectedWorkload.VerificationPolicy // SEM SHELL // SEM REDE // SEM AIC</small>
     </section>
 
     <section class="terminal farm-agent-panel">
-        <div class="terminal-title">COMPUTE AGENT // VÍNCULO DA MÁQUINA</div>
+        <div class="terminal-title"><span>Compute agent</span><small>vínculo da máquina</small></div>
         <p>
             @if (IsEmbedded)
             {
@@ -172,7 +172,7 @@ else
             }
         </p>
         <button type="button" class="button-secondary" @onclick="CreateEnrollmentAsync" disabled="@_working">
-            [ GERAR CÓDIGO PARA NOVO/RE-VÍNCULO ]
+            Gerar código para novo/re-vínculo
         </button>
         @if (_enrollment is not null)
         {
@@ -185,7 +185,7 @@ else
     </section>
 
     <section class="terminal farm-jobs">
-        <div class="terminal-title">JOBS RECENTES // ÚLTIMOS 10</div>
+        <div class="terminal-title"><span>Jobs recentes</span><small>últimos 10</small></div>
         @if (_dashboard.RecentJobs.Count == 0)
         {
             <p class="muted">Nenhum Job executado neste laboratório.</p>
@@ -198,13 +198,13 @@ else
                     <header>
                         <strong>@job.Workload // @ShortId(job.Id)</strong>
                         <div class="farm-job-actions">
-                            <span class="@JobStatusClass(job.Status)">[ @JobStatusLabel(job.Status) ]</span>
+                            <span class="@JobStatusClass(job.Status)">@JobStatusLabel(job.Status)</span>
                             @if (job.Evidence?.IsValid == true)
                             {
                                 <a class="farm-evidence-download"
                                    href="@EvidenceUrl(job.Id)"
                                    download="@EvidenceFileName(job.Id)">
-                                    [ BAIXAR EVIDÊNCIA ]
+                                    Baixar evidência
                                 </a>
                             }
                             @if (!IsEmbedded && CanCancel(job))
@@ -213,12 +213,12 @@ else
                                         class="button-secondary"
                                         @onclick="() => CancelJobAsync(job.Id)"
                                         disabled="@_working">
-                                    [ CANCELAR ]
+                                    Cancelar
                                 </button>
                             }
                             else if (job.CancellationRequestedAtUtc is not null && CanCancelStatus(job.Status))
                             {
-                                <span class="amber">[ CANCELAMENTO SOLICITADO ]</span>
+                                <span class="amber">Cancelamento solicitado</span>
                             }
                         </div>
                     </header>

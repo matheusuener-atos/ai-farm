@@ -6,27 +6,27 @@
 <PageTitle>Incidentes // atos AI Farm</PageTitle>
 
 <header class="page-head">
-    <div><p class="eyebrow">atos:/OPS/INCIDENTS</p><h1>CENTRO DE INCIDENTES</h1><p>DETECÇÃO // PRIORIZAÇÃO // RECONHECIMENTO AUDITÁVEL</p></div>
-    <a class="audit-export" href="/audit">[ ABRIR AUDITORIA ]</a>
+    <div><p class="eyebrow">atos:/OPS/INCIDENTS</p><h1>Centro de incidentes</h1><p>DETECÇÃO // PRIORIZAÇÃO // RECONHECIMENTO AUDITÁVEL</p></div>
+    <a class="audit-export" href="/audit">Abrir auditoria</a>
 </header>
 
 @if (_error is not null) { <div class="error" role="alert">@_error</div> }
 @if (_notice is not null) { <div class="incident-notice" role="status">@_notice</div> }
 
 <section class="panel">
-    <header class="panel-head"><h2>FILTROS OPERACIONAIS</h2><span class="tag">SOMENTE LEITURA DAS FONTES</span></header>
+    <header class="panel-head"><h2>Filtros operacionais</h2><span class="tag">SOMENTE LEITURA DAS FONTES</span></header>
     <form class="incident-filters" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>BUSCAR<input type="search" maxlength="120" placeholder="código, título, detalhe ou referência" @bind="_search" /></label>
         <label>SEVERIDADE<select @bind="_severity"><option value="">TODAS</option><option value="Critical">CRÍTICA</option><option value="Warning">ALERTA</option></select></label>
         <label class="incident-check"><InputCheckbox @bind-Value="_openOnly" /> SOMENTE NÃO RECONHECIDOS</label>
-        <button type="submit" disabled="@_loading">[ APLICAR ]</button>
-        <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">[ LIMPAR ]</button>
+        <button type="submit" disabled="@_loading">Aplicar</button>
+        <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">Limpar</button>
     </form>
 </section>
 
 @if (_loading && _dashboard is null)
 {
-    <section class="terminal placeholder"><div class="terminal-title">[ CORRELACIONANDO SINAIS ]</div></section>
+    <section class="terminal placeholder"><div class="terminal-title"><span>Correlacionando sinais</span></div></section>
 }
 else if (_dashboard is not null)
 {
@@ -41,7 +41,7 @@ else if (_dashboard is not null)
     <section class="incident-list" aria-live="polite">
         @if (_dashboard.Incidents.Count == 0)
         {
-            <div class="incident-clear"><strong>[ NENHUM INCIDENTE NO FILTRO ]</strong><span>Os sinais monitorados não produziram ocorrências.</span></div>
+            <div class="incident-clear"><strong>Nenhum incidente no filtro</strong><span>Os sinais monitorados não produziram ocorrências.</span></div>
         }
         @foreach (var incident in _dashboard.Incidents)
         {
@@ -54,11 +54,11 @@ else if (_dashboard is not null)
                     <div><small>@incident.Code // REF @incident.Reference</small><h2>@incident.Title</h2><p>@incident.Detail</p></div>
                     @if (incident.IsAcknowledged)
                     {
-                        <span class="incident-ack">[ RECONHECIDO // @incident.AcknowledgedAtUtc!.Value.ToLocalTime().ToString("dd/MM HH:mm") ]</span>
+                        <span class="incident-ack">RECONHECIDO // @incident.AcknowledgedAtUtc!.Value.ToLocalTime().ToString("dd/MM HH:mm")</span>
                     }
                     else
                     {
-                        <button type="button" @onclick="() => AcknowledgeAsync(incident)" disabled="@_working">[ RECONHECER ]</button>
+                        <button type="button" @onclick="() => AcknowledgeAsync(incident)" disabled="@_working">Reconhecer</button>
                     }
                 </div>
             </article>

@@ -8,10 +8,10 @@
 <header class="page-head">
     <div>
         <p class="eyebrow">atos:/AUDIT/CENTER</p>
-        <h1>CENTRO DE AUDITORIA</h1>
+        <h1>Centro de auditoria</h1>
         <p>LEDGER // IRIS // FARM // ECONOMIA // REWARDS // SEGURANÇA</p>
     </div>
-    <a class="audit-export" href="@ExportUrl">[ EXPORTAR JSON ]</a>
+    <a class="audit-export" href="@ExportUrl">Exportar JSON</a>
 </header>
 
 @if (_error is not null)
@@ -20,7 +20,7 @@
 }
 
 <section class="panel audit-filter-panel">
-    <header class="panel-head"><h2>CONSULTA</h2><span class="tag">CONTA ISOLADA</span></header>
+    <header class="panel-head"><h2>Consulta</h2><span class="tag">CONTA ISOLADA</span></header>
     <form class="audit-filters" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>BUSCAR<input type="search" maxlength="120" placeholder="ação, status, referência ou digest" @bind="_searchDraft" /></label>
         <label>CATEGORIA
@@ -35,15 +35,15 @@
         <label>DE (UTC)<input type="datetime-local" @bind="_fromDraft" /></label>
         <label>ATÉ (UTC)<input type="datetime-local" @bind="_toDraft" /></label>
         <div class="audit-filter-actions">
-            <button type="submit" disabled="@_loading">[ APLICAR ]</button>
-            <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">[ LIMPAR ]</button>
+            <button type="submit" disabled="@_loading">Aplicar</button>
+            <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">Limpar</button>
         </div>
     </form>
 </section>
 
 @if (_loading && _page is null)
 {
-    <section class="terminal placeholder"><div class="terminal-title">[ CONSOLIDANDO TRILHAS ]</div></section>
+    <section class="terminal placeholder"><div class="terminal-title"><span>Consolidando trilhas</span></div></section>
 }
 else if (_page is not null)
 {
@@ -62,7 +62,7 @@ else if (_page is not null)
 
     <section class="panel audit-timeline">
         <header class="panel-head">
-            <h2>LINHA DO TEMPO</h2>
+            <h2>Linha do tempo</h2>
             <span class="tag">PÁGINA @_page.Page / @_page.TotalPages</span>
         </header>
         @if (_page.Events.Count == 0)
@@ -91,9 +91,9 @@ else if (_page is not null)
             </div>
         }
         <footer class="audit-pagination">
-            <button type="button" @onclick="PreviousAsync" disabled="@(_loading || !_page.HasPreviousPage)">[ ← ANTERIOR ]</button>
+            <button type="button" @onclick="PreviousAsync" disabled="@(_loading || !_page.HasPreviousPage)">← Anterior</button>
             <span>@_page.Totals.Total EVENTO(S) // @_page.PageSize POR PÁGINA</span>
-            <button type="button" @onclick="NextAsync" disabled="@(_loading || !_page.HasNextPage)">[ PRÓXIMA → ]</button>
+            <button type="button" @onclick="NextAsync" disabled="@(_loading || !_page.HasNextPage)">Próxima →</button>
         </footer>
     </section>
 }

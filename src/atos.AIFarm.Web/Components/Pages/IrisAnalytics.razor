@@ -8,7 +8,7 @@
 <div class="page-head analytics-head">
     <div>
         <p class="eyebrow">atos:/IRIS/ANALYTICS</p>
-        <h1>CENTRO ANALÍTICO</h1>
+        <h1>Centro analítico</h1>
         <p>TELEMETRIA AGREGADA // SEM PROMPTS // ISOLADA POR CONTA</p>
     </div>
     <label class="analytics-period">PERÍODO UTC
@@ -66,11 +66,11 @@ else
     <section class="panel analytics-timeline">
         <div class="panel-head section-heading">
             <div>
-                <h2>CUSTO DIÁRIO</h2>
+                <h2>Custo diário</h2>
                 <p class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</p>
             </div>
             <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">
-                @(_loading ? "[ ATUALIZANDO... ]" : "[ ATUALIZAR ]")
+                @(_loading ? "Atualizando..." : "Atualizar")
             </button>
         </div>
         <div class="analytics-bars" role="img" aria-label="Custo real diário da Iris">
@@ -90,7 +90,7 @@ else
 
     <div class="analytics-detail-grid">
         <section class="panel">
-            <div class="panel-head"><h2>PROVEDORES E MODELOS</h2></div>
+            <div class="panel-head"><h2>Provedores e modelos</h2></div>
             @if (_analytics.Routes.Count == 0)
             {
                 <p class="analytics-empty muted">SEM EXECUÇÕES NO PERÍODO.</p>
@@ -118,7 +118,7 @@ else
         </section>
 
         <section class="panel analytics-statuses">
-            <div class="panel-head"><h2>RESULTADOS</h2></div>
+            <div class="panel-head"><h2>Resultados</h2></div>
             @if (_analytics.Statuses.Count == 0)
             {
                 <p class="analytics-empty muted">SEM RESULTADOS NO PERÍODO.</p>

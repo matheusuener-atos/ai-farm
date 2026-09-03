@@ -8,19 +8,19 @@
 
 <div class="page-heading">
     <p class="eyebrow amber">atos:/FARM/ECONOMIA</p>
-    <h1>ECONOMIA SOB TESTE</h1>
+    <h1>Economia sob teste</h1>
     <p>Simule se o valor de um workload pode financiar energia, operação, risco, margem e recompensa.</p>
 </div>
 
 <section class="economics-warning" role="note">
-    <strong>[ SIMULAÇÃO // NÃO FINANCEIRO ]</strong>
+    <strong>Simulação // não financeiro</strong>
     <span>Nenhum cenário cria AIC, altera a Wallet ou define uma conversão CP → AIC.</span>
 </section>
 
 @if (_benchmark is null)
 {
     <section class="benchmark-source unavailable">
-        <strong>[ MEDIÇÃO INDISPONÍVEL ]</strong>
+        <strong>Medição indisponível</strong>
         <span>Execute um benchmark concluído no Compute Lab para substituir a capacidade informada manualmente.</span>
     </section>
 }
@@ -28,16 +28,16 @@ else
 {
     <section class="benchmark-source">
         <div>
-            <strong>[ ÚLTIMO BENCHMARK // @ShortId(_benchmark.JobId) ]</strong>
+            <strong>ÚLTIMO BENCHMARK // @ShortId(_benchmark.JobId)</strong>
             <span>@Number(_benchmark.ComputeUnitsPerHour) CP/H // @_benchmark.DurationMilliseconds MS // @_benchmark.FinishedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
             <small>EVIDÊNCIA @(_benchmark.HasValidEvidence ? "VÁLIDA" : "LEGADA OU INDISPONÍVEL") // NODE @_benchmark.NodeName</small>
         </div>
-        <button type="button" class="button-secondary" @onclick="UseLatestBenchmark">[ USAR MEDIÇÃO ]</button>
+        <button type="button" class="button-secondary" @onclick="UseLatestBenchmark">Usar medição</button>
     </section>
 }
 
 <section class="terminal economics-inputs">
-    <div class="terminal-title">PARÂMETROS DO CENÁRIO</div>
+    <div class="terminal-title"><span>Parâmetros do cenário</span></div>
     <div class="economics-form">
         <label>HORAS DISPONÍVEIS / MÊS<InputNumber @bind-Value="_scenario.MonthlyAvailableHours" min="0.01" step="1" /></label>
         <label>POTÊNCIA MÉDIA / W<InputNumber @bind-Value="_scenario.PowerWatts" min="0.01" step="1" /></label>
@@ -53,8 +53,8 @@ else
         <label>RESERVA DE RISCO / %<InputNumber @bind-Value="_scenario.RiskReservePercent" min="0" max="100" step="1" /></label>
     </div>
     <div class="economics-actions">
-        <button type="button" @onclick="Calculate">[ CALCULAR CENÁRIO ]</button>
-        <button type="button" class="button-secondary" @onclick="Reset">[ RESTAURAR EXEMPLO ]</button>
+        <button type="button" @onclick="Calculate">Calcular cenário</button>
+        <button type="button" class="button-secondary" @onclick="Reset">Restaurar exemplo</button>
     </div>
     <div class="economics-save">
         <label>
@@ -62,7 +62,7 @@ else
             <input @bind="_scenarioName" maxlength="80" placeholder="ex.: BASE GPU DOMÉSTICA" />
         </label>
         <button type="button" @onclick="SaveScenarioAsync" disabled="@(_saving || _result is null)">
-            @(_saving ? "[ SALVANDO... ]" : "[ SALVAR FOTOGRAFIA ]")
+            @(_saving ? "Salvando..." : "Salvar fotografia")
         </button>
         @if (_notice is not null)
         {
@@ -84,7 +84,7 @@ else if (_result is not null)
                 <strong>@(_result.IsEconomicallyViable ? "ECONOMICAMENTE POSSÍVEL" : "NÃO FINANCIA REWARD")</strong>
             </div>
             <span class="@(_result.IsEconomicallyViable ? "green" : "error-text")">
-                [ @(_result.IsEconomicallyViable ? "VIÁVEL" : "DÉFICIT") ]
+                @(_result.IsEconomicallyViable ? "VIÁVEL" : "DÉFICIT")
             </span>
         </header>
         <div class="economics-summary">
@@ -99,7 +99,7 @@ else if (_result is not null)
     </section>
 
     <section class="terminal economics-breakdown">
-        <div class="terminal-title">COMPOSIÇÃO // RASTREÁVEL</div>
+        <div class="terminal-title"><span>Composição</span><small>rastreável</small></div>
         <dl>
             <div><dt>HORAS EFETIVAS</dt><dd>@Number(_result.EffectiveHours) H</dd></div>
             <div><dt>ENERGIA</dt><dd>@Number(_result.EnergyKwh) KWH // @Money(_result.EnergyCost)</dd></div>
@@ -114,7 +114,7 @@ else if (_result is not null)
     </section>
 
     <section class="terminal economics-sensitivity">
-        <div class="terminal-title">SENSIBILIDADE // NÃO É PREVISÃO</div>
+        <div class="terminal-title"><span>Sensibilidade</span><small>não é previsão</small></div>
         <div class="sensitivity-notice">
             STRESS: energia +20%, valor −20%, utilização ×0,75 e sucesso −10 p.p. //
             FAVORÁVEL: energia −10%, valor +10%, utilização ×1,15 e sucesso +3 p.p.
@@ -143,7 +143,7 @@ else if (_result is not null)
 }
 
 <section class="terminal economics-history">
-    <div class="terminal-title">HISTÓRICO IMUTÁVEL // ÚLTIMOS 10</div>
+    <div class="terminal-title"><span>Histórico imutável</span><small>últimos 10</small></div>
     @if (_savedScenarios.Count == 0)
     {
         <p class="muted">Nenhuma fotografia econômica salva nesta conta.</p>
@@ -159,7 +159,7 @@ else if (_result is not null)
                         <small>@saved.CreatedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") // @saved.Version</small>
                     </div>
                     <span class="@(saved.IsIntegrityValid ? "green" : "error-text")">
-                        [ @(saved.IsIntegrityValid ? "ÍNTEGRO" : "INVÁLIDO") ]
+                        @(saved.IsIntegrityValid ? "ÍNTEGRO" : "INVÁLIDO")
                     </span>
                 </header>
                 <dl>
@@ -172,12 +172,12 @@ else if (_result is not null)
                 </dl>
                 <div class="economics-history-actions">
                     <button type="button" class="button-secondary" @onclick="() => LoadScenario(saved)" disabled="@(!saved.IsIntegrityValid)">
-                        [ CARREGAR CENÁRIO ]
+                        Carregar cenário
                     </button>
                     @if (saved.IsIntegrityValid)
                     {
                         <a class="economics-report-download" href="@ReportUrl(saved.Id)" download="@ReportFileName(saved.Id)">
-                            [ BAIXAR RELATÓRIO ]
+                            Baixar relatório
                         </a>
                     }
                 </div>

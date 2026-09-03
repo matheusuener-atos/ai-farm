@@ -8,14 +8,14 @@
 <div class="page-head jobs-head">
     <div>
         <p class="eyebrow amber">atos:/FARM/JOBS</p>
-        <h1>CENTRO DE JOBS</h1>
+        <h1>Centro de jobs</h1>
         <p>HISTÓRICO COMPLETO // EVIDÊNCIA PROFUNDA // EXPORTAÇÃO AUDITÁVEL</p>
     </div>
-    <a class="button-secondary jobs-export" href="@ExportUrl">[ EXPORTAR JSON ]</a>
+    <a class="button-secondary jobs-export" href="@ExportUrl">Exportar JSON</a>
 </div>
 
 <section class="panel jobs-filters">
-    <div class="panel-head"><h2>FILTROS</h2><button type="button" class="button-secondary" @onclick="ResetAsync" disabled="@_loading">[ LIMPAR ]</button></div>
+    <div class="panel-head"><h2>Filtros</h2><button type="button" class="button-secondary" @onclick="ResetAsync" disabled="@_loading">Limpar</button></div>
     <div class="jobs-filter-grid">
         <label>BUSCA
             <input @bind="_search" maxlength="120" placeholder="workload, versão ou UUID" />
@@ -50,7 +50,7 @@
         <label>DE // UTC<input type="date" @bind="_fromDate" /></label>
         <label>ATÉ // UTC<input type="date" @bind="_toDate" /></label>
         <label class="jobs-check"><input type="checkbox" @bind="_integrityFailuresOnly" /> SOMENTE INTEGRIDADE INVÁLIDA</label>
-        <button type="button" @onclick="ApplyAsync" disabled="@_loading">@(_loading ? "[ CONSULTANDO... ]" : "[ APLICAR FILTROS ]")</button>
+        <button type="button" @onclick="ApplyAsync" disabled="@_loading">@(_loading ? "Consultando..." : "Aplicar filtros")</button>
     </div>
 </section>
 
@@ -75,7 +75,7 @@ else
         <div class="panel-head"><h2>JOBS // PÁGINA @_result.Page DE @_result.TotalPages</h2><span class="muted">LIMITE DE VARREDURA 5.000</span></div>
         @if (_result.IsScanTruncated)
         {
-            <p class="jobs-warning">[ RESULTADO TRUNCADO // REFINE OS FILTROS ]</p>
+            <p class="jobs-warning">Resultado truncado // refine os filtros</p>
         }
         @if (_result.Items.Count == 0)
         {
@@ -88,8 +88,8 @@ else
                 <header>
                     <div><strong>@job.Workload</strong><small>@job.WorkloadVersion // @Short(job.Id)</small></div>
                     <div class="job-badges">
-                        <span>[ @OriginLabel(item.Origin) ]</span>
-                        <span class="@StatusClass(job.Status)">[ @StatusLabel(job.Status) ]</span>
+                        <span>@OriginLabel(item.Origin)</span>
+                        <span class="@StatusClass(job.Status)">@StatusLabel(job.Status)</span>
                     </div>
                 </header>
                 <dl>
@@ -99,7 +99,7 @@ else
                     <div><dt>EVIDÊNCIA</dt><dd class="@EvidenceClass(job)">@EvidenceLabel(job)</dd></div>
                 </dl>
                 <details>
-                    <summary>[ INSPECIONAR JOB E LIFECYCLE ]</summary>
+                    <summary>Inspecionar job e lifecycle</summary>
                     <div class="job-detail">
                         <dl>
                             <div><dt>JOB ID</dt><dd>@job.Id</dd></div>
@@ -116,7 +116,7 @@ else
                                 <span class="@CheckClass(job.Evidence.Verification.LifecycleValid)">LIFECYCLE @CheckLabel(job.Evidence.Verification.LifecycleValid)</span>
                                 @if (job.Evidence.IsValid)
                                 {
-                                    <a href="@EvidenceUrl(job.Id)" download="@EvidenceFile(job.Id)">[ BAIXAR EVIDÊNCIA ]</a>
+                                    <a href="@EvidenceUrl(job.Id)" download="@EvidenceFile(job.Id)">Baixar evidência</a>
                                 }
                             </div>
                         }
@@ -131,9 +131,9 @@ else
             </article>
         }
         <footer class="jobs-pagination">
-            <button type="button" class="button-secondary" @onclick="PreviousAsync" disabled="@(_loading || !_result.HasPreviousPage)">[ ← ANTERIOR ]</button>
+            <button type="button" class="button-secondary" @onclick="PreviousAsync" disabled="@(_loading || !_result.HasPreviousPage)">← Anterior</button>
             <span>PÁG @_result.Page / @_result.TotalPages</span>
-            <button type="button" class="button-secondary" @onclick="NextAsync" disabled="@(_loading || !_result.HasNextPage)">[ PRÓXIMA → ]</button>
+            <button type="button" class="button-secondary" @onclick="NextAsync" disabled="@(_loading || !_result.HasNextPage)">Próxima →</button>
         </footer>
     </section>
 }

@@ -7,7 +7,7 @@
 
 <div class="page-heading">
     <p class="eyebrow amber">atos:/FARM/SALDO</p>
-    <h1>QUANTO EU JÁ FARMEI?</h1>
+    <h1>Quanto eu já farmei?</h1>
     <p>Compute verificado, reward registrado e consumo de IA sem misturar grandezas.</p>
 </div>
 
@@ -18,26 +18,26 @@
 else if (_snapshot is null)
 {
     <section class="terminal placeholder">
-        <div class="terminal-title">[ CONSOLIDANDO FARM + LEDGER ]</div>
+        <div class="terminal-title"><span>Consolidando farm + ledger</span></div>
     </section>
 }
 else
 {
     <section class="farm-value-equation" aria-label="Fluxo de valor da Farm">
         <article>
-            <span>[ 01 ] COMPUTE ÚTIL</span>
+            <span>01 COMPUTE ÚTIL</span>
             <strong>@FormatCp(_snapshot.VerifiedComputeUnitsMilli)</strong>
             <small>@_snapshot.CompletedJobs JOBS CONCLUÍDOS</small>
         </article>
         <span aria-hidden="true">→</span>
         <article>
-            <span>[ 02 ] AIC GERADO</span>
+            <span>02 AIC GERADO</span>
             <strong>@Aic.Format(_snapshot.GeneratedEarnedAicMinor)</strong>
             <small>REWARDS FINANCIADOS NO LEDGER</small>
         </article>
         <span aria-hidden="true">→</span>
         <article>
-            <span>[ 03 ] IA CONSUMIDA</span>
+            <span>03 IA CONSUMIDA</span>
             <strong>@Aic.Format(_snapshot.ConsumedAicMinor)</strong>
             <small>CAPTURAS LIQUIDADAS</small>
         </article>
@@ -46,7 +46,7 @@ else
     @if (!_snapshot.HasFundedRewards)
     {
         <section class="farm-no-reward" role="note">
-            <strong>[ SEM REWARD FINANCIADO ]</strong>
+            <strong>Sem reward financiado</strong>
             <p>Seu compute foi medido, mas não gerou AIC. Isso é esperado enquanto a política CP → AIC e o Reward Pool não forem aprovados e financiados.</p>
         </section>
     }
@@ -80,7 +80,7 @@ else
     </section>
 
     <section class="terminal farm-balance-audit">
-        <div class="terminal-title">ORIGEM DOS NÚMEROS</div>
+        <div class="terminal-title"><span>Origem dos números</span></div>
         <dl>
             <div><dt>COMPUTE</dt><dd>JOBS `COMPLETED` DA CONTA</dd></div>
             <div><dt>AIC GERADO</dt><dd>TRANSAÇÕES `REWARD` DO LEDGER</dd></div>

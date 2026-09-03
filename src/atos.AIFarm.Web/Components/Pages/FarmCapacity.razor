@@ -8,9 +8,9 @@
 
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/CAPACITY_MATRIX</p>
-    <h1>CAPACIDADE DO POOL</h1>
+    <h1>Capacidade do pool</h1>
     <p>Admissão real por CPU, memória, política local, heartbeat, versão do Agent e ocupação atual.</p>
-    <a class="text-link" href="/farm/demands">[ ABRIR FILA DE DEMANDAS → ]</a>
+    <a class="text-link" href="/farm/demands">Abrir fila de demandas →</a>
 </div>
 
 @if (_dashboard is null)
@@ -27,13 +27,13 @@ else
     </section>
 
     <section class="panel">
-        <div class="panel-head"><h2>ADMISSÃO POR WORKLOAD</h2><span>@_dashboard.CalculatedAtUtc.ToLocalTime().ToString("HH:mm:ss")</span></div>
+        <div class="panel-head"><h2>Admissão por workload</h2><span>@_dashboard.CalculatedAtUtc.ToLocalTime().ToString("HH:mm:ss")</span></div>
         <div class="workload-grid">
             @foreach (var workload in _dashboard.Workloads)
             {
                 <article class="workload-card">
                     <div><strong>@workload.DisplayName</strong><small>@workload.WorkloadVersion</small></div>
-                    <span class="@(workload.EligibleNodeCount > 0 ? "green" : "error")">[ @workload.EligibleNodeCount NODE(S) ELEGÍVEL(IS) ]</span>
+                    <span class="@(workload.EligibleNodeCount > 0 ? "green" : "error")">@workload.EligibleNodeCount NODE(S) ELEGÍVEL(IS)</span>
                     <small>REQUER @workload.RequiredLogicalProcessors CPU // @FormatBytes(workload.RequiredMemoryBytes)</small>
                     @if (workload.BlockedNodes.Count > 0)
                     {
@@ -45,13 +45,13 @@ else
     </section>
 
     <section class="panel">
-        <div class="panel-head"><h2>MATRIZ DOS NODES</h2><button class="button-secondary" @onclick="LoadAsync">[ ATUALIZAR ]</button></div>
+        <div class="panel-head"><h2>Matriz dos nodes</h2><button class="button-secondary" @onclick="LoadAsync">Atualizar</button></div>
         @foreach (var item in _dashboard.Nodes)
         {
             <article class="node-capacity">
                 <header>
                     <div><strong>@item.Node.Name</strong><small>@item.Node.ConnectionKind // @item.Node.AgentVersion</small></div>
-                    <span class="@(item.EligibleWorkloadCount > 0 ? "green" : item.Busy ? "amber" : "error")">[ @(item.EligibleWorkloadCount > 0 ? "ACEITANDO" : item.Busy ? "SATURADO" : "BLOQUEADO") ]</span>
+                    <span class="@(item.EligibleWorkloadCount > 0 ? "green" : item.Busy ? "amber" : "error")">@(item.EligibleWorkloadCount > 0 ? "ACEITANDO" : item.Busy ? "SATURADO" : "BLOQUEADO")</span>
                 </header>
                 <div class="resource-bars">
                     <div><small>CPU AUTORIZADA</small><strong>@item.AvailableLogicalProcessors / @item.Node.AuthorizedLogicalProcessors</strong></div>
