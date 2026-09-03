@@ -12,15 +12,11 @@ public sealed class PostgresWalletConcurrencyTests
     private static readonly DateTimeOffset TestNow =
         new(2026, 8, 31, 21, 0, 0, TimeSpan.Zero);
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task ConcurrentReservationsCannotOverspendAndStateSurvivesRecreation()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var identity = new AIFarmIdentity(
             Guid.NewGuid(),
@@ -71,15 +67,11 @@ public sealed class PostgresWalletConcurrencyTests
         }
     }
 
-    [Fact]
+    [RequiresPostgresFact]
     [Trait("Category", "Postgres")]
     public async Task StartupReleasesReservationThatExpiredWhileApplicationWasStopped()
     {
-        var connectionString = ReadLocalVariable("DATABASE_URL");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
 
         var identity = new AIFarmIdentity(
             Guid.NewGuid(),
@@ -197,23 +189,6 @@ public sealed class PostgresWalletConcurrencyTests
             .ExecuteDeleteAsync();
     }
 
-    private static string? ReadLocalVariable(string key)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var path = Path.Combine(directory.FullName, ".env.local");
-            if (File.Exists(path))
-            {
-                var prefix = $"{key}=";
-                var line = File.ReadLines(path)
-                    .FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
-                return line?[prefix.Length..].Trim().Trim('"', '\'');
-            }
-            directory = directory.Parent;
-        }
-        return null;
-    }
 
     private sealed record ReservationAttempt(
         ReservationResult? Reservation,
