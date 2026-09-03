@@ -11,3 +11,6 @@ appsettings.Local.json
 .aifarm-agent/
 .neon
 .env.local
+
+# Publish local do Compute Agent (a imagem Docker gera o exe distribuido)
+atos-agent/
