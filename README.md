@@ -811,18 +811,36 @@ Qualquer alteração de taxa, teto ou orçamento deve usar uma nova
 `GET /api/v1/farm/rewards/pool` e liquidam uma proposta própria com escopo
 `FarmExecute` em `POST /api/v1/farm/rewards/{proposalId}/settle`.
 
-Os valores iniciais são apenas um exemplo editável. O simulador não define
-preço real, não converte CP em AIC e não registra Reward no Ledger. Uma futura
-política comercial somente poderá consumir seus resultados depois que fonte de
-receita, regra CP → AIC e orçamento forem decididos explicitamente.
+Os valores iniciais são apenas um exemplo editável. O **simulador**
+(`/farm/economy`) não define preço real, não converte CP em AIC e não registra
+Reward no Ledger — suas fotografias são referência em BRL. A conversão
+CP → AIC **existe**, mas somente pelo settlement do ADR 0022 descrito acima:
+política versionada e financiada, desligada por padrão, com orçamento mensal e
+partida dobrada no Ledger. Sem a política habilitada, nenhum caminho converte
+CP em AIC. Escala do AIC, ordem de consumo dos buckets e modelo contábil de
+compra estão propostos no ADR 0026, aguardando aprovação.
 
 ### Saldo da Farm
 
-A rota autenticada `/saldo-farm` relaciona, sem converter automaticamente,
-todo CP de Jobs concluídos com transações `Reward` e `Capture` do Ledger. Ela
-distingue AIC gerado, AIC consumido, `Earned` disponível e saldo total. Enquanto
-não existir Reward Pool financiado, compute verificado aparece com zero AIC
-gerado de forma explícita.
+A rota autenticada `/saldo-farm` relaciona, sem conversão própria, todo CP de
+Jobs concluídos com transações `Reward` e `Capture` do Ledger. Ela distingue
+AIC gerado, AIC consumido, `Earned` disponível e saldo total. Com a política
+de rewards desligada (padrão), compute verificado aparece com zero AIC gerado
+de forma explícita; com a política habilitada, o AIC gerado reflete os
+settlements do ADR 0022.
+
+### Crédito administrativo no bucket Purchased
+
+Para testar a economia com crédito não promocional, o escopo administrativo
+`WalletCredit` autoriza `POST /api/v1/wallet/credits` com corpo
+`{ "amountMinor": ..., "correlationId": "..." }`. O crédito é idempotente por
+`CorrelationId` (repetir devolve a mesma transação; reutilizar a correlação
+com valor diferente é rejeitado), limitado a 1.000 AIC por requisição,
+registra partida dobrada no Ledger (débito no bucket `Purchased` da Wallet,
+crédito em `atos:PURCHASED_POOL:ADMIN:v1`) e aparece na categoria Ledger do
+Centro de Auditoria. Não há integração com gateway de pagamento. Enquanto o
+ADR 0026 não for aprovado, o saldo `Purchased` é visível em `/wallet` mas não
+é consumível — reservas continuam sacando somente de `Promotional`.
 
 ## Marco 2 — Provider OpenAI
 

@@ -8,18 +8,22 @@
 <div class="page-head">
     <p class="eyebrow">atos:/WALLET</p>
     <h1>AI wallet</h1>
-    <p>LEDGER IMUTÁVEL // VALORES EM mAIC</p>
+    <p>LEDGER IMUTÁVEL // PARTIDAS DOBRADAS // VALORES EM mAIC</p>
 </div>
 
-@if (_snapshot is null)
+@if (_error is not null)
 {
-    <p>CARREGANDO...</p>
+    <p class="error">@_error</p>
+}
+else if (_snapshot is null)
+{
+    <p class="muted">CARREGANDO...</p>
 }
 else
 {
-    <div class="kpi-grid cols-3">
+    <div class="kpi-grid cols-5">
         <section class="kpi kpi-purple">
-            <span>DISPONÍVEL</span>
+            <span>DISPONÍVEL TOTAL</span>
             <strong>@Aic.Format(_snapshot.Balance.AvailableMinor)</strong>
         </section>
         <section class="kpi kpi-amber">
@@ -27,28 +31,114 @@ else
             <strong>@Aic.Format(_snapshot.Balance.ReservedMinor)</strong>
         </section>
         <section class="kpi">
+            <span>PURCHASED</span>
+            <strong>@BucketBalance(CreditBucket.Purchased)</strong>
+            <small>CRÉDITO ADMINISTRATIVO // CONSUMO AGUARDA ADR 0026</small>
+        </section>
+        <section class="kpi kpi-green">
+            <span>EARNED</span>
+            <strong>@BucketBalance(CreditBucket.Earned)</strong>
+            <small>SETTLEMENT DA FARM // ADR 0022</small>
+        </section>
+        <section class="kpi">
             <span>PROMOTIONAL</span>
-            <strong>@Aic.Format(_snapshot.Balance.AvailableByBucket[CreditBucket.Promotional])</strong>
+            <strong>@BucketBalance(CreditBucket.Promotional)</strong>
+            <small>ÚNICO BUCKET CONSUMÍVEL HOJE</small>
         </section>
     </div>
 
-    <section class="panel ledger">
+    <section class="panel">
+        <header class="panel-head">
+            <h2>Invariantes do ledger</h2>
+            <span class="tag @(InvariantsHold ? "green" : "error-text")">
+                @(InvariantsHold ? "VÁLIDO" : "VIOLADO")
+            </span>
+        </header>
+        <div class="kv-list">
+            <div><span>TRANSAÇÕES</span><strong>@_snapshot.Transactions.Count</strong></div>
+            <div><span>LANÇAMENTOS</span><strong>@AllEntries.Count</strong></div>
+            <div><span>TRANSAÇÕES DESBALANCEADAS</span><strong>@UnbalancedCount</strong></div>
+            <div><span>TOTAL DÉBITOS</span><strong>@Aic.Format(TotalDebits)</strong></div>
+            <div><span>TOTAL CRÉDITOS</span><strong>@Aic.Format(TotalCredits)</strong></div>
+            <div class="total"><span>DIFERENÇA</span><strong>@Aic.Format(TotalDebits - TotalCredits)</strong></div>
+        </div>
+        <p class="panel-note">
+            Cada transação deve somar zero (débitos = créditos) e o saldo é sempre
+            projeção dos lançamentos — nunca uma coluna mutável.
+        </p>
+    </section>
+
+    <section class="panel">
+        <header class="panel-head">
+            <h2>Reservas abertas</h2>
+            <span class="tag amber">EXPIRAM AUTOMATICAMENTE</span>
+        </header>
+        @if (_snapshot.OpenReservations.Count == 0)
+        {
+            <p class="panel-empty">
+                NENHUMA RESERVA ATIVA // RESERVAS NÃO CAPTURADAS SÃO LIBERADAS NO
+                LEDGER APÓS A EXPIRAÇÃO
+            </p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>RESERVA</th><th>BUCKET</th><th class="num">VALOR</th><th>EXPIRA (UTC)</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var reservation in _snapshot.OpenReservations)
+                        {
+                            <tr>
+                                <td><code>@reservation.ReservationId.ToString("N")[..8]</code></td>
+                                <td>@reservation.Bucket.ToString().ToUpperInvariant()</td>
+                                <td class="num">@Aic.Format(reservation.ReservedAmountMinor)</td>
+                                <td class="time">@reservation.ExpiresAtUtc.ToString("dd/MM HH:mm:ss")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
         <header class="panel-head"><h2>Atividade do ledger</h2><span class="tag">IMUTÁVEL</span></header>
         <div class="table-wrap">
             <table>
                 <thead>
-                    <tr><th>UTC</th><th>OPERAÇÃO</th><th>VALOR</th><th>CORRELAÇÃO</th><th>DESCRIÇÃO</th></tr>
+                    <tr>
+                        <th>UTC</th>
+                        <th>OPERAÇÃO</th>
+                        <th>CONTA CONTÁBIL</th>
+                        <th>BUCKET</th>
+                        <th class="num">DÉBITO</th>
+                        <th class="num">CRÉDITO</th>
+                        <th>CORRELAÇÃO</th>
+                    </tr>
                 </thead>
                 <tbody>
                     @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc))
                     {
                         <tr>
-                            <td>@transaction.CreatedAtUtc.ToString("HH:mm:ss")</td>
+                            <td class="time">@transaction.CreatedAtUtc.ToString("dd/MM HH:mm:ss")</td>
                             <td class="@TypeClass(transaction.Type)">@transaction.Type.ToString().ToUpperInvariant()</td>
-                            <td>@Aic.Format(transaction.Entries.Max(x => x.AmountMinor))</td>
-                            <td><code>@transaction.CorrelationId.ToString()[..8]</code></td>
-                            <td>@transaction.Description</td>
+                            <td colspan="4"><small>@transaction.Description</small></td>
+                            <td><code>@transaction.CorrelationId.ToString("N")[..8]</code></td>
                         </tr>
+                        @foreach (var entry in transaction.Entries)
+                        {
+                            <tr>
+                                <td></td>
+                                <td></td>
+                                <td><code>@AccountLabel(entry.AccountCode)</code></td>
+                                <td>@entry.Bucket.ToString().ToUpperInvariant()</td>
+                                <td class="num">@(entry.Direction == LedgerDirection.Debit ? Aic.Format(entry.AmountMinor) : "—")</td>
+                                <td class="num">@(entry.Direction == LedgerDirection.Credit ? Aic.Format(entry.AmountMinor) : "—")</td>
+                                <td></td>
+                            </tr>
+                        }
                     }
                 </tbody>
             </table>
@@ -58,13 +148,53 @@ else
 
 @code {
     private WalletSnapshot? _snapshot;
+    private string? _error;
 
-    protected override async Task OnInitializedAsync() =>
-        _snapshot = await WalletService.GetSnapshotAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _snapshot = await WalletService.GetSnapshotAsync();
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível carregar a wallet. Tente novamente.";
+        }
+    }
+
+    private IReadOnlyList<LedgerEntry> AllEntries =>
+        _snapshot is null
+            ? []
+            : _snapshot.Transactions.SelectMany(x => x.Entries).ToArray();
+
+    private long TotalDebits => AllEntries
+        .Where(x => x.Direction == LedgerDirection.Debit)
+        .Sum(x => x.AmountMinor);
+
+    private long TotalCredits => AllEntries
+        .Where(x => x.Direction == LedgerDirection.Credit)
+        .Sum(x => x.AmountMinor);
+
+    private int UnbalancedCount => _snapshot is null
+        ? 0
+        : _snapshot.Transactions.Count(x => x.Entries.Sum(entry => entry.SignedAmountMinor) != 0);
+
+    private bool InvariantsHold => TotalDebits == TotalCredits && UnbalancedCount == 0;
+
+    private string BucketBalance(CreditBucket bucket) =>
+        Aic.Format(_snapshot!.Balance.AvailableByBucket.GetValueOrDefault(bucket));
+
+    private string AccountLabel(string accountCode)
+    {
+        var walletPrefix = $"WALLET:{_snapshot!.WalletId}:";
+        return accountCode.StartsWith(walletPrefix, StringComparison.Ordinal)
+            ? $"WALLET:…:{accountCode[walletPrefix.Length..]}"
+            : accountCode;
+    }
 
     private static string TypeClass(LedgerTransactionType type) => type switch
     {
-        LedgerTransactionType.Grant => "green",
+        LedgerTransactionType.Grant or LedgerTransactionType.Reward => "green",
         LedgerTransactionType.Capture => "purple",
         LedgerTransactionType.Reserve or LedgerTransactionType.Release => "amber",
         _ => string.Empty
