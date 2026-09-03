@@ -76,7 +76,8 @@ public sealed record ChatExecutionPlan(
     ChatContextPlan? Context = null,
     ConversationAiSettings? Settings = null,
     IReadOnlyList<AiAttachmentInput>? Attachments = null,
-    AiDataClassification DataClassification = AiDataClassification.Standard);
+    AiDataClassification DataClassification = AiDataClassification.Standard,
+    FarmKnowledgeSearchResult? Knowledge = null);
 public sealed record AiProviderRequest(
     string Prompt,
     AiRoute Route,

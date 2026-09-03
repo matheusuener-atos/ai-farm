@@ -26,6 +26,8 @@ public static class DependencyInjection
         services.TryAddSingleton(configuredContextLimits);
         services.TryAddSingleton<IChatContextPlanner>(
             new ChatContextPlanner(configuredContextLimits));
+        services.TryAddSingleton<IFarmKnowledgeSearchService,
+            EmptyFarmKnowledgeSearchService>();
         services.TryAddSingleton<IAIFarmIdentityAccessor>(
             new FixedAIFarmIdentityAccessor(AIFarmIdentity.Development));
         services.AddSingleton<IAIFarmReadinessProbe, InMemoryReadinessProbe>();
@@ -123,6 +125,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmDemandDispatcher>();
         services.RemoveAll<IFarmCapacityQuery>();
         services.RemoveAll<IAuditTrail>();
+        services.RemoveAll<IFarmKnowledgeSearchService>();
         services.RemoveAll<IOperationalIncidentService>();
         services.RemoveAll<IAiUsageBudgetService>();
         services.RemoveAll<IApiTokenService>();
@@ -158,6 +161,7 @@ public static class DependencyInjection
         services.AddHostedService<FarmDemandWorker>();
         services.AddScoped<IFarmCapacityQuery, PostgresFarmCapacityQuery>();
         services.AddScoped<IAuditTrail, PostgresAuditTrail>();
+        services.AddScoped<IFarmKnowledgeSearchService, PostgresFarmKnowledgeSearchService>();
         services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
         services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();
         services.AddScoped<PostgresApiTokenService>();

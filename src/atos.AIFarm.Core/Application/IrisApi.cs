@@ -6,7 +6,8 @@ public sealed record IrisApiExecutionRequest(
     string Prompt,
     Guid? ConversationId = null,
     int? MaximumContextMessages = null,
-    AiDataClassification DataClassification = AiDataClassification.Standard)
+    AiDataClassification DataClassification = AiDataClassification.Standard,
+    bool UseFarmKnowledge = false)
 {
     public IrisApiExecutionRequest Validate()
     {
@@ -69,6 +70,7 @@ public sealed class IrisApiService(IChatStore chat, ChatWorkflow workflow)
             request.Prompt,
             request.MaximumContextMessages,
             dataClassification: request.DataClassification,
+            useFarmKnowledge: request.UseFarmKnowledge,
             cancellationToken: cancellationToken);
         var result = await workflow.SendAsync(
             conversation.Id,

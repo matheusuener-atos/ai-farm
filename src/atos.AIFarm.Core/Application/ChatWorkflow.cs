@@ -13,7 +13,8 @@ public sealed class ChatWorkflow(
     IChatContextPlanner? contextPlanner = null,
     IAiModelCatalog? modelCatalog = null,
     IChatAttachmentService? attachmentService = null,
-    IAiUsageBudgetService? usageBudget = null)
+    IAiUsageBudgetService? usageBudget = null,
+    IFarmKnowledgeSearchService? farmKnowledge = null)
 {
     private readonly ChatExecutionLimits _executionLimits =
         ValidateLimits(executionLimits ?? ChatExecutionLimits.Default);
@@ -59,6 +60,7 @@ public sealed class ChatWorkflow(
             ConversationAiSettings.Default,
             [],
             AiDataClassification.Standard,
+            false,
             cancellationToken);
     }
 
@@ -69,7 +71,8 @@ public sealed class ChatWorkflow(
         Guid? beforeMessageId = null,
         IReadOnlyCollection<Guid>? attachmentIds = null,
         AiDataClassification dataClassification = AiDataClassification.Standard,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool useFarmKnowledge = false)
     {
         var conversation = await chat.GetConversationAsync(
             conversationId,
@@ -109,6 +112,7 @@ public sealed class ChatWorkflow(
             conversation.AiSettings ?? ConversationAiSettings.Default,
             attachments,
             dataClassification,
+            useFarmKnowledge,
             cancellationToken);
     }
 
@@ -119,6 +123,7 @@ public sealed class ChatWorkflow(
         ConversationAiSettings settings,
         IReadOnlyList<AiAttachmentInput> attachments,
         AiDataClassification dataClassification,
+        bool useFarmKnowledge,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -164,17 +169,28 @@ public sealed class ChatWorkflow(
             throw new InvalidOperationException(
                 "Dados classificados como PRIVADO não podem sair deste ambiente. Use CONFIÁVEL somente se o envio ao provedor indicado no preflight estiver autorizado.");
         }
+        if (useFarmKnowledge &&
+            !string.Equals(route.Provider, "atos Fake Provider", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "A Memória da Farm está restrita ao provider local. O envio de índices a um provider externo exige autorização explícita do destino.");
+        }
+        FarmKnowledgeSearchResult? knowledge = null;
+        if (useFarmKnowledge && farmKnowledge is not null)
+            knowledge = await farmKnowledge.SearchAsync(normalizedPrompt, cancellationToken: cancellationToken);
+        var effectiveInstruction = CombineInstructions(normalizedSettings.SystemInstruction,
+            knowledge is { HasHits: true } ? FarmKnowledgeRetrieval.BuildSystemContext(knowledge.Hits) : null);
         var context = _contextPlanner.Plan(
             messages ?? [],
             normalizedPrompt,
             maximumContextMessages,
-            normalizedSettings.SystemInstruction);
+            effectiveInstruction);
         var request = new AiProviderRequest(
             normalizedPrompt,
             route,
             context.Messages,
             context.EstimatedInputTokens,
-            normalizedSettings.SystemInstruction,
+            effectiveInstruction,
             normalizedSettings.Temperature,
             normalizedSettings.MaximumOutputTokens,
             attachments,
@@ -199,7 +215,8 @@ public sealed class ChatWorkflow(
             context,
             normalizedSettings,
             attachments,
-            dataClassification);
+            dataClassification,
+            knowledge);
     }
 
     public async Task<ChatExecutionResult> SendAsync(
@@ -296,7 +313,9 @@ public sealed class ChatWorkflow(
                 plan.Route,
                 plan.Context?.Messages,
                 plan.Context?.EstimatedInputTokens,
-                plan.Settings?.SystemInstruction,
+                CombineInstructions(plan.Settings?.SystemInstruction,
+                    plan.Knowledge is { HasHits: true }
+                        ? FarmKnowledgeRetrieval.BuildSystemContext(plan.Knowledge.Hits) : null),
                 plan.Settings?.Temperature,
                 plan.Settings?.MaximumOutputTokens,
                 plan.Attachments,
@@ -312,13 +331,21 @@ public sealed class ChatWorkflow(
             else
             {
                 providerResult = await provider.ExecuteAsync(request, cancellationToken);
-                if (onDelta is not null)
-                {
-                    await onDelta(providerResult.Content, cancellationToken);
-                }
             }
             var finishedAtUtc = _timeProvider.GetUtcNow();
             ValidateProviderResult(providerResult, plan.MaximumCostMinor);
+            var response = plan.Knowledge is { HasHits: true }
+                ? FarmKnowledgeRetrieval.AppendSources(providerResult.Content, plan.Knowledge.Hits)
+                : providerResult.Content;
+            if (onDelta is not null)
+            {
+                if (provider is IAiStreamingProvider)
+                {
+                    if (!string.Equals(response, providerResult.Content, StringComparison.Ordinal))
+                        await onDelta(response[providerResult.Content.TrimEnd().Length..], cancellationToken);
+                }
+                else await onDelta(response, cancellationToken);
+            }
             await wallet.CaptureAsync(
                 reservation.ReservationId,
                 providerResult.ActualCostMinor,
@@ -336,7 +363,7 @@ public sealed class ChatWorkflow(
             var result = new ChatExecutionResult(
                 conversationId,
                 operationId,
-                providerResult.Content,
+                response,
                 plan.Route,
                 plan.MaximumCostMinor,
                 providerResult.ActualCostMinor,
@@ -377,6 +404,15 @@ public sealed class ChatWorkflow(
                 CancellationToken.None);
             throw;
         }
+    }
+
+    private static string? CombineInstructions(string? configured, string? knowledge)
+    {
+        var first = string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+        var second = string.IsNullOrWhiteSpace(knowledge) ? null : knowledge.Trim();
+        if (first is null) return second;
+        if (second is null) return first;
+        return $"{first}\n\n{second}";
     }
 
     private static void ValidateProviderResult(

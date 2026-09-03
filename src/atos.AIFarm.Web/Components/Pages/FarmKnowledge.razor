@@ -1,0 +1,82 @@
+@page "/farm/knowledge"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmKnowledgeSearchService Knowledge
+
+<PageTitle>Conhecimento da Farm // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow">atos:/FARM/CONHECIMENTO</p>
+    <h1>Biblioteca computada</h1>
+    <p>RECUPERAÇÃO LEXICAL // ÍNDICES VERIFICADOS // ESCOPO DA CONTA</p>
+</div>
+
+<section class="terminal">
+    <div class="terminal-title"><span>Buscar nos índices concluídos</span></div>
+    <form class="knowledge-search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+        <label for="knowledge-query">PERGUNTA OU TERMOS</label>
+        <div>
+            <input id="knowledge-query" maxlength="4000" @bind="_query"
+                   placeholder="Ex.: como os créditos computacionais são verificados?" />
+            <button type="submit" disabled="@_working">@(_working ? "Buscando…" : "Buscar")</button>
+        </div>
+    </form>
+    <p class="muted">Somente demandas IRIS TEXT INDEX concluídas, íntegras e pertencentes à conta atual são consultadas.</p>
+</section>
+
+@if (_error is not null)
+{
+    <p class="error-banner" role="alert">@_error</p>
+}
+
+@if (_result is not null)
+{
+    <section class="panel">
+        <div class="panel-head">
+            <span>Resultados</span>
+            <span>@_result.SearchedSourceCount FONTE(S) ÍNTEGRA(S) // @_result.Hits.Count TRECHO(S)</span>
+        </div>
+        @if (!_result.HasHits)
+        {
+            <p class="empty-state">Nenhum trecho relevante encontrado. Crie e conclua uma demanda “Iris Text Index” ou refine a busca.</p>
+        }
+        else
+        {
+            <div class="knowledge-results">
+                @foreach (var hit in _result.Hits)
+                {
+                    <article>
+                        <header>
+                            <strong>@hit.Label</strong>
+                            <span class="tag">SCORE @hit.Score.ToString("0.000")</span>
+                        </header>
+                        <p>@hit.Excerpt</p>
+                        <footer>
+                            <code>@hit.Reference</code>
+                            <span>@hit.IndexedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                            <span>@string.Join(", ", hit.MatchedTerms)</span>
+                        </footer>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private string _query = string.Empty;
+    private bool _working;
+    private string? _error;
+    private FarmKnowledgeSearchResult? _result;
+
+    private async Task SearchAsync()
+    {
+        if (_working || string.IsNullOrWhiteSpace(_query)) return;
+        _working = true;
+        _error = null;
+        try { _result = await Knowledge.SearchAsync(_query, 8); }
+        catch (ArgumentException exception) { _error = exception.Message; }
+        catch (Exception) { _error = "Não foi possível consultar os índices da Farm."; }
+        finally { _working = false; }
+    }
+}
