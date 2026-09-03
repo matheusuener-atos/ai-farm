@@ -47,8 +47,8 @@ jobs:
 
       - name: Apply migrations
         run: |
-          dotnet tool install --global dotnet-ef --version 10.0.*
-          dotnet ef database update \
+          dotnet tool restore
+          dotnet tool run dotnet-ef -- database update \
             --project src/atos.AIFarm.Infrastructure/atos.AIFarm.Infrastructure.csproj \
             --configuration Release
 
