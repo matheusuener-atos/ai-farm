@@ -243,10 +243,32 @@ else
 {
     farmManifestSigning = new FarmManifestSigningOptions(manifestSigningKey);
 }
+var nodeReliabilityPolicy = new FarmNodeReliabilityPolicy(
+    builder.Configuration.GetValue("AIFarm:Farm:Reliability:SampleSize", 20),
+    builder.Configuration.GetValue("AIFarm:Farm:Reliability:PriorSuccesses", 4),
+    builder.Configuration.GetValue("AIFarm:Farm:Reliability:PriorFailures", 1),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Reliability:ConsecutiveFailureThreshold", 3),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Reliability:QuarantineMinutes", 30)).Validate();
+
+var rewardPolicy = new FarmRewardPolicy(
+    builder.Configuration.GetValue("AIFarm:Farm:Rewards:Enabled", false),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Rewards:PolicyVersion",
+        "atos-reward-policy-v1")!,
+    builder.Configuration.GetValue<long>(
+        "AIFarm:Farm:Rewards:AicMinorPerThousandCp", 0),
+    builder.Configuration.GetValue<long>(
+        "AIFarm:Farm:Rewards:MonthlyBudgetMinor", 0),
+    builder.Configuration.GetValue<long>(
+        "AIFarm:Farm:Rewards:MaximumPerSettlementMinor", 0)).Validate();
 builder.Services.AddAIFarmPostgres(
     postgresConnection,
     objectStorage: objectStorage,
-    farmManifestSigning: farmManifestSigning);
+    farmManifestSigning: farmManifestSigning,
+    nodeReliabilityPolicy: nodeReliabilityPolicy,
+    rewardPolicy: rewardPolicy);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
@@ -688,6 +710,33 @@ personalApi.MapPost("/farm/schedules/{scheduleId:guid}/trigger", async (
 {
     try { return Results.Ok(await schedules.TriggerNowAsync(scheduleId, cancellationToken)); }
     catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/rewards/pool", async (
+    IFarmRewardSettlementService rewards,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await rewards.GetPoolAsync(cancellationToken: cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/rewards/{proposalId:guid}/settle", async (
+    Guid proposalId,
+    IFarmRewardSettlementService rewards,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await rewards.SettleAsync(proposalId, cancellationToken));
+    }
+    catch (FarmRewardPoolUnavailableException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
   .RequireRateLimiting("farm-execute");

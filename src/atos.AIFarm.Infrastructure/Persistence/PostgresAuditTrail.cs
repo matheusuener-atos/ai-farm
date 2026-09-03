@@ -222,6 +222,26 @@ public sealed class PostgresAuditTrail(
                     Short(record.Id), Short(record.JobId), null, record.Digest,
                     snapshot.IsIntegrityValid ? AuditIntegrityStatus.Valid : AuditIntegrityStatus.Invalid);
             }));
+
+            var settlements = await db.FarmRewardSettlements.AsNoTracking()
+                .Where(x => x.AccountId == identity.AccountId)
+                .Where(x => query.FromUtc == null || x.SettledAtUtc >= query.FromUtc)
+                .Where(x => query.ToUtc == null || x.SettledAtUtc <= query.ToUtc)
+                .OrderByDescending(x => x.SettledAtUtc)
+                .Take(MaximumScan + 1)
+                .ToArrayAsync(cancellationToken);
+            truncated |= settlements.Length > MaximumScan;
+            events.AddRange(settlements.Take(MaximumScan).Select(record =>
+            {
+                var snapshot = PostgresFarmRewardSettlementService.ToSnapshot(record);
+                return new AuditEventSnapshot(
+                    record.Id, record.SettledAtUtc, AuditCategory.Reward,
+                    "REWARD_SETTLEMENT", "SETTLED",
+                    $"{Aic.Format(record.RewardAmountMinor)} // {record.ProcessingPointsMilli / 1_000m:N3} CP // {record.PolicyVersion}",
+                    Short(record.Id), Short(record.LedgerTransactionId),
+                    record.RewardAmountMinor, record.Digest,
+                    snapshot.IsIntegrityValid ? AuditIntegrityStatus.Valid : AuditIntegrityStatus.Invalid);
+            }));
         }
 
         if (query.Category is null or AuditCategory.Security)

@@ -9,6 +9,7 @@ public sealed class PostgresOperationalIncidentService(
     IAuditTrail auditTrail,
     IAiUsageQuery usageQuery,
     IFarmLabService farmLab,
+    IFarmCapacityQuery capacityQuery,
     TimeProvider timeProvider) : IOperationalIncidentService
 {
     public async Task<IncidentDashboard> SearchAsync(
@@ -80,6 +81,7 @@ public sealed class PostgresOperationalIncidentService(
         var audit = await auditTrail.SearchAsync(new AuditQuery(PageSize: 100), cancellationToken);
         var usage = await usageQuery.GetDashboardAsync(50, cancellationToken);
         var farm = await farmLab.GetDashboardAsync(cancellationToken);
+        var capacity = await capacityQuery.GetAsync(cancellationToken);
         var incidents = new List<OperationalIncidentSnapshot>();
 
         incidents.AddRange(audit.Events
@@ -115,6 +117,17 @@ public sealed class PostgresOperationalIncidentService(
                 $"{farm.Node.Name} // último sinal {farm.Node.LastSeenAtUtc:O}",
                 farm.Node.Id.ToString("N")[..8], farm.Node.LastSeenAtUtc));
         }
+        incidents.AddRange(capacity.Nodes
+            .Where(x => x.Reliability?.IsQuarantined == true)
+            .Select(x => New(
+                $"node:{x.Node.Id:N}:QUARANTINED:{x.Reliability!.QuarantinedUntilUtc:yyyyMMddHHmmss}",
+                IncidentSource.Node,
+                IncidentSeverity.Critical,
+                "NODE_RELIABILITY_QUARANTINE",
+                $"Node {x.Node.Name} em quarentena automática",
+                $"Score {x.Reliability.Score}/100 // {x.Reliability.ConsecutiveFailures} falhas consecutivas // retorno {x.Reliability.QuarantinedUntilUtc:O}",
+                x.Node.Id.ToString("N")[..8],
+                x.Reliability.LastOutcomeAtUtc ?? capacity.CalculatedAtUtc)));
         return incidents.GroupBy(x => x.Key).Select(x => x.First()).ToArray();
     }
 

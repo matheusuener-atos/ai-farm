@@ -23,6 +23,7 @@ else
         <div><small>NODES</small><strong>@_dashboard.Nodes.Count</strong></div>
         <div><small>ACEITANDO</small><strong>@_dashboard.Nodes.Count(x => x.EligibleWorkloadCount > 0)</strong></div>
         <div><small>EM USO</small><strong>@_dashboard.Nodes.Count(x => x.Busy)</strong></div>
+        <div><small>QUARENTENA</small><strong>@_dashboard.Nodes.Count(x => x.Reliability?.IsQuarantined == true)</strong></div>
         <div><small>NA FILA</small><strong>@_dashboard.QueuedDemandCount</strong></div>
     </section>
 
@@ -51,14 +52,29 @@ else
             <article class="node-capacity">
                 <header>
                     <div><strong>@item.Node.Name</strong><small>@item.Node.ConnectionKind // @item.Node.AgentVersion</small></div>
-                    <span class="@(item.EligibleWorkloadCount > 0 ? "green" : item.Busy ? "amber" : "error")">@(item.EligibleWorkloadCount > 0 ? "ACEITANDO" : item.Busy ? "SATURADO" : "BLOQUEADO")</span>
+                    <span class="@(item.Reliability?.IsQuarantined == true ? "error" : item.EligibleWorkloadCount > 0 ? "green" : item.Busy ? "amber" : "error")">@(item.Reliability?.IsQuarantined == true ? "QUARENTENA" : item.EligibleWorkloadCount > 0 ? "ACEITANDO" : item.Busy ? "SATURADO" : "BLOQUEADO")</span>
                 </header>
                 <div class="resource-bars">
                     <div><small>CPU AUTORIZADA</small><strong>@item.AvailableLogicalProcessors / @item.Node.AuthorizedLogicalProcessors</strong></div>
                     <div><small>MEMÓRIA AUTORIZADA</small><strong>@FormatBytes(item.AvailableMemoryBytes) / @FormatBytes(item.Node.AuthorizedMemoryBytes)</strong></div>
                     <div><small>JOBS ATIVOS</small><strong>@item.ActiveJobCount</strong></div>
                     <div><small>HEARTBEAT</small><strong>@(item.Node.IsHeartbeatFresh ? "ATUAL" : "EXPIRADO")</strong></div>
+                    <div><small>CONFIABILIDADE</small><strong>@(item.Reliability?.Score ?? 80) / 100</strong></div>
                 </div>
+                @if (item.Reliability is { } reliability)
+                {
+                    <div class="reliability-strip @(reliability.IsQuarantined ? "quarantined" : null)">
+                        <span>FAIXA <strong>@ReliabilityBand(reliability.Band)</strong></span>
+                        <span>AMOSTRA <strong>@reliability.SampleSize</strong></span>
+                        <span>APROVADOS <strong>@reliability.SuccessfulJobs</strong></span>
+                        <span>FALHAS <strong>@reliability.FailedJobs</strong></span>
+                        <span>SEQUÊNCIA DE FALHAS <strong>@reliability.ConsecutiveFailures</strong></span>
+                        @if (reliability.IsQuarantined)
+                        {
+                            <span>RETORNO <strong>@reliability.QuarantinedUntilUtc?.ToLocalTime().ToString("dd/MM HH:mm")</strong></span>
+                        }
+                    </div>
+                }
                 <div class="compatibility-row">
                     @foreach (var workload in item.Workloads)
                     {
@@ -102,10 +118,21 @@ else
         FarmCapacityBlocker.Offline => "OFFLINE",
         FarmCapacityBlocker.StaleHeartbeat => "HEARTBEAT",
         FarmCapacityBlocker.JobsDisabled => "POLÍTICA LOCAL",
+        FarmCapacityBlocker.Quarantined => "QUARENTENA",
         FarmCapacityBlocker.AgentVersionMismatch => "VERSÃO",
         FarmCapacityBlocker.InsufficientProcessors => "CPU",
         FarmCapacityBlocker.InsufficientMemory => "MEMÓRIA",
         FarmCapacityBlocker.Busy => "OCUPADO",
         _ => "OK"
+    };
+
+    private static string ReliabilityBand(FarmNodeReliabilityBand value) => value switch
+    {
+        FarmNodeReliabilityBand.Unproven => "SEM HISTÓRICO",
+        FarmNodeReliabilityBand.Watch => "OBSERVAÇÃO",
+        FarmNodeReliabilityBand.Stable => "ESTÁVEL",
+        FarmNodeReliabilityBand.Trusted => "CONFIÁVEL",
+        FarmNodeReliabilityBand.Quarantined => "QUARENTENA",
+        _ => value.ToString().ToUpperInvariant()
     };
 }

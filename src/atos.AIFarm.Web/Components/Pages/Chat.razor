@@ -452,6 +452,12 @@
                     }
                 </select>
             </label>
+            <label class="farm-knowledge-toggle">
+                <input type="checkbox" @bind="_useFarmKnowledge"
+                       disabled="@(_working || _pendingPlan is not null)" />
+                MEMÓRIA DA FARM
+                <small>Usar índices computados · somente provider local</small>
+            </label>
         </div>
         @if (_editingBranch || _regenerating)
         {
@@ -547,6 +553,13 @@
                             <dd>@context.EstimatedInputTokens.ToString("N0") / @context.MaximumInputTokens.ToString("N0") TOKENS</dd>
                         </div>
                     }
+                    @if (_pendingPlan.Knowledge is { } knowledge)
+                    {
+                        <div>
+                            <dt>MEMÓRIA DA FARM</dt>
+                            <dd>@knowledge.Hits.Count TRECHO(S) // @knowledge.SearchedSourceCount FONTE(S) ÍNTEGRA(S)</dd>
+                        </div>
+                    }
                     @if (_pendingPlan.Settings is { } settings)
                     {
                         <div>
@@ -593,6 +606,24 @@
                     {
                         <p class="context-note">Resumo automático Mensagens antigas foram compactadas de forma extrativa.</p>
                     }
+                }
+                @if (_pendingPlan.Knowledge is { HasHits: true } farmContext)
+                {
+                    <details class="context-details">
+                        <summary>Ver conhecimento recuperado da Farm</summary>
+                        @foreach (var hit in farmContext.Hits)
+                        {
+                            <article>
+                                <strong>@hit.Label // SCORE @hit.Score.ToString("0.000")</strong>
+                                <pre>@hit.Excerpt</pre>
+                                <small>@hit.Reference</small>
+                            </article>
+                        }
+                    </details>
+                }
+                else if (_pendingPlan.Knowledge is not null)
+                {
+                    <p class="context-note">Memória da Farm ativada, mas nenhum trecho relevante foi encontrado.</p>
                 }
                 @if (!CanAffordPendingPlan)
                 {
@@ -699,6 +730,7 @@
     private string _feedbackReason = string.Empty;
     private ConversationAiSettings _savedAiSettings = ConversationAiSettings.Default;
     private AiDataClassification _dataClassification = AiDataClassification.Standard;
+    private bool _useFarmKnowledge;
 
     private IReadOnlyList<AiModelOption> ModelOptions => ModelCatalog.GetOptions();
     private int SelectedModelMaximumOutputTokens =>
@@ -944,7 +976,8 @@
                 _contextMessageLimit,
                 _branchMessageId,
                 _attachments.Select(x => x.Id).ToArray(),
-                _dataClassification);
+                _dataClassification,
+                useFarmKnowledge: _useFarmKnowledge);
             _prompt = _pendingPlan.Prompt;
             _attemptIdempotencyKey = Guid.NewGuid().ToString("N");
             _lastFailure = null;

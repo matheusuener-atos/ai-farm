@@ -26,6 +26,8 @@ public static class DependencyInjection
         services.TryAddSingleton(configuredContextLimits);
         services.TryAddSingleton<IChatContextPlanner>(
             new ChatContextPlanner(configuredContextLimits));
+        services.TryAddSingleton<IFarmKnowledgeSearchService,
+            EmptyFarmKnowledgeSearchService>();
         services.TryAddSingleton<IAIFarmIdentityAccessor>(
             new FixedAIFarmIdentityAccessor(AIFarmIdentity.Development));
         services.AddSingleton<IAIFarmReadinessProbe, InMemoryReadinessProbe>();
@@ -81,12 +83,18 @@ public static class DependencyInjection
         string connectionString,
         AIFarmIdentity? identity = null,
         NeonObjectStorageOptions? objectStorage = null,
-        FarmManifestSigningOptions? farmManifestSigning = null)
+        FarmManifestSigningOptions? farmManifestSigning = null,
+        FarmNodeReliabilityPolicy? nodeReliabilityPolicy = null,
+        FarmRewardPolicy? rewardPolicy = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton(
             farmManifestSigning ?? FarmManifestSigningOptions.Development);
+        services.TryAddSingleton(
+            (nodeReliabilityPolicy ?? FarmNodeReliabilityPolicy.Default).Validate());
+        services.TryAddSingleton(
+            (rewardPolicy ?? FarmRewardPolicy.Disabled).Validate());
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)
@@ -108,6 +116,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmEconomicsScenarioStore>();
         services.RemoveAll<IFarmBalanceQuery>();
         services.RemoveAll<IFarmRewardProposalStore>();
+        services.RemoveAll<IFarmRewardSettlementService>();
         services.RemoveAll<IFarmAnalyticsQuery>();
         services.RemoveAll<IFarmJobHistoryService>();
         services.RemoveAll<IFarmScheduleService>();
@@ -116,6 +125,7 @@ public static class DependencyInjection
         services.RemoveAll<IFarmDemandDispatcher>();
         services.RemoveAll<IFarmCapacityQuery>();
         services.RemoveAll<IAuditTrail>();
+        services.RemoveAll<IFarmKnowledgeSearchService>();
         services.RemoveAll<IOperationalIncidentService>();
         services.RemoveAll<IAiUsageBudgetService>();
         services.RemoveAll<IApiTokenService>();
@@ -134,6 +144,7 @@ public static class DependencyInjection
         services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
         services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
         services.AddScoped<IFarmRewardProposalStore, PostgresFarmRewardProposalStore>();
+        services.AddScoped<IFarmRewardSettlementService, PostgresFarmRewardSettlementService>();
         services.AddScoped<IFarmAnalyticsQuery, PostgresFarmAnalyticsQuery>();
         services.AddScoped<IFarmJobHistoryService, PostgresFarmJobHistoryService>();
         services.AddScoped<PostgresFarmScheduleService>();
@@ -150,6 +161,7 @@ public static class DependencyInjection
         services.AddHostedService<FarmDemandWorker>();
         services.AddScoped<IFarmCapacityQuery, PostgresFarmCapacityQuery>();
         services.AddScoped<IAuditTrail, PostgresAuditTrail>();
+        services.AddScoped<IFarmKnowledgeSearchService, PostgresFarmKnowledgeSearchService>();
         services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
         services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();
         services.AddScoped<PostgresApiTokenService>();

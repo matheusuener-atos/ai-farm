@@ -1,4 +1,4 @@
-.capacity-summary { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); margin-bottom: 1rem; }
+.capacity-summary { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--border); margin-bottom: 1rem; }
 .capacity-summary div { display: grid; gap: .35rem; padding: 1rem; border-right: 1px solid var(--border); }
 .capacity-summary div:last-child { border-right: 0; }
 .capacity-summary small, .workload-card small, .node-capacity small { color: var(--muted); }
@@ -9,9 +9,14 @@
 .node-capacity { padding: 1rem; border-top: 1px solid var(--border); display: grid; gap: 1rem; }
 .node-capacity header { display: flex; justify-content: space-between; gap: 1rem; }
 .node-capacity header div { display: grid; gap: .25rem; }
-.resource-bars { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border); }
+.resource-bars { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--border); }
 .resource-bars div { display: grid; gap: .3rem; padding: .75rem; border-right: 1px solid var(--border); }
 .resource-bars div:last-child { border-right: 0; }
+.reliability-strip { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; padding: .7rem .8rem; border: 1px solid var(--border); background: var(--surface-2); }
+.reliability-strip span { color: var(--muted); font-size: .68rem; }
+.reliability-strip strong { color: var(--ink); }
+.reliability-strip.quarantined { border-color: var(--orange); background: #fff0eb; }
+.reliability-strip.quarantined strong { color: var(--orange); }
 .compatibility-row { display: flex; flex-wrap: wrap; gap: .5rem; }
 .compatibility-row span { border: 1px solid var(--border); padding: .4rem .55rem; font-size: .7rem; }
 .compatibility-row .eligible { border-color: var(--green); color: var(--green); }
