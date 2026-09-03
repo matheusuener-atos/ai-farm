@@ -145,13 +145,15 @@ public sealed class PostgresAuditTrail(
 
         if (query.Category is null or AuditCategory.Farm)
         {
-            var records = await db.FarmJobs.AsNoTracking()
+            var loaded = await db.FarmJobs.AsNoTracking()
                 .Where(x => x.AccountId == identity.AccountId)
                 .Where(x => query.FromUtc == null || x.CreatedAtUtc >= query.FromUtc)
                 .Where(x => query.ToUtc == null || x.CreatedAtUtc <= query.ToUtc)
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(MaximumScan + 1)
                 .ToArrayAsync(cancellationToken);
+            truncated |= loaded.Length > MaximumScan;
+            var records = loaded.Take(MaximumScan).ToArray();
             var farmJobIds = records.Select(x => x.Id).ToArray();
             var farmEvents = await db.FarmJobEvents.AsNoTracking()
                 .Where(x => farmJobIds.Contains(x.JobId))
@@ -160,8 +162,7 @@ public sealed class PostgresAuditTrail(
             var farmEventsByJob = farmEvents
                 .GroupBy(x => x.JobId)
                 .ToDictionary(x => x.Key, x => (IReadOnlyCollection<FarmJobEventRecord>)x.ToArray());
-            truncated |= records.Length > MaximumScan;
-            events.AddRange(records.Take(MaximumScan).Select(record =>
+            events.AddRange(records.Select(record =>
             {
                 var integrity = record.EvidenceDigest is null
                     ? record.Status == "Completed" ? AuditIntegrityStatus.Invalid : AuditIntegrityStatus.NotApplicable

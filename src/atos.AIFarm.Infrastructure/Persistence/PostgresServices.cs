@@ -1393,30 +1393,88 @@ public sealed class PostgresAiUsageQuery(
 
         var now = timeProvider.GetUtcNow().ToUniversalTime();
         var today = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, TimeSpan.Zero);
-        var earliest = today.AddDays(-(days * 2 - 1));
+        var fromUtc = today.AddDays(-(days - 1));
+        var previousFrom = fromUtc.AddDays(-days);
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var executions = await (
-            from request in db.AiRequests
-            join execution in db.AiExecutions on request.Id equals execution.AiRequestId
-            join conversation in db.Conversations on request.ConversationId equals conversation.Id
-            where request.AccountId == identity.AccountId && execution.StartedAtUtc >= earliest
-            select new AiExecutionSummary(
-                request.OperationId,
-                request.ConversationId,
-                conversation.Title,
-                execution.Provider,
-                execution.Model,
-                execution.PriceCatalogVersion,
-                execution.InputUnits,
-                execution.OutputUnits,
-                execution.EstimatedCostMinor,
-                execution.ActualCostMinor,
-                execution.Status,
-                execution.StartedAtUtc,
-                execution.FinishedAtUtc))
-            .ToArrayAsync(cancellationToken);
 
-        return AiUsageAnalyticsBuilder.Build(executions, days, now);
+        // As agregações rodam no banco (ADR 0028); só as amostras de duração
+        // da janela atual chegam em memória, em projeção estreita.
+        var current =
+            from request in db.AiRequests.AsNoTracking()
+            join execution in db.AiExecutions.AsNoTracking() on request.Id equals execution.AiRequestId
+            where request.AccountId == identity.AccountId &&
+                  execution.StartedAtUtc >= fromUtc &&
+                  execution.StartedAtUtc <= now
+            select new { execution, request.ConversationId };
+
+        var daily = await current
+            .GroupBy(x => x.execution.StartedAtUtc.Date)
+            .Select(group => new
+            {
+                Date = group.Key,
+                ExecutionCount = group.Count(),
+                SuccessCount = group.Count(x => x.execution.Status.ToLower() == "completed"),
+                InputUnits = group.Sum(x => x.execution.InputUnits),
+                OutputUnits = group.Sum(x => x.execution.OutputUnits),
+                EstimatedCostMinor = group.Sum(x => x.execution.EstimatedCostMinor),
+                ActualCostMinor = group.Sum(x => x.execution.ActualCostMinor)
+            })
+            .ToArrayAsync(cancellationToken);
+        var routes = await current
+            .GroupBy(x => new { x.execution.Provider, x.execution.Model })
+            .Select(group => new AiUsageRouteAggregate(
+                group.Key.Provider,
+                group.Key.Model,
+                group.Count(),
+                group.Count(x => x.execution.Status.ToLower() == "completed"),
+                group.Sum(x => x.execution.InputUnits),
+                group.Sum(x => x.execution.OutputUnits),
+                group.Sum(x => x.execution.EstimatedCostMinor),
+                group.Sum(x => x.execution.ActualCostMinor)))
+            .ToArrayAsync(cancellationToken);
+        var statuses = await current
+            .GroupBy(x => x.execution.Status)
+            .Select(group => new AiUsageStatusAggregate(group.Key, group.Count()))
+            .ToArrayAsync(cancellationToken);
+        var conversationCount = await current
+            .Select(x => x.ConversationId)
+            .Distinct()
+            .CountAsync(cancellationToken);
+        var durationSamples = await current
+            .Where(x => x.execution.FinishedAtUtc != null)
+            .Select(x => new AiUsageDurationSample(
+                x.execution.Provider,
+                x.execution.Model,
+                x.execution.StartedAtUtc,
+                x.execution.FinishedAtUtc!.Value))
+            .ToArrayAsync(cancellationToken);
+        var previousActualCost = await (
+            from request in db.AiRequests.AsNoTracking()
+            join execution in db.AiExecutions.AsNoTracking() on request.Id equals execution.AiRequestId
+            where request.AccountId == identity.AccountId &&
+                  execution.StartedAtUtc >= previousFrom &&
+                  execution.StartedAtUtc < fromUtc
+            select execution.ActualCostMinor)
+            .SumAsync(cancellationToken);
+
+        return AiUsageAnalyticsBuilder.FromAggregates(
+            days,
+            now,
+            conversationCount,
+            previousActualCost,
+            daily
+                .Select(x => new AiUsageDailyAggregate(
+                    DateOnly.FromDateTime(x.Date),
+                    x.ExecutionCount,
+                    x.SuccessCount,
+                    x.InputUnits,
+                    x.OutputUnits,
+                    x.EstimatedCostMinor,
+                    x.ActualCostMinor))
+                .ToArray(),
+            routes,
+            statuses,
+            durationSamples);
     }
 }
