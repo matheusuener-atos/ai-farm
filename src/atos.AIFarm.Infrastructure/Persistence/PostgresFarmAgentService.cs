@@ -565,7 +565,8 @@ internal sealed class PostgresFarmAgentService(
                 job,
                 FarmJobStatus.Completed,
                 $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; nenhum AIC emitido.",
-                cancellationToken);
+                cancellationToken,
+                job.FinishedAtUtc.Value);
         }
         await db.SaveChangesAsync(cancellationToken);
         if (verified)
@@ -671,7 +672,8 @@ internal sealed class PostgresFarmAgentService(
         FarmJobRecord job,
         FarmJobStatus status,
         string detail,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTimeOffset? occurredAtUtc = null)
     {
         var persisted = await db.FarmJobEvents
             .Where(x => x.JobId == job.Id)
@@ -685,7 +687,7 @@ internal sealed class PostgresFarmAgentService(
             Sequence = persisted + tracked + 1,
             Status = status.ToString(),
             Detail = detail,
-            OccurredAtUtc = timeProvider.GetUtcNow()
+            OccurredAtUtc = occurredAtUtc ?? timeProvider.GetUtcNow()
         });
     }
 
