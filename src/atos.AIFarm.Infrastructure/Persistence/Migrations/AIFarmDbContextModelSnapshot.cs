@@ -1357,6 +1357,11 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<bool>("SharePlatformWork")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(24)

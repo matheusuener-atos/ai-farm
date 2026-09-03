@@ -88,7 +88,8 @@ public static class DependencyInjection
         NeonObjectStorageOptions? objectStorage = null,
         FarmManifestSigningOptions? farmManifestSigning = null,
         FarmNodeReliabilityPolicy? nodeReliabilityPolicy = null,
-        FarmRewardPolicy? rewardPolicy = null)
+        FarmRewardPolicy? rewardPolicy = null,
+        FarmPlatformPoolOptions? platformPool = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
@@ -99,6 +100,7 @@ public static class DependencyInjection
             (nodeReliabilityPolicy ?? FarmNodeReliabilityPolicy.Default).Validate());
         services.TryAddSingleton(
             (rewardPolicy ?? FarmRewardPolicy.Disabled).Validate());
+        services.TryAddSingleton(platformPool ?? FarmPlatformPoolOptions.Disabled);
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)
