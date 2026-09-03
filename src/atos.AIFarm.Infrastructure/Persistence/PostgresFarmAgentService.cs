@@ -489,6 +489,7 @@ internal sealed class PostgresFarmAgentService(
 
         var claimed = await db.FarmJobs
             .Where(x => x.Id == jobId && x.NodeId == node.Id &&
+                        x.CancellationRequestedAtUtc == null &&
                         (x.Status == "Accepted" || x.Status == "Running"))
             .ExecuteUpdateAsync(
                 setters => setters
@@ -500,7 +501,23 @@ internal sealed class PostgresFarmAgentService(
                     .SetProperty(x => x.WorkerEnforcement, result.Enforcement),
                 cancellationToken);
         if (claimed != 1)
+        {
+            // Cerca contra a corrida upload × cancelamento: se o pedido de
+            // cancelamento chegou depois da leitura inicial, a evidência é
+            // descartada e o Job termina Cancelled, nunca Uploading.
+            await db.Entry(existing).ReloadAsync(cancellationToken);
+            if (existing.CancellationRequestedAtUtc is not null &&
+                FarmJobLifecycle.ActiveStatuses.Contains(existing.Status))
+            {
+                return await TerminateAndAcknowledgeAsync(
+                    db,
+                    existing.Id,
+                    FarmJobStatus.Cancelled,
+                    "O cancelamento venceu a corrida com o upload; evidência parcial descartada.",
+                    cancellationToken);
+            }
             throw new InvalidOperationException("O Job não aceita evidência neste estado.");
+        }
 
         await db.Entry(existing).ReloadAsync(cancellationToken);
         var job = existing;

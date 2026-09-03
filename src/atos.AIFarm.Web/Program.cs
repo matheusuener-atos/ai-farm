@@ -950,6 +950,8 @@ personalApi.MapGet("/incidents", async (
     string? search,
     string? severity,
     bool? openOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
     IOperationalIncidentService incidents,
     CancellationToken cancellationToken) =>
 {
@@ -958,8 +960,16 @@ personalApi.MapGet("/incidents", async (
         return Results.BadRequest(new { error = "Severidade inválida." });
     var parsed = Enum.TryParse<IncidentSeverity>(severity, true, out var value)
         ? value : (IncidentSeverity?)null;
-    return Results.Ok(await incidents.SearchAsync(
-        new IncidentQuery(search, parsed, openOnly ?? true), cancellationToken));
+    try
+    {
+        return Results.Ok(await incidents.SearchAsync(
+            new IncidentQuery(search, parsed, openOnly ?? true, fromUtc, toUtc),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
 }).RequireAuthorization(AIFarmApiTokenDefaults.IncidentsReadPolicy);
 
 personalApi.MapGet("/audit", async (

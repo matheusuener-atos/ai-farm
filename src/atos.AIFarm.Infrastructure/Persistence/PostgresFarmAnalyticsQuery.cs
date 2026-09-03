@@ -24,25 +24,53 @@ public sealed class PostgresFarmAnalyticsQuery(
         var earliest = today.AddDays(-(days * 2 - 1));
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
 
-        var records = await db.FarmJobs.AsNoTracking()
+        // Projeção estreita para todos os Jobs das duas janelas; payloads de
+        // manifesto/evidência e eventos só são carregados para os Completed,
+        // porque a verificação profunda por linha é o que permite às métricas
+        // denunciarem adulteração (ADR 0028) — ela não é pré-agregável sem
+        // abrir mão da tamper-evidence.
+        var lightweight = await db.FarmJobs.AsNoTracking()
             .Where(x => x.AccountId == identity.AccountId && x.CreatedAtUtc >= earliest)
+            .Select(x => new
+            {
+                x.Id,
+                x.Workload,
+                x.WorkloadVersion,
+                x.Status,
+                x.ComputeUnitsMilli,
+                x.DurationMilliseconds,
+                x.WorkerPeakMemoryBytes,
+                x.WorkerProcessorTimeMilliseconds,
+                x.WorkerEnforcement,
+                x.CreatedAtUtc,
+                x.FinishedAtUtc
+            })
             .ToArrayAsync(cancellationToken);
-        var jobIds = records.Select(x => x.Id).ToArray();
+        var completedIds = lightweight
+            .Where(x => x.Status == nameof(FarmJobStatus.Completed))
+            .Select(x => x.Id)
+            .ToArray();
+        var completedRecords = await db.FarmJobs.AsNoTracking()
+            .Where(x => completedIds.Contains(x.Id))
+            .ToArrayAsync(cancellationToken);
         var eventsByJob = (await db.FarmJobEvents.AsNoTracking()
-                .Where(x => jobIds.Contains(x.JobId))
+                .Where(x => completedIds.Contains(x.JobId))
                 .OrderBy(x => x.Sequence)
                 .ToArrayAsync(cancellationToken))
             .GroupBy(x => x.JobId)
             .ToDictionary(x => x.Key, x => (IReadOnlyCollection<FarmJobEventRecord>)x.ToArray());
-        var jobs = records.Select(x =>
+        var validityByJob = completedRecords.ToDictionary(
+            x => x.Id,
+            x => FarmEvidenceSecurity.Verify(
+                x,
+                eventsByJob.GetValueOrDefault(x.Id) ?? [],
+                signingOptions,
+                out _).IsValid);
+        var jobs = lightweight.Select(x =>
         {
             var status = Enum.Parse<FarmJobStatus>(x.Status);
             var evidenceValid = status != FarmJobStatus.Completed ||
-                FarmEvidenceSecurity.Verify(
-                    x,
-                    eventsByJob.GetValueOrDefault(x.Id) ?? [],
-                    signingOptions,
-                    out _).IsValid;
+                validityByJob.GetValueOrDefault(x.Id);
             return new FarmAnalyticsJob(
                 x.Id,
                 x.Workload,

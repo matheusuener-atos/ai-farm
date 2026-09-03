@@ -63,6 +63,7 @@ internal sealed class AgentWorkerResourceGuard : IDisposable
             if (!_hardMemoryLimit && _process.WorkingSet64 > _maximumMemoryBytes)
             {
                 _memoryExceeded = true;
+                Terminate();
                 Kill(_process);
             }
         }
@@ -107,6 +108,17 @@ internal sealed class AgentWorkerResourceGuard : IDisposable
             Math.Max(1, _peakMemoryBytes),
             processorTimeMilliseconds,
             enforcement);
+    }
+
+    /// <summary>
+    /// Encerra imediatamente todos os processos do Job Object (quando ativo).
+    /// Complementa Process.Kill: garante a morte da árvore inteira mesmo se
+    /// um descendente escapar da enumeração do sistema operacional.
+    /// </summary>
+    public void Terminate()
+    {
+        if (_jobHandle == IntPtr.Zero) return;
+        TerminateJobObject(_jobHandle, 1);
     }
 
     public void Dispose()
@@ -242,6 +254,9 @@ internal sealed class AgentWorkerResourceGuard : IDisposable
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);

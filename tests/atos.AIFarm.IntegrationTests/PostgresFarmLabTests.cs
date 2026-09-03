@@ -721,6 +721,80 @@ public sealed class PostgresFarmLabTests
         }
     }
 
+    [RequiresPostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task CancellationDiscardsPartialEvidenceAndBlocksLateUpload()
+    {
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos cancel race test");
+        var clock = new AdjustableTimeProvider(new DateTimeOffset(2026, 9, 3, 12, 0, 0, TimeSpan.Zero));
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+
+            var enrollment = await agents.CreateEnrollmentAsync();
+            var request = new FarmAgentEnrollmentRequest(
+                "LAB-CANCEL-01",
+                ".NET 10 // WINDOWS",
+                8,
+                16L * 1024 * 1024 * 1024,
+                FarmAgentProtocol.CurrentAgentVersion);
+            var linked = await agents.EnrollAsync(enrollment.Token, request);
+            Assert.NotNull(linked);
+            Assert.NotNull(await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    request.Runtime, 8, request.MemoryBytes, request.AgentVersion)));
+
+            var trust = await agents.GetTrustAsync(linked.Credential);
+            Assert.NotNull(trust);
+            var offered = await lab.RunBenchmarkAsync();
+            var claimed = await agents.ClaimJobAsync(linked.Credential);
+            Assert.NotNull(claimed);
+            Assert.True(FarmManifestSecurity.TryVerify(
+                claimed.ManifestPayload,
+                claimed.ManifestDigest,
+                claimed.ManifestSignature,
+                new FarmManifestSigningOptions(trust.VerificationKey),
+                out var manifest));
+            Assert.NotNull(manifest);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, claimed.JobId));
+
+            // O cancelamento chega enquanto o Agent ainda calcula o resultado;
+            // o upload tardio deve terminar Cancelled com a evidência descartada.
+            await lab.CancelJobAsync(offered.Id);
+            var digest = DeterministicBenchmark.Compute(manifest.Nonce, manifest.Iterations);
+            var acknowledgement = await agents.SubmitResultAsync(
+                linked.Credential,
+                claimed.JobId,
+                RemoteResult(digest, 10));
+            Assert.NotNull(acknowledgement);
+            Assert.Equal(FarmJobStatus.Cancelled, acknowledgement.Status);
+            Assert.False(acknowledgement.Verified);
+            Assert.Equal(0, acknowledgement.ComputeUnitsMilli);
+
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var stored = await db.FarmJobs.AsNoTracking().SingleAsync(x => x.Id == offered.Id);
+            Assert.Equal(nameof(FarmJobStatus.Cancelled), stored.Status);
+            Assert.Null(stored.ResultDigest);
+            Assert.Null(stored.DurationMilliseconds);
+            Assert.Null(stored.WorkerPeakMemoryBytes);
+            Assert.Null(stored.WorkerProcessorTimeMilliseconds);
+            Assert.Null(stored.WorkerEnforcement);
+            Assert.Null(stored.EvidencePayload);
+            Assert.Null(await lab.DownloadEvidenceAsync(offered.Id));
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, accountId);
+        }
+    }
+
     private static ServiceProvider BuildProvider(
         string connectionString,
         AIFarmIdentity identity,

@@ -18,6 +18,7 @@
     <form class="incident-filters" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>BUSCAR<input type="search" maxlength="120" placeholder="código, título, detalhe ou referência" @bind="_search" /></label>
         <label>SEVERIDADE<select @bind="_severity"><option value="">TODAS</option><option value="Critical">CRÍTICA</option><option value="Warning">ALERTA</option></select></label>
+        <label>JANELA<select @bind="_windowDays"><option value="1">ÚLTIMAS 24H</option><option value="7">ÚLTIMOS 7 DIAS</option><option value="30">ÚLTIMOS 30 DIAS</option></select></label>
         <label class="incident-check"><InputCheckbox @bind-Value="_openOnly" /> SOMENTE NÃO RECONHECIDOS</label>
         <button type="submit" disabled="@_loading">Aplicar</button>
         <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">Limpar</button>
@@ -37,6 +38,18 @@ else if (_dashboard is not null)
         <article class="kpi kpi-amber"><span>ALERTAS</span><strong>@_dashboard.Warning</strong><small>REQUEREM AVALIAÇÃO</small></article>
         <article class="kpi kpi-purple"><span>RECONHECIDOS</span><strong>@_dashboard.Acknowledged</strong><small>REGISTRO PERSISTENTE</small></article>
     </section>
+
+    <p class="muted">
+        JANELA UTC @_dashboard.FromUtc.ToString("dd/MM HH:mm") — @_dashboard.ToUtc.ToString("dd/MM HH:mm")
+        // ESTADO DE NODES É AVALIADO NO INSTANTE ATUAL
+    </p>
+    @if (_dashboard.IsTruncated)
+    {
+        <div class="incident-notice" role="status">
+            UMA OU MAIS FONTES ATINGIRAM O LIMITE DE VARREDURA DESTA JANELA.
+            A LISTA ESTÁ TRUNCADA — REDUZA O PERÍODO PARA COBERTURA COMPLETA.
+        </div>
+    }
 
     <section class="incident-list" aria-live="polite">
         @if (_dashboard.Incidents.Count == 0)
@@ -70,6 +83,7 @@ else if (_dashboard is not null)
     private IncidentDashboard? _dashboard;
     private string _search = string.Empty;
     private string _severity = string.Empty;
+    private int _windowDays = IncidentQuery.DefaultWindowDays;
     private bool _openOnly;
     private bool _loading;
     private bool _working;
@@ -78,7 +92,7 @@ else if (_dashboard is not null)
 
     protected override Task OnInitializedAsync() => LoadAsync();
     private Task ApplyAsync() => LoadAsync();
-    private async Task ClearAsync() { _search = _severity = string.Empty; _openOnly = false; await LoadAsync(); }
+    private async Task ClearAsync() { _search = _severity = string.Empty; _openOnly = false; _windowDays = IncidentQuery.DefaultWindowDays; await LoadAsync(); }
 
     private async Task AcknowledgeAsync(OperationalIncidentSnapshot incident)
     {
@@ -100,7 +114,11 @@ else if (_dashboard is not null)
         try
         {
             var severity = Enum.TryParse<IncidentSeverity>(_severity, out var parsed) ? parsed : (IncidentSeverity?)null;
-            _dashboard = await IncidentService.SearchAsync(new IncidentQuery(_search, severity, _openOnly));
+            _dashboard = await IncidentService.SearchAsync(new IncidentQuery(
+                _search,
+                severity,
+                _openOnly,
+                DateTimeOffset.UtcNow.AddDays(-_windowDays)));
         }
         catch (ArgumentException exception) { _error = exception.Message; }
         catch (Exception) { _error = "Não foi possível carregar os incidentes operacionais."; }

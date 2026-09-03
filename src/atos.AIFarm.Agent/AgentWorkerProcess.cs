@@ -176,12 +176,14 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
         }
         catch (OperationCanceledException)
         {
+            resources.Terminate();
             Kill(process);
             await process.WaitForExitAsync(CancellationToken.None);
             throw;
         }
         catch
         {
+            resources.Terminate();
             Kill(process);
             await process.WaitForExitAsync(CancellationToken.None);
             throw;

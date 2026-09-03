@@ -96,14 +96,34 @@ internal static class FarmJobLifecycle
         if (IsActive(terminalStatus))
             throw new ArgumentOutOfRangeException(nameof(terminalStatus));
 
-        var updated = await db.FarmJobs
-            .Where(x => x.Id == jobId && ActiveStatuses.Contains(x.Status))
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(x => x.Status, terminalStatus.ToString())
-                    .SetProperty(x => x.FailureReason, detail)
-                    .SetProperty(x => x.FinishedAtUtc, now),
-                cancellationToken);
+        // Cancelamento descarta qualquer evidência parcial já enviada: um Job
+        // Cancelled nunca carrega resultado, telemetria ou saída tipada.
+        var updated = terminalStatus == FarmJobStatus.Cancelled
+            ? await db.FarmJobs
+                .Where(x => x.Id == jobId && ActiveStatuses.Contains(x.Status))
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(x => x.Status, terminalStatus.ToString())
+                        .SetProperty(x => x.FailureReason, detail)
+                        .SetProperty(x => x.FinishedAtUtc, now)
+                        .SetProperty(x => x.ResultDigest, (string?)null)
+                        .SetProperty(x => x.DurationMilliseconds, (long?)null)
+                        .SetProperty(x => x.WorkerPeakMemoryBytes, (long?)null)
+                        .SetProperty(x => x.WorkerProcessorTimeMilliseconds, (long?)null)
+                        .SetProperty(x => x.WorkerEnforcement, (string?)null)
+                        .SetProperty(x => x.OutputVersion, (string?)null)
+                        .SetProperty(x => x.OutputPayload, (string?)null)
+                        .SetProperty(x => x.OutputSizeBytes, (int?)null)
+                        .SetProperty(x => x.OutputDigest, (string?)null),
+                    cancellationToken)
+            : await db.FarmJobs
+                .Where(x => x.Id == jobId && ActiveStatuses.Contains(x.Status))
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(x => x.Status, terminalStatus.ToString())
+                        .SetProperty(x => x.FailureReason, detail)
+                        .SetProperty(x => x.FinishedAtUtc, now),
+                    cancellationToken);
         if (updated != 1) return false;
 
         var sequence = await db.FarmJobEvents
