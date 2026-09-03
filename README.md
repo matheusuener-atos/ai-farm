@@ -703,17 +703,32 @@ relatório JSON pela própria conta. O envelope inclui um segundo digest SHA-256
 do payload exportado; ele permite verificar integridade e não representa uma
 assinatura criptográfica.
 
-A rota autenticada `/farm/rewards` fecha a cadeia de proveniência antes de
-qualquer pagamento. Uma proposta só pode ser registrada quando o Job concluído
-possui evidência HMAC válida e a fotografia econômica íntegra foi criada a
-partir desse mesmo Job. Ela congela CP, valor recomendado em BRL, digests das
-duas fontes, versão, horário e digest próprio. A operação é idempotente por
-cenário e isolada por conta.
+A rota autenticada `/farm/rewards` fecha a cadeia de proveniência e, quando uma
+política financiada está habilitada, liquida a proposta em AIC. Antes da
+liquidação, a aplicação revalida proposta, cenário, Job, manifesto e evidência.
+O settlement é atômico, único por proposta e registra a partida dobrada no
+Ledger: débito no bucket `Earned` da Wallet e crédito na conta versionada do
+Reward Pool. Repetir a mesma solicitação devolve o settlement existente.
 
-Todas as propostas permanecem em `AwaitingPolicyAndFunding`. Elas não criam
-AIC, não movimentam o Ledger e não afirmam uma taxa CP → AIC. Liquidação só
-poderá ser adicionada depois que fonte do Reward Pool, orçamento, autoridade de
-aprovação e política de conversão forem definidos explicitamente.
+A política permanece desativada por padrão. Para uma homologação controlada,
+configure valores inteiros em mAIC (1 AIC = 1.000 mAIC):
+
+```dotenv
+AIFarm__Farm__Rewards__Enabled=true
+AIFarm__Farm__Rewards__PolicyVersion=atos-reward-policy-2026-09-v1
+AIFarm__Farm__Rewards__AicMinorPerThousandCp=1000
+AIFarm__Farm__Rewards__MonthlyBudgetMinor=100000
+AIFarm__Farm__Rewards__MaximumPerSettlementMinor=10000
+```
+
+Nesse exemplo, 1.000 CP rendem 1 AIC, o pool mensal possui 100 AIC e cada
+settlement está limitado a 10 AIC. Esses números são apenas parâmetros de
+homologação, não preço ou recomendação comercial. O orçamento é global por
+versão e mês UTC; não há pagamento parcial quando o saldo é insuficiente.
+Qualquer alteração de taxa, teto ou orçamento deve usar uma nova
+`PolicyVersion`. Tokens pessoais consultam o pool em
+`GET /api/v1/farm/rewards/pool` e liquidam uma proposta própria com escopo
+`FarmExecute` em `POST /api/v1/farm/rewards/{proposalId}/settle`.
 
 Os valores iniciais são apenas um exemplo editável. O simulador não define
 preço real, não converte CP em AIC e não registra Reward no Ledger. Uma futura

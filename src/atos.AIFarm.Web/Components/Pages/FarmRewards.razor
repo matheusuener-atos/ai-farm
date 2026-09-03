@@ -4,18 +4,27 @@
 @inject IFarmLabService FarmLab
 @inject IFarmEconomicsScenarioStore ScenarioStore
 @inject IFarmRewardProposalStore ProposalStore
+@inject IFarmRewardSettlementService SettlementService
 
 <PageTitle>Propostas de Reward // atos AI Farm</PageTitle>
 
 <div class="page-heading">
     <p class="eyebrow amber">atos:/FARM/REWARDS</p>
     <h1>Antes do pagamento</h1>
-    <p>Transforme evidência técnica e cenário econômico em uma proposta auditável, sem emitir AIC.</p>
+    <p>Transforme evidência técnica e cenário econômico em uma proposta auditável, pronta para liquidação financiada.</p>
 </div>
 
-<section class="reward-guardrail" role="note">
-    <strong>Liquidação bloqueada</strong>
-    <span>Uma proposta recomenda valor em BRL. Ela não define CP → AIC, não financia o Reward Pool e não movimenta o Ledger.</span>
+<section class="reward-guardrail @(_pool?.Policy.IsEnabled == true ? "funded" : null)" role="note">
+    @if (_pool?.Policy.IsEnabled == true)
+    {
+        <strong>Reward Pool financiado</strong>
+        <span>Política @_pool.Policy.Version: @Aic.Format(_pool.Policy.AicMinorPerThousandCp) por 1.000 CP, com orçamento mensal rígido e liquidação auditável.</span>
+    }
+    else
+    {
+        <strong>Liquidação bloqueada</strong>
+        <span>Nenhum AIC será emitido até uma política CP → AIC versionada e um orçamento mensal serem habilitados pela operação.</span>
+    }
 </section>
 
 @if (_error is not null)
@@ -33,8 +42,21 @@
         <div class="terminal-title"><span>Validando fontes</span></div>
     </section>
 }
-else
+else if (_pool is not null)
 {
+    <section class="terminal reward-pool">
+        <div class="terminal-title"><span>Reward Pool</span><small>@_pool!.PeriodStartUtc.ToString("MM/yyyy") · compartilhado</small></div>
+        <div class="reward-pool-grid">
+            <article><span>ORÇAMENTO</span><strong>@Aic.Format(_pool.BudgetMinor)</strong></article>
+            <article><span>LIQUIDADO</span><strong>@Aic.Format(_pool.SpentMinor)</strong></article>
+            <article><span>DISPONÍVEL</span><strong>@Aic.Format(_pool.RemainingMinor)</strong></article>
+            <article><span>LIMITE / REWARD</span><strong>@Aic.Format(_pool.Policy.MaximumPerSettlementMinor)</strong></article>
+        </div>
+        <div class="reward-pool-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@PoolUsagePercent">
+            <span style="width: @PoolUsagePercent.ToString(System.Globalization.CultureInfo.InvariantCulture)%"></span>
+        </div>
+    </section>
+
     <section class="terminal reward-sources">
         <div class="terminal-title"><span>Fontes elegíveis</span><small>cenário medido + evidência válida</small></div>
         @if (EligibleSources.Count == 0)
@@ -100,6 +122,23 @@ else
                         <div><dt>VALOR RECOMENDADO</dt><dd>@Money(proposal.RecommendedRewardBrl, 6)</dd></div>
                         <div><dt>DIGEST</dt><dd title="@proposal.Digest">@ShortHash(proposal.Digest)</dd></div>
                     </dl>
+                    @if (SettlementFor(proposal.Id) is { } settlement)
+                    {
+                        <div class="reward-settled">
+                            <strong>@Aic.Format(settlement.RewardAmountMinor) creditado em Earned</strong>
+                            <span>@settlement.PolicyVersion · Ledger @ShortId(settlement.LedgerTransactionId)</span>
+                            <small class="@(settlement.IsIntegrityValid ? "green" : "error-text")">@(settlement.IsIntegrityValid ? "Settlement íntegro" : "Integridade inválida")</small>
+                        </div>
+                    }
+                    else
+                    {
+                        <button type="button"
+                                class="primary"
+                                @onclick="() => SettleProposalAsync(proposal)"
+                                disabled="@(_working || _pool?.Policy.IsEnabled != true || !proposal.IsIntegrityValid || proposal.RecommendedRewardBrl <= 0)">
+                            Resgatar reward em AIC
+                        </button>
+                    }
                 </article>
             }
         }
@@ -115,6 +154,7 @@ else
     private FarmDashboard? _dashboard;
     private IReadOnlyList<FarmEconomicsScenarioSnapshot> _scenarios = [];
     private IReadOnlyList<FarmRewardProposalSnapshot> _proposals = [];
+    private FarmRewardPoolSnapshot? _pool;
     private bool _loading = true;
     private bool _working;
     private string? _error;
@@ -177,14 +217,44 @@ else
         }
     }
 
+    private async Task SettleProposalAsync(FarmRewardProposalSnapshot proposal)
+    {
+        if (_working || SettlementFor(proposal.Id) is not null) return;
+
+        _working = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var settlement = await SettlementService.SettleAsync(proposal.Id);
+            await ReloadAsync();
+            _notice = $"REWARD {Aic.Format(settlement.RewardAmountMinor)} LIQUIDADO // EARNED // LEDGER {ShortId(settlement.LedgerTransactionId)}";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
     private async Task ReloadAsync()
     {
         _dashboard = await FarmLab.GetDashboardAsync();
         _scenarios = await ScenarioStore.ListAsync(50);
         _proposals = await ProposalStore.ListAsync();
+        _pool = await SettlementService.GetPoolAsync(100);
     }
 
     private bool HasProposal(Guid scenarioId) => _proposals.Any(x => x.ScenarioId == scenarioId);
+    private FarmRewardSettlementSnapshot? SettlementFor(Guid proposalId) =>
+        _pool?.Settlements.SingleOrDefault(x => x.ProposalId == proposalId);
+    private decimal PoolUsagePercent => _pool is null || _pool.BudgetMinor <= 0
+        ? 0
+        : decimal.Round(
+            decimal.Min(100m, _pool.SpentMinor * 100m / _pool.BudgetMinor), 1);
     private static decimal RecommendedReward(RewardSource source) => decimal.Round(
         source.Job.ComputeUnitsMilli * source.Scenario.Result.MaximumRewardPerThousandCu / 1_000_000m,
         6,
