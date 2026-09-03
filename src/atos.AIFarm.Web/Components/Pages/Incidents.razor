@@ -1,0 +1,113 @@
+@page "/incidents"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IOperationalIncidentService IncidentService
+
+<PageTitle>Incidentes // atos AI Farm</PageTitle>
+
+<header class="page-head">
+    <div><p class="eyebrow">atos:/OPS/INCIDENTS</p><h1>CENTRO DE INCIDENTES</h1><p>DETECÇÃO // PRIORIZAÇÃO // RECONHECIMENTO AUDITÁVEL</p></div>
+    <a class="audit-export" href="/audit">[ ABRIR AUDITORIA ]</a>
+</header>
+
+@if (_error is not null) { <div class="error" role="alert">@_error</div> }
+@if (_notice is not null) { <div class="incident-notice" role="status">@_notice</div> }
+
+<section class="panel">
+    <header class="panel-head"><h2>FILTROS OPERACIONAIS</h2><span class="tag">SOMENTE LEITURA DAS FONTES</span></header>
+    <form class="incident-filters" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
+        <label>BUSCAR<input type="search" maxlength="120" placeholder="código, título, detalhe ou referência" @bind="_search" /></label>
+        <label>SEVERIDADE<select @bind="_severity"><option value="">TODAS</option><option value="Critical">CRÍTICA</option><option value="Warning">ALERTA</option></select></label>
+        <label class="incident-check"><InputCheckbox @bind-Value="_openOnly" /> SOMENTE NÃO RECONHECIDOS</label>
+        <button type="submit" disabled="@_loading">[ APLICAR ]</button>
+        <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">[ LIMPAR ]</button>
+    </form>
+</section>
+
+@if (_loading && _dashboard is null)
+{
+    <section class="terminal placeholder"><div class="terminal-title">[ CORRELACIONANDO SINAIS ]</div></section>
+}
+else if (_dashboard is not null)
+{
+    <section class="kpi-grid cols-5">
+        <article class="kpi"><span>TOTAL DETECTADO</span><strong>@_dashboard.Total</strong><small>FONTES CORRELACIONADAS</small></article>
+        <article class="kpi @(_dashboard.Open == 0 ? "kpi-green" : "kpi-red")"><span>ABERTOS</span><strong>@_dashboard.Open</strong><small>AGUARDANDO RECONHECIMENTO</small></article>
+        <article class="kpi kpi-red"><span>CRÍTICOS</span><strong>@_dashboard.Critical</strong><small>EXIGEM PRIORIDADE</small></article>
+        <article class="kpi kpi-amber"><span>ALERTAS</span><strong>@_dashboard.Warning</strong><small>REQUEREM AVALIAÇÃO</small></article>
+        <article class="kpi kpi-purple"><span>RECONHECIDOS</span><strong>@_dashboard.Acknowledged</strong><small>REGISTRO PERSISTENTE</small></article>
+    </section>
+
+    <section class="incident-list" aria-live="polite">
+        @if (_dashboard.Incidents.Count == 0)
+        {
+            <div class="incident-clear"><strong>[ NENHUM INCIDENTE NO FILTRO ]</strong><span>Os sinais monitorados não produziram ocorrências.</span></div>
+        }
+        @foreach (var incident in _dashboard.Incidents)
+        {
+            <article class="incident-card @SeverityClass(incident.Severity) @(incident.IsAcknowledged ? "acknowledged" : null)">
+                <header>
+                    <div><span class="incident-severity">@SeverityLabel(incident.Severity)</span><span class="incident-source">@SourceLabel(incident.Source)</span></div>
+                    <time datetime="@incident.DetectedAtUtc.ToString("O")">UTC @incident.DetectedAtUtc.ToString("dd/MM/yyyy HH:mm:ss")</time>
+                </header>
+                <div class="incident-body">
+                    <div><small>@incident.Code // REF @incident.Reference</small><h2>@incident.Title</h2><p>@incident.Detail</p></div>
+                    @if (incident.IsAcknowledged)
+                    {
+                        <span class="incident-ack">[ RECONHECIDO // @incident.AcknowledgedAtUtc!.Value.ToLocalTime().ToString("dd/MM HH:mm") ]</span>
+                    }
+                    else
+                    {
+                        <button type="button" @onclick="() => AcknowledgeAsync(incident)" disabled="@_working">[ RECONHECER ]</button>
+                    }
+                </div>
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private IncidentDashboard? _dashboard;
+    private string _search = string.Empty;
+    private string _severity = string.Empty;
+    private bool _openOnly;
+    private bool _loading;
+    private bool _working;
+    private string? _error;
+    private string? _notice;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private Task ApplyAsync() => LoadAsync();
+    private async Task ClearAsync() { _search = _severity = string.Empty; _openOnly = false; await LoadAsync(); }
+
+    private async Task AcknowledgeAsync(OperationalIncidentSnapshot incident)
+    {
+        if (_working) return;
+        _working = true; _error = null; _notice = null;
+        try
+        {
+            if (!await IncidentService.AcknowledgeAsync(incident.Key)) { _error = "O incidente não está mais disponível para reconhecimento."; return; }
+            _notice = $"INCIDENTE {incident.Reference} RECONHECIDO // A EVIDÊNCIA ORIGINAL FOI PRESERVADA";
+            await LoadAsync(clearNotice: false);
+        }
+        catch (Exception) { _error = "Não foi possível reconhecer o incidente."; }
+        finally { _working = false; }
+    }
+
+    private async Task LoadAsync(bool clearNotice = true)
+    {
+        _loading = true; _error = null; if (clearNotice) _notice = null;
+        try
+        {
+            var severity = Enum.TryParse<IncidentSeverity>(_severity, out var parsed) ? parsed : (IncidentSeverity?)null;
+            _dashboard = await IncidentService.SearchAsync(new IncidentQuery(_search, severity, _openOnly));
+        }
+        catch (ArgumentException exception) { _error = exception.Message; }
+        catch (Exception) { _error = "Não foi possível carregar os incidentes operacionais."; }
+        finally { _loading = false; }
+    }
+
+    private static string SeverityLabel(IncidentSeverity value) => value == IncidentSeverity.Critical ? "CRÍTICO" : "ALERTA";
+    private static string SeverityClass(IncidentSeverity value) => value == IncidentSeverity.Critical ? "critical" : "warning";
+    private static string SourceLabel(IncidentSource value) => value switch { IncidentSource.Integrity => "INTEGRIDADE", IncidentSource.Iris => "IRIS", IncidentSource.Farm => "FARM", IncidentSource.Node => "NODE", _ => value.ToString().ToUpperInvariant() };
+}

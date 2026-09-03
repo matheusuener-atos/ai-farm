@@ -67,7 +67,8 @@ internal sealed record FarmJobManifest(
     string DataClassification,
     DateTimeOffset IssuedAtUtc,
     DateTimeOffset ExpiresAtUtc,
-    string? NodeProfileHash = null);
+    string? NodeProfileHash = null,
+    string? InputDigest = null);
 
 internal sealed record SignedFarmJobManifest(
     FarmJobManifest Manifest,
@@ -77,6 +78,10 @@ internal sealed record SignedFarmJobManifest(
 
 internal static class FarmManifestSecurity
 {
+    internal const string EmbeddedVersion = "atos-farm-manifest-v1";
+    internal const string LegacyAgentVersion = "atos-farm-manifest-v2-agent";
+    internal const string AgentProfileVersion = "atos-farm-manifest-v3-agent-profile";
+
     public static SignedFarmJobManifest Sign(
         FarmJobManifest manifest,
         FarmManifestSigningOptions options)
@@ -113,6 +118,39 @@ internal static class FarmManifestSecurity
         return manifest is not null;
     }
 
+    public static bool TryVerifyJobBinding(
+        FarmJobRecord job,
+        FarmManifestSigningOptions rootOptions,
+        out FarmJobManifest? manifest)
+    {
+        var verification = job.ManifestVersion is AgentProfileVersion or LegacyAgentVersion
+            ? rootOptions.DeriveForAgent(job.NodeId).Signing
+            : rootOptions;
+        if (!TryVerify(
+                job.ManifestPayload,
+                job.ManifestDigest,
+                job.ManifestSignature,
+                verification,
+                out manifest) ||
+            manifest is null)
+            return false;
+
+        return manifest.Version is EmbeddedVersion or AgentProfileVersion or LegacyAgentVersion &&
+            manifest.Version == job.ManifestVersion &&
+            manifest.JobId == job.Id &&
+            manifest.AttemptId == job.AttemptId &&
+            manifest.NodeId == job.NodeId &&
+            manifest.Workload == job.Workload &&
+            manifest.WorkloadVersion == job.WorkloadVersion &&
+            manifest.VerificationPolicy == job.VerificationPolicy &&
+            manifest.Nonce == job.Nonce &&
+            manifest.MaxLogicalProcessors == job.ReservedLogicalProcessors &&
+            manifest.MaxMemoryBytes == job.ReservedMemoryBytes &&
+            manifest.InputDigest == job.InputDigest &&
+            SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
+            SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
+    }
+
     private static bool TryHex(string? value, out byte[] bytes)
     {
         bytes = [];
@@ -120,6 +158,9 @@ internal static class FarmManifestSecurity
         try { bytes = Convert.FromHexString(value); return true; }
         catch (FormatException) { return false; }
     }
+
+    private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
+        right is not null && Math.Abs((left - right.Value).Ticks) < 10;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

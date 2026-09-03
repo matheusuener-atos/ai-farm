@@ -36,7 +36,14 @@ internal sealed record FarmJobEvidencePayload(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? StartedAtUtc,
     DateTimeOffset FinishedAtUtc,
-    IReadOnlyList<FarmEvidenceEvent> Events);
+    IReadOnlyList<FarmEvidenceEvent> Events,
+    string? DemandLabel = null,
+    string? InputVersion = null,
+    int? InputSizeBytes = null,
+    string? InputDigest = null,
+    string? OutputVersion = null,
+    int? OutputSizeBytes = null,
+    string? OutputDigest = null);
 
 internal sealed record SignedFarmJobEvidence(
     FarmJobEvidencePayload Evidence,
@@ -102,7 +109,14 @@ internal static class FarmEvidenceSecurity
                 x.Sequence,
                 x.Status,
                 x.OccurredAtUtc,
-                x.Detail)).ToArray());
+                x.Detail)).ToArray(),
+            job.DemandLabel,
+            job.InputVersion,
+            job.InputSizeBytes,
+            job.InputDigest,
+            job.OutputVersion,
+            job.OutputSizeBytes,
+            job.OutputDigest);
         var payload = JsonSerializer.Serialize(evidence, CanonicalOptions);
         var bytes = Encoding.UTF8.GetBytes(payload);
         return new SignedFarmJobEvidence(
@@ -133,14 +147,15 @@ internal static class FarmEvidenceSecurity
         job.EvidenceCreatedAtUtc = job.FinishedAtUtc;
     }
 
-    public static bool TryVerify(
+    public static FarmJobEvidenceVerificationSnapshot Verify(
         FarmJobRecord job,
+        IReadOnlyCollection<FarmJobEventRecord> currentEvents,
         FarmManifestSigningOptions rootOptions,
         out FarmJobEvidencePayload? evidence)
     {
         evidence = null;
         var key = rootOptions.DeriveForAgent(job.NodeId);
-        return job.EvidenceVersion == Version &&
+        var signatureValid = job.EvidenceVersion == Version &&
             job.EvidenceKeyId == key.KeyId &&
             TryVerify(
                 job.EvidencePayload,
@@ -150,20 +165,98 @@ internal static class FarmEvidenceSecurity
                 out evidence) &&
             evidence is not null &&
             evidence.Algorithm == Algorithm &&
-            evidence.KeyId == key.KeyId &&
+            evidence.KeyId == key.KeyId;
+        var manifestValid = FarmManifestSecurity.TryVerifyJobBinding(
+            job,
+            rootOptions,
+            out _);
+        var jobBindingValid = signatureValid && evidence is not null &&
+            EvidenceMatchesJob(evidence, job);
+        var lifecycleValid = signatureValid && evidence is not null &&
+            LifecycleMatches(evidence.Events, currentEvents, job);
+        return new FarmJobEvidenceVerificationSnapshot(
+            signatureValid,
+            manifestValid,
+            jobBindingValid,
+            lifecycleValid);
+    }
+
+    private static bool EvidenceMatchesJob(
+        FarmJobEvidencePayload evidence,
+        FarmJobRecord job) =>
+            job.Status == FarmJobStatus.Completed.ToString() &&
+            evidence.Version == job.EvidenceVersion &&
             evidence.JobId == job.Id &&
             evidence.NodeId == job.NodeId &&
             evidence.AttemptId == job.AttemptId &&
+            evidence.Workload == job.Workload &&
+            evidence.WorkloadVersion == job.WorkloadVersion &&
+            evidence.VerificationPolicy == job.VerificationPolicy &&
+            evidence.ManifestVersion == job.ManifestVersion &&
             evidence.ManifestDigest == job.ManifestDigest &&
+            evidence.ManifestSignature == job.ManifestSignature &&
             evidence.ManifestPayload == job.ManifestPayload &&
             evidence.ResultDigest == job.ResultDigest &&
             evidence.ExpectedDigest == job.ExpectedDigest &&
             evidence.ComputeUnitsMilli == job.ComputeUnitsMilli &&
+            evidence.DurationMilliseconds == job.DurationMilliseconds &&
+            evidence.WorkerPeakMemoryBytes == job.WorkerPeakMemoryBytes &&
+            evidence.WorkerProcessorTimeMilliseconds == job.WorkerProcessorTimeMilliseconds &&
+            evidence.WorkerEnforcement == job.WorkerEnforcement &&
+            evidence.DemandLabel == job.DemandLabel &&
+            evidence.InputVersion == job.InputVersion &&
+            evidence.InputSizeBytes == job.InputSizeBytes &&
+            evidence.InputDigest == job.InputDigest &&
+            evidence.OutputVersion == job.OutputVersion &&
+            evidence.OutputSizeBytes == job.OutputSizeBytes &&
+            evidence.OutputDigest == job.OutputDigest &&
+            PayloadMatchesDigest(job.InputPayload, job.InputDigest) &&
+            PayloadMatchesDigest(job.OutputPayload, job.OutputDigest) &&
+            SamePostgresTimestamp(evidence.CreatedAtUtc, job.CreatedAtUtc) &&
+            SameNullablePostgresTimestamp(evidence.StartedAtUtc, job.StartedAtUtc) &&
             SamePostgresTimestamp(evidence.FinishedAtUtc, job.FinishedAtUtc);
+
+    private static bool PayloadMatchesDigest(string? payload, string? digest)
+    {
+        if (payload is null || digest is null) return payload is null && digest is null;
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(
+                SHA256.HashData(Encoding.UTF8.GetBytes(payload)),
+                Convert.FromHexString(digest));
+        }
+        catch (FormatException) { return false; }
+    }
+
+    private static bool LifecycleMatches(
+        IReadOnlyList<FarmEvidenceEvent> sealedEvents,
+        IReadOnlyCollection<FarmJobEventRecord> currentEvents,
+        FarmJobRecord job)
+    {
+        var ordered = currentEvents.OrderBy(x => x.Sequence).ToArray();
+        if (sealedEvents.Count == 0 || sealedEvents.Count != ordered.Length)
+            return false;
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var current = ordered[index];
+            var sealedEvent = sealedEvents[index];
+            if (current.JobId != job.Id ||
+                current.Sequence != index + 1 ||
+                sealedEvent.Sequence != current.Sequence ||
+                sealedEvent.Status != current.Status ||
+                sealedEvent.Detail != current.Detail ||
+                !SamePostgresTimestamp(sealedEvent.OccurredAtUtc, current.OccurredAtUtc))
+                return false;
+        }
+
+        var finalEvent = ordered[^1];
+        return finalEvent.Status == FarmJobStatus.Completed.ToString() &&
+            SamePostgresTimestamp(finalEvent.OccurredAtUtc, job.FinishedAtUtc);
     }
 
     public static FarmJobEvidenceSnapshot? ToSnapshot(
         FarmJobRecord job,
+        IReadOnlyCollection<FarmJobEventRecord> currentEvents,
         FarmManifestSigningOptions rootOptions)
     {
         if (job.EvidenceVersion is null ||
@@ -172,7 +265,7 @@ internal static class FarmEvidenceSecurity
             job.EvidenceKeyId is null ||
             job.EvidenceCreatedAtUtc is null)
             return null;
-        var valid = TryVerify(job, rootOptions, out _);
+        var verification = Verify(job, currentEvents, rootOptions, out _);
         return new FarmJobEvidenceSnapshot(
             job.EvidenceVersion,
             Algorithm,
@@ -180,7 +273,7 @@ internal static class FarmEvidenceSecurity
             job.EvidenceDigest,
             job.EvidenceSignature,
             job.EvidenceCreatedAtUtc.Value,
-            valid);
+            verification);
     }
 
     public static bool TryVerify(
@@ -223,6 +316,12 @@ internal static class FarmEvidenceSecurity
 
     private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
         right is not null && Math.Abs((left - right.Value).Ticks) < 10;
+
+    private static bool SameNullablePostgresTimestamp(
+        DateTimeOffset? left,
+        DateTimeOffset? right) =>
+        left is null && right is null ||
+        left is not null && SamePostgresTimestamp(left.Value, right);
 
     private static readonly JsonSerializerOptions CanonicalOptions = new()
     {

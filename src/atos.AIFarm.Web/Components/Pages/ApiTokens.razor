@@ -1,0 +1,184 @@
+@page "/account/api-tokens"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IApiTokenService Tokens
+@inject IJSRuntime JavaScript
+
+<PageTitle>Tokens da Iris // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow">atos:/ACCOUNT/API_TOKENS</p>
+    <h1>ACESSO PROGRAMÁTICO</h1>
+    <p>SEGREDO ÚNICO // ESCOPOS MÍNIMOS // REVOGAÇÃO IMEDIATA</p>
+</div>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+
+@if (_createdSecret is not null)
+{
+    <section class="token-secret" role="status">
+        <strong>[ COPIE AGORA — O SEGREDO NÃO SERÁ EXIBIDO NOVAMENTE ]</strong>
+        <code>@_createdSecret</code>
+        <div>
+            <button type="button" @onclick="CopySecretAsync">[ COPIAR TOKEN ]</button>
+            <button type="button" class="button-secondary" @onclick="DismissSecret">[ JÁ GUARDEI ]</button>
+        </div>
+    </section>
+}
+
+<section class="panel token-create">
+    <div class="panel-head section-heading">
+        <div>
+            <h2>EMITIR TOKEN</h2>
+            <p class="muted">USE SOMENTE OS ESCOPOS NECESSÁRIOS PARA A INTEGRAÇÃO</p>
+        </div>
+    </div>
+    <div class="token-form">
+        <label>NOME
+            <input maxlength="80" @bind="_name" placeholder="ex.: dashboard interno" disabled="@_working" />
+        </label>
+        <label>VALIDADE
+            <select @bind="_validityDays" disabled="@_working">
+                <option value="30">30 DIAS</option>
+                <option value="90">90 DIAS</option>
+                <option value="180">180 DIAS</option>
+                <option value="365">365 DIAS</option>
+            </select>
+        </label>
+    </div>
+    <fieldset class="token-scopes">
+        <legend>ESCOPOS DE LEITURA</legend>
+        <label><input type="checkbox" @bind="_profileRead" /> PERFIL <small>GET /api/v1/me</small></label>
+        <label><input type="checkbox" @bind="_usageRead" /> USO <small>GET /api/v1/usage</small></label>
+        <label><input type="checkbox" @bind="_incidentsRead" /> INCIDENTES <small>GET /api/v1/incidents</small></label>
+        <label><input type="checkbox" @bind="_auditRead" /> AUDITORIA <small>GET /api/v1/audit</small></label>
+        <label><input type="checkbox" @bind="_conversationsRead" /> CONVERSAS <small>GET /api/v1/conversations</small></label>
+        <label><input type="checkbox" @bind="_farmRead" /> FARM <small>ANALYTICS E CATÁLOGO DE WORKLOADS</small></label>
+    </fieldset>
+    <fieldset class="token-scopes">
+        <legend>ESCOPOS DE EXECUÇÃO</legend>
+        <label><input type="checkbox" @bind="_irisExecute" /> EXECUTAR IRIS <small>POST /api/v1/iris/responses</small></label>
+        <label><input type="checkbox" @bind="_farmExecute" /> EXECUTAR FARM <small>SUBMETER E CANCELAR JOBS</small></label>
+        <p class="muted">ATENÇÃO // EXECUTAR IRIS PODE CONSUMIR AIC. EXECUTAR FARM CONSOME PROCESSAMENTO, SEM CONVERSÃO AUTOMÁTICA DE CP EM AIC.</p>
+    </fieldset>
+    <button type="button" @onclick="CreateAsync" disabled="@_working">
+        @(_working ? "[ EMITINDO... ]" : "[ EMITIR TOKEN ]")
+    </button>
+</section>
+
+<section class="panel token-list">
+    <div class="panel-head section-heading">
+        <div><h2>TOKENS DA CONTA</h2><p class="muted">SEGREDOS NÃO SÃO ARMAZENADOS EM TEXTO PURO</p></div>
+        <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button>
+    </div>
+    @if (_loading)
+    {
+        <p class="muted">CARREGANDO...</p>
+    }
+    else if (_tokens.Count == 0)
+    {
+        <p class="muted">NENHUM TOKEN EMITIDO.</p>
+    }
+    else
+    {
+        @foreach (var token in _tokens)
+        {
+            <article>
+                <header>
+                    <div><strong>@token.Name</strong><code>@token.Prefix</code></div>
+                    <span class="@StatusClass(token)">[ @Status(token) ]</span>
+                </header>
+                <dl>
+                    <div><dt>ESCOPOS</dt><dd>@FormatScopes(token.Scopes)</dd></div>
+                    <div><dt>CRIADO</dt><dd>@token.CreatedAtUtc.ToString("dd/MM/yyyy HH:mm") UTC</dd></div>
+                    <div><dt>EXPIRA</dt><dd>@token.ExpiresAtUtc.ToString("dd/MM/yyyy HH:mm") UTC</dd></div>
+                    <div><dt>ÚLTIMO USO</dt><dd>@(token.LastUsedAtUtc?.ToString("dd/MM/yyyy HH:mm 'UTC'") ?? "NUNCA")</dd></div>
+                </dl>
+                @if (!token.IsRevoked && !token.IsExpired(DateTimeOffset.UtcNow))
+                {
+                    <button type="button" class="danger-button" @onclick="() => RevokeAsync(token.Id)" disabled="@_working">[ REVOGAR ]</button>
+                }
+            </article>
+        }
+    }
+</section>
+
+@code {
+    private IReadOnlyList<ApiTokenSnapshot> _tokens = [];
+    private string _name = string.Empty;
+    private int _validityDays = 90;
+    private bool _profileRead = true;
+    private bool _usageRead = true;
+    private bool _incidentsRead;
+    private bool _auditRead;
+    private bool _conversationsRead;
+    private bool _farmRead;
+    private bool _farmExecute;
+    private bool _irisExecute;
+    private bool _loading = true;
+    private bool _working;
+    private string? _createdSecret;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try { _tokens = await Tokens.ListAsync(); }
+        catch (Exception) { _error = "Não foi possível carregar os tokens da conta."; }
+        finally { _loading = false; }
+    }
+
+    private async Task CreateAsync()
+    {
+        _working = true;
+        _error = null;
+        try
+        {
+            var created = await Tokens.CreateAsync(new ApiTokenCreateRequest(
+                _name, SelectedScopes(), DateTimeOffset.UtcNow.AddDays(_validityDays)));
+            _createdSecret = created.Secret;
+            _name = string.Empty;
+            await LoadAsync();
+        }
+        catch (ArgumentException exception) { _error = exception.Message; }
+        catch (Exception) { _error = "Não foi possível emitir o token."; }
+        finally { _working = false; }
+    }
+
+    private async Task RevokeAsync(Guid id)
+    {
+        _working = true;
+        _error = null;
+        try { await Tokens.RevokeAsync(id); await LoadAsync(); }
+        catch (Exception) { _error = "Não foi possível revogar o token."; }
+        finally { _working = false; }
+    }
+
+    private ApiTokenScope SelectedScopes() =>
+        (_profileRead ? ApiTokenScope.ProfileRead : 0) |
+        (_usageRead ? ApiTokenScope.UsageRead : 0) |
+        (_incidentsRead ? ApiTokenScope.IncidentsRead : 0) |
+        (_auditRead ? ApiTokenScope.AuditRead : 0) |
+        (_conversationsRead ? ApiTokenScope.ConversationsRead : 0) |
+        (_farmRead ? ApiTokenScope.FarmRead : 0) |
+        (_farmExecute ? ApiTokenScope.FarmExecute : 0) |
+        (_irisExecute ? ApiTokenScope.IrisExecute : 0);
+
+    private async Task CopySecretAsync()
+    {
+        if (_createdSecret is not null)
+            await JavaScript.InvokeVoidAsync("navigator.clipboard.writeText", _createdSecret);
+    }
+    private void DismissSecret() => _createdSecret = null;
+    private static string Status(ApiTokenSnapshot token) => token.IsRevoked ? "REVOGADO" : token.IsExpired(DateTimeOffset.UtcNow) ? "EXPIRADO" : "ATIVO";
+    private static string StatusClass(ApiTokenSnapshot token) => token.IsRevoked || token.IsExpired(DateTimeOffset.UtcNow) ? "muted" : "green";
+    private static string FormatScopes(ApiTokenScope scopes) => string.Join(" // ", Enum.GetValues<ApiTokenScope>()
+        .Where(x => x is not ApiTokenScope.None and not ApiTokenScope.AllRead and not ApiTokenScope.All && scopes.HasFlag(x))
+        .Select(x => x.ToString().ToUpperInvariant()));
+}

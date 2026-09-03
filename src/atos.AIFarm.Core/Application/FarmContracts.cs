@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.5.0";
+    public const string CurrentAgentVersion = "atos-agent/0.8.0";
 }
 
 public static class FarmWorkerEnforcement
@@ -81,7 +81,8 @@ public sealed record FarmAgentHeartbeatRequest(
     bool AcceptJobs = true,
     int MaxLogicalProcessors = 0,
     long MaxMemoryBytes = 0,
-    Guid? ActiveJobId = null);
+    Guid? ActiveJobId = null,
+    IReadOnlyList<Guid>? ActiveJobIds = null);
 
 public sealed record FarmAgentHeartbeatResult(
     Guid NodeId,
@@ -92,7 +93,10 @@ public sealed record FarmAgentHeartbeatResult(
     int ActiveHeartbeatIntervalSeconds,
     Guid? ActiveJobId,
     DateTimeOffset? LeaseExpiresAtUtc,
-    bool CancelActiveJob);
+    bool CancelActiveJob,
+    IReadOnlyList<Guid>? CancelActiveJobIds = null);
+
+public sealed record FarmAgentClaimRequest(IReadOnlyList<Guid>? ActiveJobIds = null);
 
 public sealed record FarmAgentTrust(
     string Algorithm,
@@ -105,14 +109,16 @@ public sealed record FarmRemoteJobOffer(
     string ManifestPayload,
     string ManifestDigest,
     string ManifestSignature,
-    string SignatureAlgorithm);
+    string SignatureAlgorithm,
+    FarmRemoteJobInput? Input = null);
 
 public sealed record FarmRemoteJobResult(
     string ResultDigest,
     long DurationMilliseconds,
     long PeakMemoryBytes = 0,
     long ProcessorTimeMilliseconds = 0,
-    string Enforcement = "UNREPORTED");
+    string Enforcement = "UNREPORTED",
+    string? OutputPayload = null);
 
 public sealed record FarmRemoteJobRejection(
     string Reason,
@@ -144,7 +150,8 @@ public sealed record FarmJobManifestSnapshot(
     long MaxMemoryBytes,
     string NetworkPolicy,
     string DataClassification,
-    string? NodeProfileHash);
+    string? NodeProfileHash,
+    string? InputDigest = null);
 
 public sealed record FarmJobEvidenceSnapshot(
     string Version,
@@ -153,7 +160,20 @@ public sealed record FarmJobEvidenceSnapshot(
     string Digest,
     string Signature,
     DateTimeOffset CreatedAtUtc,
-    bool IsValid);
+    FarmJobEvidenceVerificationSnapshot Verification)
+{
+    public bool IsValid => Verification.IsValid;
+}
+
+public sealed record FarmJobEvidenceVerificationSnapshot(
+    bool SignatureValid,
+    bool ManifestValid,
+    bool JobBindingValid,
+    bool LifecycleValid)
+{
+    public bool IsValid =>
+        SignatureValid && ManifestValid && JobBindingValid && LifecycleValid;
+}
 
 public sealed record FarmJobEvidenceDownload(
     string FileName,
@@ -178,12 +198,20 @@ public sealed record FarmJobSnapshot(
     string? WorkerEnforcement,
     FarmJobManifestSnapshot? Manifest,
     FarmJobEvidenceSnapshot? Evidence,
-    IReadOnlyList<FarmJobEventSnapshot> Events);
+    IReadOnlyList<FarmJobEventSnapshot> Events,
+    FarmUsefulJobSnapshot? Useful = null);
 
 public sealed record FarmDashboard(
     FarmNodeSnapshot Node,
-    IReadOnlyList<FarmJobSnapshot> RecentJobs)
+    IReadOnlyList<FarmJobSnapshot> RecentJobs,
+    IReadOnlyList<FarmNodeSnapshot>? PoolNodes = null)
 {
+    public IReadOnlyList<FarmNodeSnapshot> Nodes => PoolNodes ?? [Node];
+    public int OnlineNodeCount => Nodes.Count(x => x.Status == FarmNodeStatus.Online);
+    public int AvailableNodeCount =>
+        (Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent)
+            ? Nodes.Where(x => x.ConnectionKind == FarmNodeConnectionKind.Agent)
+            : Nodes).Count(x => x.AcceptJobs);
     public long VerifiedComputeUnitsMilli =>
         RecentJobs.Where(x => x.Status == FarmJobStatus.Completed)
             .Sum(x => x.ComputeUnitsMilli);
@@ -193,7 +221,17 @@ public interface IFarmLabService
 {
     Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default);
     Task<FarmDashboard> SetNodeStatusAsync(FarmNodeStatus status, CancellationToken cancellationToken = default);
+    Task<FarmDashboard> SetNodeStatusAsync(
+        Guid nodeId,
+        FarmNodeStatus status,
+        CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
+    Task<FarmJobSnapshot> RunWorkloadAsync(
+        string workloadId,
+        CancellationToken cancellationToken = default);
+    Task<FarmJobSnapshot?> GetJobAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default);
     Task<FarmDashboard> CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default);
     Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
         Guid jobId,
@@ -216,7 +254,8 @@ public interface IFarmAgentService
         CancellationToken cancellationToken = default);
     Task<FarmRemoteJobOffer?> ClaimJobAsync(
         string credential,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? activeJobIds = null);
     Task<bool> MarkJobStartedAsync(
         string credential,
         Guid jobId,

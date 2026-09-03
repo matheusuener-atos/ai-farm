@@ -1,0 +1,32 @@
+.schedule-link { display:inline-block; margin-top:1rem; color:var(--amber); }
+.schedule-success { border:1px solid var(--green); color:var(--green); padding:.8rem 1rem; }
+.schedule-create { margin-bottom:1rem; }
+.schedule-form { display:grid; grid-template-columns:1.2fr 1.5fr .8fr auto; gap:.75rem; align-items:end; padding:1rem; }
+.schedule-form label { display:grid; gap:.35rem; font-size:.72rem; color:var(--muted); }
+.schedule-form input,.schedule-form select { width:100%; }
+.schedule-create > small { display:block; padding:0 1rem 1rem; color:var(--muted); }
+.schedule-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:.75rem; margin:1rem 0; }
+.schedule-kpis section { border:1px solid var(--line); padding:1rem; display:grid; gap:.35rem; }
+.schedule-kpis span { color:var(--muted); font-size:.72rem; }
+.schedule-kpis strong { font-size:1.65rem; }
+.schedule-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; padding:1rem; }
+.schedule-grid article { border:1px solid var(--line); padding:1rem; }
+.schedule-grid header,.schedule-grid footer { display:flex; justify-content:space-between; align-items:center; gap:.6rem; }
+.schedule-grid header div { display:grid; gap:.2rem; }
+.schedule-grid header small { color:var(--muted); }
+.schedule-grid dl { display:grid; grid-template-columns:repeat(2,1fr); gap:.75rem; margin:1rem 0; }
+.schedule-grid dl div { display:grid; gap:.2rem; }
+.schedule-grid dt { color:var(--muted); font-size:.68rem; }
+.schedule-grid dd { margin:0; overflow-wrap:anywhere; }
+.schedule-triggers article { display:grid; grid-template-columns:150px minmax(0,1fr) auto auto; gap:1rem; align-items:center; padding:.75rem 1rem; border-top:1px solid var(--line); }
+.schedule-triggers article div { display:grid; gap:.2rem; }
+.schedule-triggers small,.schedule-triggers time { color:var(--muted); }
+.schedule-triggers a { color:var(--violet); }
+.schedule-empty { padding:1rem; color:var(--muted); }
+@media (max-width:900px) {
+  .schedule-form,.schedule-kpis,.schedule-grid { grid-template-columns:1fr 1fr; }
+  .schedule-triggers article { grid-template-columns:1fr auto; }
+}
+@media (max-width:600px) {
+  .schedule-form,.schedule-kpis,.schedule-grid { grid-template-columns:1fr; }
+}

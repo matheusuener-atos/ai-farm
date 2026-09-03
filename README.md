@@ -200,10 +200,17 @@ para que o Render possa monitorar o serviço.
 
 ## Compute Lab — início da Fase 3
 
-A rota autenticada /farm agora materializa a primeira prova fechada de
-compute controlado. Ela registra um node de laboratório por conta, permite
-pausar e retomar sua disponibilidade e executa somente o workload versionado
-atos-sha256-chain-v1.
+A rota autenticada /farm materializa uma prova fechada de compute controlado.
+Ela registra um node de laboratório por conta, permite pausar e retomar sua
+disponibilidade e executa somente workloads do catálogo versionado
+`atos-workload-catalog-v1`.
+
+O catálogo inicial contém `atos-sha256-chain-v1`, usado como benchmark, e
+`atos-merkle-root-sha256-v1`, que constrói uma árvore determinística de 4.096
+folhas. A seleção feita no painel é congelada no manifesto. Servidor, Agent e
+worker compartilham a mesma allowlist e recusam identificador, versão,
+iterações, política de verificação ou limites divergentes. Ambos usam
+`DENY_ALL`, uma CPU lógica, até 256 MiB e reexecução independente no servidor.
 
 O benchmark encadeia SHA-256 sobre um nonce aleatório, reexecuta o mesmo
 manifest no verificador e só registra 1,000 CP quando os digests coincidem.
@@ -224,7 +231,7 @@ não existe conversão CP → AIC. O laboratório não concede reward, não acei
 shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
 `EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
 executando — localmente, a máquina de desenvolvimento; no Render, o container
-do serviço. No modo `AGENT`, o inventário e o benchmark pertencem ao computador
+do serviço. No modo `AGENT`, o inventário e o workload pertencem ao computador
 vinculado.
 
 ### Vínculo experimental do Compute Agent
@@ -274,8 +281,8 @@ dotnet run --project src/atos.AIFarm.Agent -- resume
 dotnet run --project src/atos.AIFarm.Agent -- limits 1 256
 ```
 
-`limits` recebe CPU lógica e memória em MiB. `pause` não interrompe o Job
-atual: apenas drena o Agent e impede novos despachos e claims. O painel mantém o
+`limits` recebe CPU lógica e memória em MiB. `pause` não interrompe os Jobs
+atuais: apenas drena o Agent e impede novos despachos e claims. O painel mantém o
 Node online, mas mostra a política local pausada e seus limites efetivos. Esses
 limites são uma política de admissão assinada; isolamento rígido de CPU/memória
 no sistema operacional ainda não faz parte deste runtime experimental.
@@ -303,21 +310,119 @@ completo de telemetria e o painel `/farm` o exibe em cada Job. Esses valores sã
 observações do Agent autenticado e entram na evidência operacional do Job; não
 constituem attestation independente do hardware.
 
+A verificação do bundle não termina na assinatura HMAC. O servidor também
+revalida o manifesto, confere o vínculo de todos os campos econômicos e técnicos
+com o Job atual e compara, evento a evento, o lifecycle selado com a trilha
+persistida. O painel expõe esses quatro diagnósticos separadamente. Qualquer
+divergência invalida a evidência no Centro de Auditoria, bloqueia seu download e
+impede que ela origine uma nova fotografia econômica ou proposta de reward,
+mesmo quando a assinatura do payload original continua matematicamente válida.
+Saldo e analytics contam CP apenas de bundles aprovados nas quatro verificações;
+o painel analítico destaca separadamente as falhas de integridade.
+
+O Agent `0.6.0` substitui a regra fixa de um único benchmark pelo catálogo
+compartilhado. O IPC `atos-worker-ipc-v2` inclui workload e versão, e o worker
+continua sem aceitar comandos, caminhos, URLs ou código fornecido pelo usuário.
+Adicionar um workload exige uma definição versionada, implementação local
+determinística e verificação equivalente no servidor.
+
+O Agent `0.7.0` e o IPC `atos-worker-ipc-v3` introduzem **Useful Jobs**. A tela
+`/farm/demands` aceita somente texto `STANDARD` de até 32 KiB e despacha o
+workload `IRIS_TEXT_INDEX`. Ele normaliza o texto, conta termos, cria segmentos
+de até 200 tokens e produz um índice JSON determinístico para recuperação
+lexical e preparação de contexto da Iris. O digest da entrada faz parte do
+manifesto assinado. A saída do Agent é reexecutada e comparada byte a byte pelo
+servidor; entrada, saída e seus digests também ficam vinculados ao bundle de
+evidência. Nenhum conteúdo `PRIVATE` ou `CONFIDENTIAL` é aceito nessa rota.
+
+Esta versão persiste payloads pequenos diretamente no PostgreSQL. Ela não é um
+modelo de embeddings nem promete similaridade semântica; armazenamento de
+artefatos maiores no Object Storage e workloads de inferência são fases
+posteriores. A conclusão válida gera 2,000 CP técnicos e continua sem converter
+CP em AIC automaticamente.
+
+O **Compute Pool v1** remove o limite histórico de um único Agent por conta.
+Cada nome de máquina representa um Node independente; vincular novamente o
+mesmo nome rotaciona somente sua credencial. Quando há Agents cadastrados, o
+scheduler escolhe apenas entre Agents online, compatíveis, com heartbeat atual,
+política local ativa e capacidade residual. Sem Agents cadastrados, o runtime
+embedded continua disponível para desenvolvimento.
+
+A alocação usa um advisory lock transacional por conta no PostgreSQL. Assim,
+duas instâncias web podem receber submissões simultâneas sem exceder o mesmo
+Node. Cada Job congela sua reserva de CPU e memória; o scheduler soma reservas
+ativas e usa o saldo como critério de admissão. O painel `/farm` lista todo o
+pool e a API permite operar cada Node separadamente.
+
+O Agent `0.8.0` introduz **multi-slot**. Um único Agent pode manter vários
+workers isolados em paralelo quando a soma dos limites assinados cabe em
+`limits <cpu> <memoria-mb>`. Claim informa os Jobs já ativos, heartbeat renova
+todos os leases e recebe cancelamentos individualizados. Reduzir a política
+local impede novos claims, mas permite que os processos em curso terminem. A
+matriz `/farm/capacity` mostra Jobs ativos e CPU/memória restantes; um Node em
+uso continua aceitando trabalho enquanto possuir saldo suficiente.
+
+A **Demand Queue v1** separa aceitação de execução. `/farm/demands` persiste a
+entrada antes de procurar capacidade, aceita prioridades baixa, normal e alta,
+validade entre cinco minutos e sete dias, cancelamento pré-despacho e atualização
+automática do estado. Um worker tenta despachar primeiro as demandas prioritárias
+e mais antigas, aplica backoff quando todos os Nodes compatíveis estão ocupados e
+expira itens que não obtiveram capacidade no prazo.
+
+O claim é atômico no PostgreSQL e suporta múltiplas instâncias web. O ID da
+demanda também é gravado com unicidade no Job, tornando a retomada idempotente
+mesmo se o processo cair entre a criação do Job e a confirmação da fila. A API
+pessoal oferece `GET/POST /api/v1/farm/demands` e
+`POST /api/v1/farm/demands/{id}/cancel`; submissões exigem
+`X-Idempotency-Key`. O Centro de Jobs identifica `DEMANDA` como origem própria.
+
+O **Resource-Aware Scheduler v1** acrescenta requisitos mínimos de CPU e memória
+ao catálogo versionado. Ao aceitar uma demanda, a Farm congela a versão e os
+recursos exigidos no PostgreSQL; uma mudança posterior do catálogo não pode
+alterar silenciosamente o contrato que já estava na fila. Antes de criar o
+manifesto, o scheduler elimina Nodes pausados, offline, com heartbeat vencido,
+política local desabilitada, Agent incompatível, recursos insuficientes ou Job
+ativo. Entre os elegíveis, usa best-fit por CPU e memória e preserva máquinas
+maiores para workloads que realmente precisem delas.
+
+`/farm/capacity` apresenta a matriz em tempo real de Node × workload, incluindo
+CPU/memória autorizadas, ocupação e o motivo exato de cada bloqueio. A mesma
+visão está disponível em `GET /api/v1/farm/capacity` com escopo de leitura da
+Farm. A fila mostra o contrato de recursos congelado em cada demanda e utiliza
+os diagnósticos do scheduler nas retentativas.
+
+A **Distributed Demand v1** permite que uma única entrada de texto seja
+processada por até oito Nodes. Ao aceitar a demanda, o servidor divide tokens
+contíguos em shards determinísticos e persiste cada parte com digest próprio.
+O dispatcher cria um Job útil por shard, sempre respeitando o limite de um Job
+ativo por Node; se a capacidade acabar no meio do fan-out, preserva os Jobs já
+criados e retoma somente as partes restantes. Quedas entre criação e vínculo
+também são recuperadas pelo par único demanda + sequência.
+
+Cada Agent recebe apenas seu shard no protocolo já existente. O resultado é
+reexecutado e sua evidência é validada individualmente. Somente quando todos os
+shards terminam aprovados o coordenador ordena as partes, soma as métricas e
+grava um `atos-distributed-text-index-v1` canônico com SHA-256. A tela mostra o
+progresso por shard e libera o JSON consolidado; a API expõe
+`GET /api/v1/farm/demands/{id}/output` com `FarmRead`. Cada Job aprovado mantém
+seu CP técnico conforme o catálogo, mas este fan-in não cria reward extra nem
+define conversão CP → AIC.
+
 O Agent `0.2.0` introduz o perfil observado `atos-node-profile-v1`. Runtime,
 versão do Agent, CPU lógica e memória detectada formam um fingerprint SHA-256
 que aparece abreviado tanto em `atos-agent status` quanto no painel. O manifesto
 remoto v3 congela e assina esse fingerprint. Depois que a evidência
 determinística é aprovada, o perfil recebe data de verificação; qualquer mudança
 em um de seus componentes revoga o selo e volta o Node para `DETECTADO` até um
-novo benchmark. Isso comprova somente a combinação observada que executou o
+novo workload verificado. Isso comprova somente a combinação observada que executou o
 workload — não é attestation criptográfica de fabricante, TPM ou GPU.
 
-Com o Agent online, `[ DESPACHAR BENCHMARK ]` cria uma oferta remota. O
+Com o Agent online, a ação de despachar o workload selecionado cria uma oferta remota. O
 servidor assina o manifesto com uma chave HMAC derivada exclusivamente para o
 Node; o Agent fixa a identidade dessa chave no Windows Credential Manager,
 confere assinatura, validade, vínculo, workload e limites da allowlist antes de
 executar. O Agent devolve somente o digest e a duração, e o servidor reexecuta o
-benchmark para aceitar ou rejeitar a evidência:
+workload para aceitar ou rejeitar a evidência:
 
     QUEUED → OFFERED → ACCEPTED → RUNNING → UPLOADING → VERIFYING → COMPLETED
        │         │          │          │          │          │
@@ -399,6 +504,183 @@ Implementado:
 - política local persistente do Provider com pausa graciosa e limites anunciados de CPU/memória.
 - fingerprint assinado do perfil observado, verificação datada e revogação automática após mudanças.
 - propostas imutáveis de reward vinculadas a Job, evidência e cenário econômico, sem emissão automática de AIC.
+- Centro de Auditoria unificado e isolado por conta para Ledger, Iris, Farm, economia e rewards, com filtros, validação de integridade e exportação JSON digestada.
+- Centro de Incidentes que prioriza falhas de integridade, Iris, Farm e Node, com reconhecimento persistente e idempotente sem alterar a evidência original.
+- orçamento preventivo da Iris por conta, com teto por tarefa, dia e mês UTC, retenções concorrentes idempotentes e painel em `/iris/budget`.
+- tokens pessoais da Iris com segredo exibido uma vez, hash SHA-256, escopos mínimos, expiração, revogação, rate limit e endpoints REST `/api/v1` para consulta e execução idempotente.
+- Centro Analítico da Iris em `/iris/analytics`, com séries UTC, sucesso, latência, unidades, custos, economia de reserva, comparação entre períodos e breakdown por rota sem expor prompts ou respostas.
+- Centro Analítico da Farm em `/farm/analytics`, com CP verificado, vazão, sucesso, falhas, workloads, saúde do Node/Agent e pipeline econômico não liquidado.
+- catálogo compartilhado de workloads com seleção na Farm, benchmark SHA-256 e construção verificável de raiz Merkle no worker isolado.
+- API pessoal de Jobs da Farm com escopo privilegiado independente, submissão idempotente, consulta, cancelamento cooperativo e download de evidência assinada.
+- verificação profunda de evidências contra manifesto, Job e lifecycle persistido, integrada à UI, API, Auditoria, downloads e gate de rewards.
+- Centro de Jobs em `/farm/jobs`, com histórico paginado, filtros operacionais, origem API/painel, inspeção do lifecycle e exportação JSON digestada.
+- Centro de Agendamentos em `/farm/schedules`, com recorrência UTC persistente, pausa/retomada, despacho idempotente entre instâncias e histórico de ocorrências.
+
+### API pessoal da Iris
+
+Emita e revogue credenciais na rota autenticada `/account/api-tokens`. O segredo
+`iris_pat_...` aparece uma única vez e deve ser enviado como Bearer somente aos
+endpoints compatíveis com os escopos selecionados:
+
+```text
+GET /api/v1/me
+GET /api/v1/usage
+GET /api/v1/usage/analytics?days=30
+GET /api/v1/incidents?openOnly=true
+GET /api/v1/audit?page=1&pageSize=25
+GET /api/v1/conversations?page=1&pageSize=25
+GET /api/v1/conversations/{conversationId}
+GET /api/v1/farm/analytics?days=30
+GET /api/v1/farm/workloads
+GET /api/v1/farm/schedules
+GET /api/v1/farm/jobs?page=1&pageSize=20
+GET /api/v1/farm/jobs/export
+POST /api/v1/farm/jobs
+POST /api/v1/farm/schedules
+POST /api/v1/farm/schedules/{scheduleId}/pause
+POST /api/v1/farm/schedules/{scheduleId}/resume
+POST /api/v1/farm/schedules/{scheduleId}/trigger
+GET /api/v1/farm/jobs/{jobId}
+POST /api/v1/farm/jobs/{jobId}/cancel
+GET /api/v1/farm/jobs/{jobId}/evidence
+POST /api/v1/iris/responses
+```
+
+Exemplo, sem registrar o token no repositório:
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:IRIS_API_TOKEN" }
+Invoke-RestMethod "http://localhost:5159/api/v1/usage" -Headers $headers
+```
+
+Para executar a Iris, emita um token com `IrisExecute`. Esse escopo pode
+consumir AIC e, portanto, deve ser concedido somente a clientes autorizados. A
+rota exige uma chave de idempotência entre 8 e 120 caracteres, isolada por
+token. Repetir a mesma chave devolve o resultado anterior sem nova chamada ao
+Provider, nova cobrança ou nova conversa:
+
+```powershell
+$headers = @{
+  Authorization = "Bearer $env:IRIS_API_TOKEN"
+  "X-Idempotency-Key" = "meu-job-0001"
+}
+$body = @{
+  prompt = "Resuma os incidentes operacionais desta semana"
+  maximumContextMessages = 16
+  dataClassification = "Standard"
+} | ConvertTo-Json
+Invoke-RestMethod "http://localhost:5159/api/v1/iris/responses" `
+  -Method Post -ContentType "application/json" -Headers $headers -Body $body
+```
+
+Opcionalmente, envie `conversationId` para continuar uma conversa pertencente
+à mesma conta. A execução usa o mesmo preflight do chat, respeita o limite por
+tarefa, o orçamento diário/mensal e a classificação de dados, e reserva e
+liquida o custo na Wallet. `ConversationsRead` é um escopo separado e permite
+consultar o histórico sem conceder execução. As consultas têm limite de 120
+chamadas por minuto por token; a rota de execução usa o limite mais restritivo
+de 20 por minuto. Não registre tokens, prompts ou respostas em logs.
+
+### API de Jobs da Farm
+
+O escopo `FarmRead` permite consultar analytics, catálogo, Jobs e evidências da
+própria conta. Para submeter ou cancelar Jobs, emita um token com o escopo
+privilegiado `FarmExecute`. A API aceita somente workloads versionados do
+catálogo assinado; ela não executa comandos arbitrários, não emite AIC e não
+converte automaticamente CP em AIC.
+
+A submissão exige `X-Idempotency-Key` entre 8 e 120 caracteres. A chave é
+persistida e isolada por token: chamadas simultâneas com a mesma chave e o
+mesmo workload devolvem o mesmo Job, sem duplicar processamento. Reutilizar a
+chave para outro workload é rejeitado com conflito.
+
+```powershell
+$headers = @{
+  Authorization = "Bearer $env:IRIS_API_TOKEN"
+  "X-Idempotency-Key" = "farm-job-0001"
+}
+$body = @{ workloadId = "atos-sha256-chain-v1" } | ConvertTo-Json
+$job = Invoke-RestMethod "http://localhost:5159/api/v1/farm/jobs" `
+  -Method Post -ContentType "application/json" -Headers $headers -Body $body
+
+Invoke-RestMethod "http://localhost:5159/api/v1/farm/jobs/$($job.id)" -Headers $headers
+Invoke-WebRequest "http://localhost:5159/api/v1/farm/jobs/$($job.id)/evidence" `
+  -Headers $headers -OutFile "farm-evidence.json"
+```
+
+`POST /api/v1/farm/jobs/{jobId}/cancel` solicita cancelamento cooperativo ao
+Agent quando o Job já está em execução. Consultas exigem `FarmRead`; submissão
+e cancelamento exigem `FarmExecute` e têm limite de 20 chamadas por minuto por
+token. Todos os acessos são filtrados pela conta vinculada ao token. A consulta
+do Job devolve `evidence.verification` com os estados independentes de HMAC,
+manifesto, vínculo do Job e lifecycle; `evidence.isValid` só é verdadeiro quando
+as quatro verificações são aprovadas.
+
+### Centro de Jobs da Farm
+
+A rota autenticada `/farm/jobs` remove a limitação operacional dos dez Jobs
+recentes do Compute Lab. Ela permite pesquisar por UUID, attempt, workload,
+versão ou política e filtrar por workload catalogado, status, origem, período
+UTC e falha de integridade. Cada resultado inclui manifesto, diagnóstico do
+bundle e lifecycle completo, sempre isolado pela conta autenticada.
+
+O botão de exportação gera um envelope `atos-farm-job-history-export-v1` com os
+filtros aplicados, totais, Jobs e digest SHA-256 do payload. Segredos de token e
+chaves de idempotência não fazem parte do contrato. A consulta limita cada
+varredura a 5.000 registros e sinaliza truncamento para que o operador refine o
+período. Clientes com `FarmRead` usam as mesmas projeções em
+`GET /api/v1/farm/jobs` e `GET /api/v1/farm/jobs/export`; paginação aceita de 1
+a 100 itens por página.
+
+### Centro de Agendamentos da Farm
+
+A rota autenticada `/farm/schedules` automatiza workloads do catálogo em
+intervalos fixos de 5 minutos a 7 dias. O primeiro disparo é imediato; cada
+ocorrência é persistida, recebe atribuição ao agendamento e pode ser
+`Submitted`, `Deferred` ou `Failed`. Pausar e retomar preservam o histórico.
+
+O dispatcher consulta o relógio UTC a cada 15 segundos. A reivindicação da
+ocorrência e o avanço de `NextRunAtUtc` são transacionais, com índices únicos
+para impedir duplicidade mesmo com mais de uma instância. Janelas perdidas são
+saltadas sem rajadas. O Job segue pelo mesmo manifesto assinado, execução
+allowlisted e verificação profunda do Compute Lab; somente evidência válida
+contribui CP e o agendamento nunca emite AIC.
+
+Tokens com `FarmRead` consultam `GET /api/v1/farm/schedules`. Criação,
+pausa, retomada e disparo imediato exigem `FarmExecute` e usam, respectivamente,
+`POST /api/v1/farm/schedules`,
+`POST /api/v1/farm/schedules/{id}/pause`,
+`POST /api/v1/farm/schedules/{id}/resume` e
+`POST /api/v1/farm/schedules/{id}/trigger`.
+
+### Centro Analítico da Iris
+
+A rota autenticada `/iris/analytics` consolida janelas móveis de 7, 30 ou 90
+dias em UTC. O painel exibe execuções, taxa de sucesso, custo estimado e real,
+AIC liberado, latência média, variação contra o período anterior, série diária,
+distribuição de resultados e desempenho por Provider/modelo. Os dados são
+calculados a partir de `AiRequest` e `AiExecution`, sempre filtrados pela conta;
+prompts e respostas não participam da projeção.
+
+Clientes com `UsageRead` obtêm o mesmo contrato por
+`GET /api/v1/usage/analytics?days=30`. O parâmetro aceita de 1 a 365 dias. A
+resposta preenche inclusive dias sem atividade, facilitando gráficos externos,
+e inclui o período anterior apenas como base agregada de comparação.
+
+### Centro Analítico da Farm
+
+A rota autenticada `/farm/analytics` consolida janelas móveis de 7, 30 ou 90
+dias em UTC. O painel mede Jobs ativos, concluídos e falhos, taxa de sucesso,
+CP verificado, CP por hora, duração, memória, tempo de CPU, variação contra o
+período anterior, série diária e desempenho por workload. Também mostra o
+estado efetivo do Node/Agent e resume cenários e propostas econômicas.
+
+Somente Jobs concluídos contribuem CP. O painel não executa workloads, não
+converte CP em AIC e não liquida propostas. Todas as consultas são filtradas
+pela conta autenticada. Tokens pessoais com o escopo `FarmRead` podem obter o
+mesmo contrato por `GET /api/v1/farm/analytics?days=30`; o parâmetro aceita de
+1 a 365 dias. O mesmo escopo consulta o catálogo público da conta em
+`GET /api/v1/farm/workloads`; esse endpoint não executa Jobs.
 
 O Marco 1 está funcionalmente completo com o Fake Provider. A primeira
 integração real está implementada no Marco 2 abaixo; sua prova com orçamento

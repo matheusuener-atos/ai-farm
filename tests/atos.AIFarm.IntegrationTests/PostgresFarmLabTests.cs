@@ -3,9 +3,11 @@ using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text;
 
 namespace atos.AIFarm.IntegrationTests;
 
+[Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmLabTests
 {
     [Fact]
@@ -55,11 +57,217 @@ public sealed class PostgresFarmLabTests
                 restored.Node.VerifiedProfileHash,
                 completed.Manifest.NodeProfileHash);
             Assert.Equal(completed.Id, restored.RecentJobs[0].Id);
+
+            var merkle = await lab.RunWorkloadAsync("merkle-root-sha256-v1");
+            Assert.Equal(FarmJobStatus.Completed, merkle.Status);
+            Assert.Equal("MERKLE_ROOT_SHA256", merkle.Workload);
+            Assert.Equal("atos-merkle-root-sha256-v1", merkle.WorkloadVersion);
+            Assert.Equal(4_096, merkle.Manifest?.Iterations);
+            Assert.Equal(1_000, merkle.ComputeUnitsMilli);
+            Assert.Equal(64, merkle.ResultDigest?.Length);
+            Assert.True(merkle.Evidence?.IsValid);
+
+            var api = provider.GetRequiredService<IFarmApiJobService>();
+            var tokenId = Guid.NewGuid();
+            var submissions = await Task.WhenAll(
+                Enumerable.Range(0, 4).Select(_ => api.SubmitAsync(
+                    new FarmApiJobRequest(FarmWorkloadCatalog.DefaultId),
+                    tokenId,
+                    "farm-api-job-0001")));
+            var submittedId = Assert.Single(submissions.Select(x => x.Id).Distinct());
+            var submitted = Assert.IsType<FarmJobSnapshot>(await api.GetAsync(submittedId));
+            Assert.Equal(FarmJobStatus.Completed, submitted.Status);
+            Assert.Equal(submittedId, submitted.Id);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => api.SubmitAsync(
+                new FarmApiJobRequest("merkle-root-sha256-v1"),
+                tokenId,
+                "farm-api-job-0001"));
+
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var firstEvent = await db.FarmJobEvents.SingleAsync(
+                    x => x.JobId == completed.Id && x.Sequence == 1);
+                firstEvent.Detail = "Lifecycle adulterado após a emissão do bundle.";
+                await db.SaveChangesAsync();
+            }
+
+            var tampered = Assert.IsType<FarmJobSnapshot>(await lab.GetJobAsync(completed.Id));
+            var tamperedEvidence = Assert.IsType<FarmJobEvidenceSnapshot>(tampered.Evidence);
+            Assert.False(tamperedEvidence.IsValid);
+            Assert.True(tamperedEvidence.Verification.SignatureValid);
+            Assert.True(tamperedEvidence.Verification.ManifestValid);
+            Assert.True(tamperedEvidence.Verification.JobBindingValid);
+            Assert.False(tamperedEvidence.Verification.LifecycleValid);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                lab.DownloadEvidenceAsync(completed.Id));
+            var audit = await provider.GetRequiredService<IAuditTrail>()
+                .SearchAsync(new AuditQuery(Category: AuditCategory.Farm, PageSize: 100));
+            Assert.Equal(
+                AuditIntegrityStatus.Invalid,
+                audit.Events.Single(x => x.Id == completed.Id).Integrity);
+            var analytics = await provider.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);
+            Assert.Equal(1, analytics.IntegrityFailureCount);
+            Assert.Equal(2, analytics.CompletedJobCount);
+            Assert.Equal(2_000, analytics.VerifiedProcessingPointsMilli);
+            var balance = await provider.GetRequiredService<IFarmBalanceQuery>().GetAsync();
+            Assert.Equal(2, balance.CompletedJobs);
+            Assert.Equal(2_000, balance.VerifiedComputeUnitsMilli);
+
+            var history = provider.GetRequiredService<IFarmJobHistoryService>();
+            var allJobs = await history.SearchAsync(new FarmJobHistoryQuery(PageSize: 1));
+            Assert.Equal(3, allJobs.Totals.Total);
+            Assert.Equal(3, allJobs.TotalPages);
+            Assert.Single(allJobs.Items);
+            Assert.Equal(2, allJobs.Totals.Completed);
+            Assert.Equal(1, allJobs.Totals.IntegrityFailures);
+            Assert.Equal(2_000, allJobs.Totals.VerifiedProcessingPointsMilli);
+
+            var apiJobs = await history.SearchAsync(new FarmJobHistoryQuery(
+                Origin: FarmJobOrigin.PersonalApi));
+            Assert.Single(apiJobs.Items);
+            Assert.Equal(submitted.Id, apiJobs.Items[0].Job.Id);
+            var merkleJobs = await history.SearchAsync(new FarmJobHistoryQuery(
+                WorkloadId: "merkle-root-sha256-v1"));
+            Assert.Single(merkleJobs.Items);
+            Assert.Equal(merkle.Id, merkleJobs.Items[0].Job.Id);
+            var invalidJobs = await history.SearchAsync(new FarmJobHistoryQuery(
+                IntegrityFailuresOnly: true));
+            Assert.Single(invalidJobs.Items);
+            Assert.Equal(completed.Id, invalidJobs.Items[0].Job.Id);
+
+            var export = await history.ExportAsync(new FarmJobHistoryQuery(
+                IntegrityFailuresOnly: true));
+            var exportJson = Encoding.UTF8.GetString(export.Content);
+            Assert.Contains("atos-farm-job-history-export-v1", exportJson);
+            Assert.Contains("payloadDigest", exportJson);
+            Assert.Contains(completed.Id.ToString(), exportJson);
+            Assert.DoesNotContain(submitted.Id.ToString(), exportJson);
         }
         finally
         {
             await CleanupAsync(connectionString, accountId);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task FarmSchedulesDispatchExactlyOnceAndPreserveAttribution()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos schedule test");
+        var future = DateTimeOffset.UtcNow.AddYears(1);
+        var start = new DateTimeOffset(future.Ticks - future.Ticks % 10, TimeSpan.Zero);
+        var clock = new AdjustableTimeProvider(start);
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var schedules = provider.GetRequiredService<IFarmScheduleService>();
+            var dispatcher = provider.GetRequiredService<IFarmScheduleDispatcher>();
+
+            var created = await schedules.CreateAsync(new(
+                "verificação recorrente",
+                FarmWorkloadCatalog.DefaultId,
+                15));
+            Assert.Equal(FarmScheduleStatus.Active, created.Status);
+            Assert.Equal(clock.GetUtcNow(), created.NextRunAtUtc);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                schedules.CreateAsync(new(
+                    "VERIFICAÇÃO RECORRENTE",
+                    FarmWorkloadCatalog.DefaultId,
+                    30)));
+
+            async Task<FarmScheduleDashboard> DispatchUntilTriggersAsync(int expected)
+            {
+                FarmScheduleDashboard? state = null;
+                for (var attempt = 0; attempt < 10; attempt++)
+                {
+                    _ = await dispatcher.DispatchDueAsync();
+                    state = await schedules.GetDashboardAsync();
+                    if (state.RecentTriggers.Count >= expected) return state;
+                }
+                throw new InvalidOperationException(
+                    $"A agenda {created.Id:N} não alcançou {expected} disparo(s).");
+            }
+
+            await schedules.SetStatusAsync(created.Id, FarmScheduleStatus.Paused);
+            _ = await dispatcher.DispatchDueAsync();
+            Assert.Empty((await schedules.GetDashboardAsync()).RecentTriggers);
+            await schedules.SetStatusAsync(created.Id, FarmScheduleStatus.Active);
+
+            _ = await Task.WhenAll(
+                dispatcher.DispatchDueAsync(),
+                dispatcher.DispatchDueAsync());
+
+            var dashboard = await DispatchUntilTriggersAsync(1);
+            var trigger = Assert.Single(dashboard.RecentTriggers);
+            Assert.Equal(FarmScheduleTriggerStatus.Submitted, trigger.Status);
+            Assert.NotNull(trigger.JobId);
+            Assert.Equal(clock.GetUtcNow().AddMinutes(15), dashboard.Schedules[0].NextRunAtUtc);
+
+            var history = await provider.GetRequiredService<IFarmJobHistoryService>()
+                .SearchAsync(new FarmJobHistoryQuery(Origin: FarmJobOrigin.Scheduled));
+            var scheduled = Assert.Single(history.Items);
+            Assert.Equal(trigger.JobId, scheduled.Job.Id);
+            Assert.Equal(FarmJobOrigin.Scheduled, scheduled.Origin);
+            Assert.True(scheduled.Job.Evidence?.IsValid);
+
+            clock.Advance(TimeSpan.FromMinutes(46));
+            dashboard = await DispatchUntilTriggersAsync(2);
+            Assert.Equal(2, dashboard.RecentTriggers.Count);
+            Assert.Equal(
+                start.AddHours(1),
+                dashboard.Schedules[0].NextRunAtUtc);
+        }
+        finally
+        {
+            await CleanupAsync(connectionString, accountId);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task UsefulTextJobPersistsVerifiedOutputAndRejectsTampering()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos useful job test");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var service = provider.GetRequiredService<IFarmUsefulJobService>();
+            var tokenId = Guid.NewGuid();
+            var request = new FarmUsefulJobRequest(
+                "iris-text-index-v1", "Base de conhecimento", "Iris organiza conhecimento para a Atos.");
+
+            var completed = await service.SubmitAsync(request, tokenId, "useful-job-0001");
+            var replay = await service.SubmitAsync(request, tokenId, "useful-job-0001");
+            var output = await service.DownloadOutputAsync(completed.Id);
+
+            Assert.Equal(completed.Id, replay.Id);
+            Assert.Equal(FarmJobStatus.Completed, completed.Status);
+            Assert.Equal(2_000, completed.ComputeUnitsMilli);
+            Assert.NotNull(completed.Useful);
+            Assert.Equal(completed.Useful.InputDigest, completed.Manifest?.InputDigest);
+            Assert.True(completed.Evidence?.IsValid);
+            Assert.NotNull(output);
+            Assert.Contains("atos-text-index-v1", Encoding.UTF8.GetString(output.Content));
+
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var record = await db.FarmJobs.SingleAsync(x => x.Id == completed.Id);
+            record.OutputPayload += " ";
+            await db.SaveChangesAsync();
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DownloadOutputAsync(completed.Id));
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
     }
 
     [Fact]
@@ -88,7 +296,7 @@ public sealed class PostgresFarmLabTests
 
     [Fact]
     [Trait("Category", "Postgres")]
-    public async Task DatabaseRejectsTwoActiveJobsForTheSameAccount()
+    public async Task DatabasePersistsIndependentResourceReservationsForConcurrentJobs()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
         if (string.IsNullOrWhiteSpace(connectionString)) return;
@@ -108,12 +316,82 @@ public sealed class PostgresFarmLabTests
                 CreateQueuedJob(accountId, dashboard.Node.Id, now),
                 CreateQueuedJob(accountId, dashboard.Node.Id, now.AddTicks(1)));
 
-            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            await db.SaveChangesAsync();
+            var active = await db.FarmJobs.AsNoTracking()
+                .Where(x => x.AccountId == accountId).ToArrayAsync();
+            Assert.Equal(2, active.Length);
+            Assert.Equal(2, active.Sum(x => x.ReservedLogicalProcessors));
+            Assert.Equal(128L * 1024 * 1024, active.Sum(x => x.ReservedMemoryBytes));
         }
         finally
         {
             await CleanupAsync(connectionString, accountId);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task ComputePoolDispatchesConcurrentJobsToDistinctAgents()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "atos compute pool test");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+            await lab.GetDashboardAsync();
+
+            async Task<FarmAgentEnrollmentResult> EnrollAsync(string name)
+            {
+                var enrollment = await agents.CreateEnrollmentAsync();
+                return Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
+                    enrollment.Token,
+                    new FarmAgentEnrollmentRequest(
+                        name, ".NET 10 // WINDOWS", 8, 16L * 1024 * 1024 * 1024,
+                        FarmAgentProtocol.CurrentAgentVersion)));
+            }
+
+            var first = await EnrollAsync("POOL-NODE-A");
+            var second = await EnrollAsync("POOL-NODE-B");
+            var heartbeat = new FarmAgentHeartbeatRequest(
+                ".NET 10 // WINDOWS", 8, 16L * 1024 * 1024 * 1024,
+                FarmAgentProtocol.CurrentAgentVersion);
+            Assert.NotNull(await agents.HeartbeatAsync(first.Credential, heartbeat));
+            Assert.NotNull(await agents.HeartbeatAsync(second.Credential, heartbeat));
+
+            var offers = await Task.WhenAll(
+                lab.RunBenchmarkAsync(),
+                lab.RunWorkloadAsync("merkle-root-sha256-v1"));
+            Assert.Equal(2, offers.Select(x => x.NodeId).Distinct().Count());
+            Assert.All(offers, offer => Assert.Equal(FarmJobStatus.Offered, offer.Status));
+
+            var firstClaim = Assert.IsType<FarmRemoteJobOffer>(await agents.ClaimJobAsync(first.Credential));
+            var secondClaim = Assert.IsType<FarmRemoteJobOffer>(await agents.ClaimJobAsync(second.Credential));
+            foreach (var pair in new[] { (first.Credential, Claim: firstClaim), (second.Credential, Claim: secondClaim) })
+            {
+                var trust = Assert.IsType<FarmAgentTrust>(await agents.GetTrustAsync(pair.Credential));
+                Assert.True(FarmManifestSecurity.TryVerify(
+                    pair.Claim.ManifestPayload, pair.Claim.ManifestDigest, pair.Claim.ManifestSignature,
+                    new FarmManifestSigningOptions(trust.VerificationKey), out var manifest));
+                Assert.NotNull(manifest);
+                Assert.True(await agents.MarkJobStartedAsync(pair.Credential, pair.Claim.JobId));
+                var digest = FarmDeterministicWorkloads.Compute(
+                    manifest.Workload, manifest.Nonce, manifest.Iterations);
+                var acknowledgement = await agents.SubmitResultAsync(
+                    pair.Credential, pair.Claim.JobId, RemoteResult(digest, 10));
+                Assert.True(acknowledgement?.Verified);
+            }
+
+            var dashboard = await lab.GetDashboardAsync();
+            Assert.Equal(3, dashboard.Nodes.Count);
+            Assert.Equal(2, dashboard.Nodes.Count(x => x.ConnectionKind == FarmNodeConnectionKind.Agent));
+            Assert.Equal(2, dashboard.RecentJobs.Count(x => x.Status == FarmJobStatus.Completed));
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
     }
 
     [Fact]
@@ -266,6 +544,52 @@ public sealed class PostgresFarmLabTests
                  FarmJobStatus.Running, FarmJobStatus.Uploading, FarmJobStatus.Verifying,
                  FarmJobStatus.Completed],
                 remote.Events.Select(x => x.Status).ToArray());
+
+            var merkleOffer = await lab.RunWorkloadAsync("merkle-root-sha256-v1");
+            var merkleClaim = Assert.IsType<FarmRemoteJobOffer>(
+                await agents.ClaimJobAsync(linked.Credential));
+            Assert.True(FarmManifestSecurity.TryVerify(
+                merkleClaim.ManifestPayload,
+                merkleClaim.ManifestDigest,
+                merkleClaim.ManifestSignature,
+                new FarmManifestSigningOptions(trust.VerificationKey),
+                out var merkleManifest));
+            Assert.NotNull(merkleManifest);
+            Assert.Equal("MERKLE_ROOT_SHA256", merkleManifest.Workload);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, merkleClaim.JobId));
+            var merkleDigest = FarmDeterministicWorkloads.Compute(
+                merkleManifest.Workload,
+                merkleManifest.Nonce,
+                merkleManifest.Iterations);
+            var merkleAcknowledgement = await agents.SubmitResultAsync(
+                linked.Credential,
+                merkleClaim.JobId,
+                RemoteResult(merkleDigest, 10));
+            Assert.Equal(merkleOffer.Id, merkleAcknowledgement?.JobId);
+            Assert.True(merkleAcknowledgement?.Verified);
+            Assert.Equal(1_000, merkleAcknowledgement?.ComputeUnitsMilli);
+
+            var usefulJobs = provider.GetRequiredService<IFarmUsefulJobService>();
+            var usefulOffer = await usefulJobs.SubmitAsync(new FarmUsefulJobRequest(
+                "iris-text-index-v1", "Índice remoto", "Iris distribui trabalho útil entre nodes."));
+            var usefulClaim = Assert.IsType<FarmRemoteJobOffer>(
+                await agents.ClaimJobAsync(linked.Credential));
+            var usefulInput = Assert.IsType<FarmRemoteJobInput>(usefulClaim.Input);
+            Assert.Equal(usefulOffer.Manifest?.InputDigest, usefulInput.Digest);
+            Assert.True(FarmManifestSecurity.TryVerify(
+                usefulClaim.ManifestPayload, usefulClaim.ManifestDigest, usefulClaim.ManifestSignature,
+                new FarmManifestSigningOptions(trust.VerificationKey), out var usefulManifest));
+            Assert.NotNull(usefulManifest);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, usefulClaim.JobId));
+            var usefulExecution = FarmDeterministicWorkloads.Execute(
+                usefulManifest.Workload, usefulManifest.Nonce,
+                usefulManifest.Iterations, usefulInput.Payload);
+            var usefulAck = await agents.SubmitResultAsync(
+                linked.Credential, usefulClaim.JobId,
+                RemoteResult(usefulExecution.Digest, 10) with { OutputPayload = usefulExecution.OutputPayload });
+            Assert.True(usefulAck?.Verified);
+            Assert.Equal(2_000, usefulAck?.ComputeUnitsMilli);
+            Assert.NotNull(await usefulJobs.DownloadOutputAsync(usefulOffer.Id));
 
             heartbeat = await agents.HeartbeatAsync(
                 linked.Credential,
@@ -449,9 +773,13 @@ public sealed class PostgresFarmLabTests
         var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         db.FarmAgentEnrollments.RemoveRange(db.FarmAgentEnrollments.Where(x => x.AccountId == accountId));
+        db.FarmScheduleTriggers.RemoveRange(db.FarmScheduleTriggers.Where(x => x.AccountId == accountId));
+        await db.SaveChangesAsync();
         var jobIds = await db.FarmJobs.Where(x => x.AccountId == accountId).Select(x => x.Id).ToArrayAsync();
         db.FarmJobEvents.RemoveRange(db.FarmJobEvents.Where(x => jobIds.Contains(x.JobId)));
         db.FarmJobs.RemoveRange(db.FarmJobs.Where(x => x.AccountId == accountId));
+        await db.SaveChangesAsync();
+        db.FarmSchedules.RemoveRange(db.FarmSchedules.Where(x => x.AccountId == accountId));
         db.FarmNodes.RemoveRange(db.FarmNodes.Where(x => x.AccountId == accountId));
         await db.SaveChangesAsync();
         var walletIds = await db.Wallets

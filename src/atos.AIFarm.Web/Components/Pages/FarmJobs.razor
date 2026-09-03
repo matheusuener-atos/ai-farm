@@ -1,0 +1,241 @@
+@page "/farm/jobs"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmJobHistoryService History
+
+<PageTitle>Centro de Jobs // atos AI Farm</PageTitle>
+
+<div class="page-head jobs-head">
+    <div>
+        <p class="eyebrow amber">atos:/FARM/JOBS</p>
+        <h1>CENTRO DE JOBS</h1>
+        <p>HISTÓRICO COMPLETO // EVIDÊNCIA PROFUNDA // EXPORTAÇÃO AUDITÁVEL</p>
+    </div>
+    <a class="button-secondary jobs-export" href="@ExportUrl">[ EXPORTAR JSON ]</a>
+</div>
+
+<section class="panel jobs-filters">
+    <div class="panel-head"><h2>FILTROS</h2><button type="button" class="button-secondary" @onclick="ResetAsync" disabled="@_loading">[ LIMPAR ]</button></div>
+    <div class="jobs-filter-grid">
+        <label>BUSCA
+            <input @bind="_search" maxlength="120" placeholder="workload, versão ou UUID" />
+        </label>
+        <label>WORKLOAD
+            <select @bind="_workloadId">
+                <option value="">TODOS</option>
+                @foreach (var workload in FarmWorkloadCatalog.Definitions)
+                {
+                    <option value="@workload.Id">@workload.DisplayName</option>
+                }
+            </select>
+        </label>
+        <label>STATUS
+            <select @bind="_status">
+                <option value="">TODOS</option>
+                @foreach (var status in Enum.GetValues<FarmJobStatus>())
+                {
+                    <option value="@status">@StatusLabel(status)</option>
+                }
+            </select>
+        </label>
+        <label>ORIGEM
+            <select @bind="_origin">
+                <option value="">TODAS</option>
+                <option value="Interactive">PAINEL</option>
+                <option value="PersonalApi">API PESSOAL</option>
+                <option value="Scheduled">AGENDAMENTO</option>
+                <option value="Demand">DEMANDA</option>
+            </select>
+        </label>
+        <label>DE // UTC<input type="date" @bind="_fromDate" /></label>
+        <label>ATÉ // UTC<input type="date" @bind="_toDate" /></label>
+        <label class="jobs-check"><input type="checkbox" @bind="_integrityFailuresOnly" /> SOMENTE INTEGRIDADE INVÁLIDA</label>
+        <button type="button" @onclick="ApplyAsync" disabled="@_loading">@(_loading ? "[ CONSULTANDO... ]" : "[ APLICAR FILTROS ]")</button>
+    </div>
+</section>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else if (_result is null)
+{
+    <p>CONSULTANDO JOBS...</p>
+}
+else
+{
+    <div class="jobs-kpis">
+        <section class="kpi"><span>RESULTADOS</span><strong>@_result.Totals.Total</strong><small>@_result.Totals.Active ATIVO(S)</small></section>
+        <section class="kpi kpi-green"><span>VERIFICADOS</span><strong>@_result.Totals.Completed</strong><small>@FormatCp(_result.Totals.VerifiedProcessingPointsMilli)</small></section>
+        <section class="kpi kpi-amber"><span>FALHAS</span><strong>@_result.Totals.Failed</strong><small>ESTADOS TERMINAIS</small></section>
+        <section class="kpi @(_result.Totals.IntegrityFailures == 0 ? "kpi-green" : "kpi-amber")"><span>INTEGRIDADE</span><strong>@_result.Totals.IntegrityFailures</strong><small>BUNDLES DIVERGENTES</small></section>
+    </div>
+
+    <section class="panel jobs-results">
+        <div class="panel-head"><h2>JOBS // PÁGINA @_result.Page DE @_result.TotalPages</h2><span class="muted">LIMITE DE VARREDURA 5.000</span></div>
+        @if (_result.IsScanTruncated)
+        {
+            <p class="jobs-warning">[ RESULTADO TRUNCADO // REFINE OS FILTROS ]</p>
+        }
+        @if (_result.Items.Count == 0)
+        {
+            <p class="jobs-empty muted">NENHUM JOB CORRESPONDE AOS FILTROS.</p>
+        }
+        @foreach (var item in _result.Items)
+        {
+            var job = item.Job;
+            <article class="job-row">
+                <header>
+                    <div><strong>@job.Workload</strong><small>@job.WorkloadVersion // @Short(job.Id)</small></div>
+                    <div class="job-badges">
+                        <span>[ @OriginLabel(item.Origin) ]</span>
+                        <span class="@StatusClass(job.Status)">[ @StatusLabel(job.Status) ]</span>
+                    </div>
+                </header>
+                <dl>
+                    <div><dt>CRIADO UTC</dt><dd>@job.CreatedAtUtc.ToString("dd/MM/yyyy HH:mm:ss")</dd></div>
+                    <div><dt>CP</dt><dd>@FormatCp(job.Evidence?.IsValid == true ? job.ComputeUnitsMilli : 0)</dd></div>
+                    <div><dt>DURAÇÃO</dt><dd>@(job.DurationMilliseconds is null ? "---" : $"{job.DurationMilliseconds:N0} MS")</dd></div>
+                    <div><dt>EVIDÊNCIA</dt><dd class="@EvidenceClass(job)">@EvidenceLabel(job)</dd></div>
+                </dl>
+                <details>
+                    <summary>[ INSPECIONAR JOB E LIFECYCLE ]</summary>
+                    <div class="job-detail">
+                        <dl>
+                            <div><dt>JOB ID</dt><dd>@job.Id</dd></div>
+                            <div><dt>NODE ID</dt><dd>@job.NodeId</dd></div>
+                            <div><dt>POLÍTICA</dt><dd>@job.VerificationPolicy</dd></div>
+                            <div><dt>RESULT DIGEST</dt><dd>@(job.ResultDigest ?? "---")</dd></div>
+                        </dl>
+                        @if (job.Evidence is not null)
+                        {
+                            <div class="job-verification">
+                                <span class="@CheckClass(job.Evidence.Verification.SignatureValid)">HMAC @CheckLabel(job.Evidence.Verification.SignatureValid)</span>
+                                <span class="@CheckClass(job.Evidence.Verification.ManifestValid)">MANIFESTO @CheckLabel(job.Evidence.Verification.ManifestValid)</span>
+                                <span class="@CheckClass(job.Evidence.Verification.JobBindingValid)">JOB @CheckLabel(job.Evidence.Verification.JobBindingValid)</span>
+                                <span class="@CheckClass(job.Evidence.Verification.LifecycleValid)">LIFECYCLE @CheckLabel(job.Evidence.Verification.LifecycleValid)</span>
+                                @if (job.Evidence.IsValid)
+                                {
+                                    <a href="@EvidenceUrl(job.Id)" download="@EvidenceFile(job.Id)">[ BAIXAR EVIDÊNCIA ]</a>
+                                }
+                            </div>
+                        }
+                        <ol>
+                            @foreach (var entry in job.Events)
+                            {
+                                <li><time>@entry.OccurredAtUtc.ToString("HH:mm:ss")</time><strong>@StatusLabel(entry.Status)</strong><span>@entry.Detail</span></li>
+                            }
+                        </ol>
+                    </div>
+                </details>
+            </article>
+        }
+        <footer class="jobs-pagination">
+            <button type="button" class="button-secondary" @onclick="PreviousAsync" disabled="@(_loading || !_result.HasPreviousPage)">[ ← ANTERIOR ]</button>
+            <span>PÁG @_result.Page / @_result.TotalPages</span>
+            <button type="button" class="button-secondary" @onclick="NextAsync" disabled="@(_loading || !_result.HasNextPage)">[ PRÓXIMA → ]</button>
+        </footer>
+    </section>
+}
+
+@code {
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "jobId")]
+    public Guid? JobId { get; set; }
+
+    private FarmJobHistoryPage? _result;
+    private string _search = string.Empty;
+    private string _workloadId = string.Empty;
+    private string _status = string.Empty;
+    private string _origin = string.Empty;
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
+    private bool _integrityFailuresOnly;
+    private bool _loading;
+    private int _page = 1;
+    private string? _error;
+
+    protected override Task OnInitializedAsync()
+    {
+        if (JobId is Guid jobId) _search = jobId.ToString();
+        return LoadAsync();
+    }
+    private async Task ApplyAsync() { _page = 1; await LoadAsync(); }
+    private async Task PreviousAsync() { if (_page > 1) { _page--; await LoadAsync(); } }
+    private async Task NextAsync() { if (_result?.HasNextPage == true) { _page++; await LoadAsync(); } }
+    private async Task ResetAsync()
+    {
+        _search = _workloadId = _status = _origin = string.Empty;
+        _fromDate = _toDate = null;
+        _integrityFailuresOnly = false;
+        _page = 1;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try { _result = await History.SearchAsync(Query()); }
+        catch (ArgumentException exception) { _error = exception.Message; }
+        catch (Exception) { _error = "Não foi possível consultar o histórico da Farm."; }
+        finally { _loading = false; }
+    }
+
+    private FarmJobHistoryQuery Query() => new(
+        _search,
+        _workloadId,
+        ParseEnum<FarmJobStatus>(_status),
+        ParseEnum<FarmJobOrigin>(_origin),
+        _integrityFailuresOnly,
+        ParseDate(_fromDate, false),
+        ParseDate(_toDate, true),
+        _page,
+        20);
+
+    private string ExportUrl
+    {
+        get
+        {
+            var values = new List<string>();
+            Add(values, "search", _search);
+            Add(values, "workloadId", _workloadId);
+            Add(values, "status", _status);
+            Add(values, "origin", _origin);
+            Add(values, "fromUtc", ParseDate(_fromDate, false)?.ToString("O"));
+            Add(values, "toUtc", ParseDate(_toDate, true)?.ToString("O"));
+            if (_integrityFailuresOnly) values.Add("integrityFailuresOnly=true");
+            return values.Count == 0 ? "/api/farm/jobs/export" : $"/api/farm/jobs/export?{string.Join('&', values)}";
+        }
+    }
+
+    private static void Add(List<string> values, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            values.Add($"{name}={Uri.EscapeDataString(value)}");
+    }
+    private static T? ParseEnum<T>(string value) where T : struct, Enum =>
+        Enum.TryParse<T>(value, out var parsed) ? parsed : null;
+    private static DateTimeOffset? ParseDate(DateTime? value, bool endOfDay) =>
+        value is null
+            ? null
+            : new DateTimeOffset(DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Utc))
+                .AddDays(endOfDay ? 1 : 0).AddTicks(endOfDay ? -1 : 0);
+    private static string FormatCp(long milli) => $"{milli / 1_000m:N3} CP";
+    private static string Short(Guid id) => id.ToString("N")[..8];
+    private static string OriginLabel(FarmJobOrigin origin) => origin switch
+    {
+        FarmJobOrigin.PersonalApi => "API",
+        FarmJobOrigin.Scheduled => "AGENDA",
+        FarmJobOrigin.Demand => "DEMANDA",
+        _ => "PAINEL"
+    };
+    private static string StatusLabel(FarmJobStatus status) => status.ToString().ToUpperInvariant();
+    private static string StatusClass(FarmJobStatus status) => status == FarmJobStatus.Completed ? "green" : status is FarmJobStatus.Failed or FarmJobStatus.Cancelled or FarmJobStatus.TimedOut or FarmJobStatus.Rejected ? "error-text" : "amber";
+    private static string EvidenceLabel(FarmJobSnapshot job) => job.Evidence is null ? "SEM BUNDLE" : job.Evidence.IsValid ? "VÁLIDA" : "INVÁLIDA";
+    private static string EvidenceClass(FarmJobSnapshot job) => job.Evidence?.IsValid == true ? "green" : job.Evidence is null ? "muted" : "error-text";
+    private static string CheckLabel(bool valid) => valid ? "OK" : "FALHA";
+    private static string CheckClass(bool valid) => valid ? "green" : "error-text";
+    private static string EvidenceUrl(Guid id) => $"/api/farm/jobs/{id}/evidence";
+    private static string EvidenceFile(Guid id) => $"atos-farm-evidence-{id:N}.json";
+}

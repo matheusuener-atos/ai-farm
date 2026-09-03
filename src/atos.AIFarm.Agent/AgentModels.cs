@@ -65,7 +65,8 @@ internal sealed record RemoteJobManifest(
     string DataClassification,
     DateTimeOffset IssuedAtUtc,
     DateTimeOffset ExpiresAtUtc,
-    string? NodeProfileHash = null);
+    string? NodeProfileHash = null,
+    string? InputDigest = null);
 
 internal static class RemoteJobVerifier
 {
@@ -104,6 +105,7 @@ internal static class RemoteJobVerifier
 
         var manifest = JsonSerializer.Deserialize<RemoteJobManifest>(offer.ManifestPayload, JsonOptions)
             ?? throw new InvalidOperationException("Manifesto remoto vazio.");
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
         var local = AgentInventory.Heartbeat(configuration.EffectivePolicy);
         var localProfileHash = FarmNodeProfileFingerprint.Compute(
             local.Runtime,
@@ -114,22 +116,50 @@ internal static class RemoteJobVerifier
             manifest.JobId != offer.JobId ||
             manifest.AttemptId != offer.AttemptId ||
             manifest.NodeId != configuration.NodeId ||
-            manifest.Workload != "SHA256_CHAIN" ||
-            manifest.WorkloadVersion != "atos-sha256-chain-v1" ||
-            manifest.VerificationPolicy != "DETERMINISTIC_REEXECUTION_V1" ||
-            manifest.NetworkPolicy != "DENY_ALL" ||
-            manifest.DataClassification != "STANDARD" ||
-            manifest.Iterations != 100_000 ||
-            manifest.TimeoutSeconds != 30 ||
-            manifest.MaxLogicalProcessors is < 1 or > 1 ||
+            definition is null ||
+            manifest.VerificationPolicy != definition.VerificationPolicy ||
+            manifest.NetworkPolicy != definition.NetworkPolicy ||
+            manifest.DataClassification != definition.DataClassification ||
+            manifest.Iterations != definition.Iterations ||
+            manifest.TimeoutSeconds != definition.TimeoutSeconds ||
+            manifest.MaxLogicalProcessors != definition.MaxLogicalProcessors ||
             !local.AcceptJobs ||
             manifest.MaxLogicalProcessors > local.MaxLogicalProcessors ||
-            manifest.MaxMemoryBytes is <= 0 or > 256L * 1024 * 1024 ||
+            manifest.MaxMemoryBytes is <= 0 || manifest.MaxMemoryBytes > definition.MaxMemoryBytes ||
             manifest.MaxMemoryBytes > local.MaxMemoryBytes ||
+            (definition.InputSchema is null
+                ? manifest.InputDigest is not null || offer.Input is not null
+                : !UsefulInputIsValid(offer.Input, definition, manifest.InputDigest)) ||
             !string.Equals(manifest.NodeProfileHash, localProfileHash, StringComparison.Ordinal) ||
             manifest.ExpiresAtUtc <= now)
             throw new InvalidOperationException("O manifesto remoto viola a allowlist ou os limites locais.");
         return manifest;
+    }
+
+    private static bool UsefulInputIsValid(
+        FarmRemoteJobInput? input,
+        FarmWorkloadDefinition definition,
+        string? manifestDigest)
+    {
+        if (input is null ||
+            input.Version != definition.InputSchema ||
+            input.ContentType != "text/plain; charset=utf-8" ||
+            input.DataClassification != definition.DataClassification ||
+            input.SizeBytes != Encoding.UTF8.GetByteCount(input.Payload) ||
+            input.SizeBytes is <= 0 or > 32 * 1024 ||
+            input.Digest != manifestDigest)
+            return false;
+        try
+        {
+            var digest = FarmDeterministicWorkloads.ComputeInputDigest(input.Payload);
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(digest),
+                Convert.FromHexString(input.Digest));
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
+        {
+            return false;
+        }
     }
 
     private static byte[] DecodeHex(string value, string field)
@@ -150,15 +180,11 @@ internal static class RemoteJobVerifier
 internal static class AgentDeterministicBenchmark
 {
     public static string Compute(string nonce, int iterations, CancellationToken cancellationToken)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(nonce));
-        for (var index = 0; index < iterations; index++)
-        {
-            if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
-            hash = SHA256.HashData(hash);
-        }
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+        => FarmDeterministicWorkloads.Compute(
+            FarmWorkloadCatalog.GetRequired(FarmWorkloadCatalog.DefaultId).Workload,
+            nonce,
+            iterations,
+            cancellationToken);
 }
 
 internal static class AgentInventory
@@ -176,7 +202,7 @@ internal static class AgentInventory
 
     public static FarmAgentHeartbeatRequest Heartbeat(
         AgentLocalPolicy? policy = null,
-        Guid? activeJobId = null)
+        IReadOnlyList<Guid>? activeJobIds = null)
     {
         var effective = AgentLocalPolicy.Normalize(policy ?? AgentLocalPolicy.Default());
         return new(
@@ -187,7 +213,8 @@ internal static class AgentInventory
         effective.AcceptJobs,
         effective.MaxLogicalProcessors,
         effective.MaxMemoryBytes,
-        activeJobId);
+        activeJobIds?.FirstOrDefault(),
+        activeJobIds);
     }
 
     private static string Runtime() =>

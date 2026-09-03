@@ -60,19 +60,47 @@ public sealed class FarmManifestSecurityTests
     public void CompletedJobEvidenceIsBoundToJobAndDetectsTampering()
     {
         var now = DateTimeOffset.Parse("2026-09-02T01:00:00Z");
+        var jobId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var attemptId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var nodeId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var key = Signing.DeriveForAgent(nodeId);
+        var manifest = new FarmJobManifest(
+            FarmManifestSecurity.AgentProfileVersion,
+            jobId,
+            attemptId,
+            nodeId,
+            "SHA256_CHAIN",
+            "atos-sha256-chain-v1",
+            "DETERMINISTIC_REEXECUTION_V1",
+            "00112233445566778899aabbccddeeff",
+            100_000,
+            30,
+            1,
+            256L * 1024 * 1024,
+            "DENY_ALL",
+            "STANDARD",
+            now.AddMinutes(-1),
+            now.AddMinutes(4),
+            new string('f', 64));
+        var signedManifest = FarmManifestSecurity.Sign(manifest, key.Signing);
         var job = new FarmJobRecord
         {
-            Id = Guid.Parse("44444444-4444-4444-4444-444444444444"),
-            AttemptId = Guid.Parse("55555555-5555-5555-5555-555555555555"),
-            NodeId = Guid.Parse("66666666-6666-6666-6666-666666666666"),
+            Id = jobId,
+            AttemptId = attemptId,
+            NodeId = nodeId,
+            ReservedLogicalProcessors = manifest.MaxLogicalProcessors,
+            ReservedMemoryBytes = manifest.MaxMemoryBytes,
             Workload = "SHA256_CHAIN",
             WorkloadVersion = "atos-sha256-chain-v1",
             VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
             Status = "Completed",
-            ManifestVersion = "atos-farm-manifest-v3-agent-profile",
-            ManifestDigest = new string('a', 64),
-            ManifestSignature = new string('b', 64),
-            ManifestPayload = "{}",
+            Nonce = manifest.Nonce,
+            ManifestVersion = manifest.Version,
+            ManifestDigest = signedManifest.Digest,
+            ManifestSignature = signedManifest.Signature,
+            ManifestPayload = signedManifest.Payload,
+            ManifestIssuedAtUtc = manifest.IssuedAtUtc,
+            ManifestExpiresAtUtc = manifest.ExpiresAtUtc,
             ResultDigest = new string('c', 64),
             ExpectedDigest = new string('c', 64),
             ComputeUnitsMilli = 1_000,
@@ -86,10 +114,9 @@ public sealed class FarmManifestSecurityTests
         };
         FarmJobEventRecord[] events =
         [
-            new() { Sequence = 1, Status = "Queued", Detail = "Criado.", OccurredAtUtc = now.AddSeconds(-2) },
-            new() { Sequence = 2, Status = "Completed", Detail = "Verificado.", OccurredAtUtc = now }
+            new() { JobId = jobId, Sequence = 1, Status = "Queued", Detail = "Criado.", OccurredAtUtc = now.AddSeconds(-2) },
+            new() { JobId = jobId, Sequence = 2, Status = "Completed", Detail = "Verificado.", OccurredAtUtc = now }
         ];
-        var key = Signing.DeriveForAgent(job.NodeId);
         var signed = FarmEvidenceSecurity.Sign(job, events, key.Signing, key.KeyId);
         job.EvidenceVersion = FarmEvidenceSecurity.Version;
         job.EvidencePayload = signed.Payload;
@@ -98,12 +125,34 @@ public sealed class FarmManifestSecurityTests
         job.EvidenceKeyId = key.KeyId;
         job.EvidenceCreatedAtUtc = now;
 
-        Assert.True(FarmEvidenceSecurity.TryVerify(job, Signing, out var restored));
+        var verification = FarmEvidenceSecurity.Verify(job, events, Signing, out var restored);
+        Assert.True(verification.IsValid);
+        Assert.True(verification.SignatureValid);
+        Assert.True(verification.ManifestValid);
+        Assert.True(verification.JobBindingValid);
+        Assert.True(verification.LifecycleValid);
         Assert.Equal(job.Id, restored?.JobId);
         Assert.Equal(2, restored?.Events.Count);
 
+        job.ReservedMemoryBytes /= 2;
+        verification = FarmEvidenceSecurity.Verify(job, events, Signing, out _);
+        Assert.False(verification.IsValid);
+        Assert.False(verification.ManifestValid);
+        job.ReservedMemoryBytes = manifest.MaxMemoryBytes;
+
         job.ResultDigest = new string('d', 64);
-        Assert.False(FarmEvidenceSecurity.TryVerify(job, Signing, out _));
+        verification = FarmEvidenceSecurity.Verify(job, events, Signing, out _);
+        Assert.False(verification.IsValid);
+        Assert.True(verification.SignatureValid);
+        Assert.False(verification.JobBindingValid);
+
+        job.ResultDigest = new string('c', 64);
+        events[0].Detail = "Adulterado.";
+        verification = FarmEvidenceSecurity.Verify(job, events, Signing, out _);
+        Assert.False(verification.IsValid);
+        Assert.True(verification.SignatureValid);
+        Assert.True(verification.JobBindingValid);
+        Assert.False(verification.LifecycleValid);
     }
 
     private static FarmJobManifest CreateManifest() => new(

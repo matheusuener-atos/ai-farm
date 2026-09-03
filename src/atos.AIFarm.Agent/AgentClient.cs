@@ -37,14 +37,14 @@ internal sealed class AgentClient(HttpClient httpClient)
         AgentConfiguration configuration,
         string credential,
         CancellationToken cancellationToken,
-        Guid? activeJobId = null)
+        IReadOnlyList<Guid>? activeJobIds = null)
     {
         using var message = new HttpRequestMessage(
             HttpMethod.Post,
             $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/heartbeat")
         {
             Content = JsonContent.Create(
-                AgentInventory.Heartbeat(configuration.EffectivePolicy, activeJobId),
+                AgentInventory.Heartbeat(configuration.EffectivePolicy, activeJobIds),
                 options: JsonOptions)
         };
         message.Headers.Authorization = new("Bearer", credential);
@@ -75,13 +75,15 @@ internal sealed class AgentClient(HttpClient httpClient)
     public async Task<FarmRemoteJobOffer?> ClaimJobAsync(
         AgentConfiguration configuration,
         string credential,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<Guid>? activeJobIds = null)
     {
         using var message = Authorized(
             HttpMethod.Post,
             $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/jobs/claim",
             credential);
-        message.Content = JsonContent.Create(new { }, options: JsonOptions);
+        message.Content = JsonContent.Create(
+            new FarmAgentClaimRequest(activeJobIds), options: JsonOptions);
         using var response = await httpClient.SendAsync(message, cancellationToken);
         EnsureAuthorized(response);
         if (response.StatusCode == HttpStatusCode.NoContent) return null;

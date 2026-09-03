@@ -67,6 +67,15 @@ public sealed class PostgresFarmEconomicsScenarioTests
             Assert.Single(concurrentProposals.Select(x => x.Id).Distinct());
             Assert.Equal(2, (await proposalsA.ListAsync()).Count);
 
+            var analyticsA = await providerA.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);
+            Assert.Equal(1, analyticsA.JobCount);
+            Assert.Equal(1, analyticsA.CompletedJobCount);
+            Assert.Equal(1_000, analyticsA.VerifiedProcessingPointsMilli);
+            Assert.NotNull(analyticsA.Node);
+            Assert.Equal(2, analyticsA.Economics.ScenarioCount);
+            Assert.Equal(2, analyticsA.Economics.RewardProposalCount);
+            Assert.Equal(2_000, analyticsA.Economics.ProposedProcessingPointsMilli);
+
             var walletA = providerA.GetRequiredService<IWalletService>();
             var operationId = Guid.NewGuid();
             var reservation = await walletA.ReservePromotionalAsync(
@@ -84,8 +93,20 @@ public sealed class PostgresFarmEconomicsScenarioTests
 
             var storeB = providerB.GetRequiredService<IFarmEconomicsScenarioStore>();
             Assert.Empty(await storeB.ListAsync());
+            var farmApiB = providerB.GetRequiredService<IFarmApiJobService>();
+            Assert.Null(await farmApiB.GetAsync(job.Id));
+            Assert.Null(await farmApiB.DownloadEvidenceAsync(job.Id));
+            var historyB = await providerB.GetRequiredService<IFarmJobHistoryService>()
+                .SearchAsync(new FarmJobHistoryQuery());
+            Assert.Empty(historyB.Items);
+            Assert.Equal(0, historyB.Totals.Total);
             var proposalsB = providerB.GetRequiredService<IFarmRewardProposalStore>();
             Assert.Empty(await proposalsB.ListAsync());
+            var analyticsB = await providerB.GetRequiredService<IFarmAnalyticsQuery>().GetAsync(7);
+            Assert.Equal(0, analyticsB.JobCount);
+            Assert.Null(analyticsB.Node);
+            Assert.Equal(0, analyticsB.Economics.ScenarioCount);
+            Assert.Equal(0, analyticsB.Economics.RewardProposalCount);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 proposalsB.CreateAsync(job.Id, saved.Id));
             var report = Assert.IsType<FarmEconomicsReportDownload>(
@@ -104,15 +125,28 @@ public sealed class PostgresFarmEconomicsScenarioTests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 storeB.SaveAsync("origem alheia", Scenario(), job.Id));
 
+            var blockedScenario = await storeA.SaveAsync(
+                "Evidência adulterada",
+                Scenario(),
+                job.Id);
+
             var factory = providerA.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
             await using (var db = await factory.CreateDbContextAsync())
             {
+                var jobEvent = await db.FarmJobEvents.SingleAsync(
+                    x => x.JobId == job.Id && x.Sequence == 1);
+                jobEvent.Detail = "Evento adulterado depois da selagem.";
                 var proposalRecord = await db.FarmRewardProposals.SingleAsync(x => x.Id == proposal.Id);
                 proposalRecord.Digest = new string('0', 64);
                 var record = await db.FarmEconomicsScenarios.SingleAsync(x => x.Id == saved.Id);
                 record.Digest = new string('0', 64);
                 await db.SaveChangesAsync();
             }
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                proposalsA.CreateAsync(job.Id, blockedScenario.Id));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                storeA.SaveAsync("Nova origem adulterada", Scenario(), job.Id));
 
             Assert.False((await proposalsA.ListAsync()).Single(x => x.Id == proposal.Id).IsIntegrityValid);
             var tampered = (await storeA.ListAsync()).Single(x => x.Id == saved.Id);

@@ -457,6 +457,9 @@ public interface IAiUsageQuery
     Task<AiUsageDashboard> GetDashboardAsync(
         int recentLimit = 50,
         CancellationToken cancellationToken = default);
+    Task<AiUsageAnalytics> GetAnalyticsAsync(
+        int days = 30,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IChatAttachmentService
