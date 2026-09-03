@@ -1,3 +1,4 @@
+using atos.AIFarm.Core.Application;
 using atos.AIFarm.Infrastructure;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -5,6 +6,7 @@ namespace atos.AIFarm.Web;
 
 public sealed class AIFarmReadinessHealthCheck(
     IAIFarmReadinessProbe readinessProbe,
+    IChatAttachmentService attachmentService,
     ILogger<AIFarmReadinessHealthCheck> logger) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -14,7 +16,6 @@ public sealed class AIFarmReadinessHealthCheck(
         try
         {
             await readinessProbe.CheckAsync(cancellationToken);
-            return HealthCheckResult.Healthy();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -28,5 +29,14 @@ public sealed class AIFarmReadinessHealthCheck(
                 exception.Message);
             return HealthCheckResult.Unhealthy("A required dependency is unavailable.");
         }
+
+        if (!attachmentService.IsAvailable)
+        {
+            return HealthCheckResult.Degraded(
+                "Chat attachments are unavailable: configure AWS_ACCESS_KEY_ID, " +
+                "AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3 and AWS_REGION.");
+        }
+
+        return HealthCheckResult.Healthy();
     }
 }

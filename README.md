@@ -100,9 +100,10 @@ Render:
 [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 ```
 
-Não troque a chave sem um procedimento de rotação: Jobs históricos assinados
-pela chave anterior continuarão registrados, mas não poderão ser revalidados
-com a nova chave.
+Para trocar a chave, siga o procedimento de rotação descrito em
+"Colocar a Iris em produção" abaixo: a chave anterior entra em
+`AIFarm__Farm__RetiredManifestSigningKeys` e os Jobs históricos continuam
+revalidáveis (ADR 0025).
 
 Anexos exigem também as quatro variáveis `AWS_*` declaradas em `render.yaml`.
 Antes de preenchê-las, o bucket deve ser criado explicitamente na branch Neon
@@ -113,6 +114,47 @@ Não copie `.env.local` para o Render: ele pertence exclusivamente à branch
 Neon `development`. O plano gratuito está declarado para evitar cobrança
 acidental e pode ser alterado no Dashboard quando forem necessários uptime e
 recursos de produção.
+
+## Colocar a Iris em produção
+
+O `render.yaml` declara `AIFarm__AI__Provider=OpenAI`; o boot em Production é
+fail-fast e recusa iniciar com mensagem clara quando o provider é `OpenAI` e a
+chave está ausente. Variáveis exatas no Environment do Render:
+
+- `AIFarm__AI__Provider`: `OpenAI` (declarada no Blueprint);
+- `OPENAI_API_KEY`: chave da API OpenAI (`sync: false`, nunca commitada);
+- `DATABASE_URL` e `DATABASE_URL_UNPOOLED`: branch Neon `production`;
+- `AIFarm__Farm__ManifestSigningKey`: chave ativa de assinatura (Base64,
+  256 bits);
+- `AIFarm__Farm__RetiredManifestSigningKeys`: chaves aposentadas pela rotação,
+  separadas por vírgula (vazia até a primeira rotação);
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`,
+  `AWS_REGION`: anexos do Chat; sem elas o Chat mostra anexos como
+  indisponíveis e `/health` reporta `degraded`.
+
+O catálogo de preços vive em `appsettings.json` (`AIFarm:AI:OpenAI`), com o
+campo `PriceSource` documentando a origem de cada preço. Ao trocar modelo ou
+preço, versione `PriceCatalogVersion`.
+
+Execuções com provider real respeitam um teto de segurança por conta e por dia
+UTC (`AIFarm__AI__DailySafetyCapMinor`, padrão 50.000 mAIC = 50 AIC), além do
+orçamento opcional por conta. Ao atingir o teto, a execução é negada antes de
+qualquer reserva, a negação fica registrada como execução falhada
+(`DailySafetyCapReached`) e aparece no centro de incidentes.
+
+### Rotação da `ManifestSigningKey`
+
+1. Gere a nova chave (`RandomNumberGenerator`, 32 bytes, Base64).
+2. Coloque a nova chave em `AIFarm__Farm__ManifestSigningKey` e acrescente a
+   anterior a `AIFarm__Farm__RetiredManifestSigningKeys`.
+3. Reinicie o serviço. Cada evidência guarda o `KeyId` da chave que a selou;
+   a verificação profunda localiza a chave certa no ring, então Jobs
+   históricos continuam revalidáveis (ADR 0025).
+4. Compute Agents fixam o `KeyId` no vínculo e recusarão ofertas assinadas
+   pela nova chave até um novo vínculo explícito em cada máquina — esse
+   re-vínculo faz parte do procedimento, não é falha.
+5. Nunca remova uma chave de `RetiredManifestSigningKeys` enquanto houver
+   histórico selado por ela que precise de revalidação.
 
 ## Operação HTTP
 

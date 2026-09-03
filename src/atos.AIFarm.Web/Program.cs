@@ -188,11 +188,17 @@ else if (!configuredProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException(
         $"AIFarm:AI:Provider '{configuredProvider}' is not supported.");
 }
+var safetyCap = new AiUsageSafetyCapPolicy(
+    openAi is not null,
+    builder.Configuration.GetValue<long>(
+        "AIFarm:AI:DailySafetyCapMinor",
+        50_000)).Validate();
 builder.Services.AddAIFarmDevelopment(
     executionLimits,
     providerProtection,
     openAi,
-    contextLimits);
+    contextLimits,
+    safetyCap);
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();
@@ -231,6 +237,9 @@ else if (objectStorageValues.Any(x => !string.IsNullOrWhiteSpace(x)))
 }
 var manifestSigningKey =
     builder.Configuration["AIFarm:Farm:ManifestSigningKey"];
+var retiredManifestSigningKeys =
+    (builder.Configuration["AIFarm:Farm:RetiredManifestSigningKeys"] ?? string.Empty)
+    .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 FarmManifestSigningOptions farmManifestSigning;
 if (string.IsNullOrWhiteSpace(manifestSigningKey))
 {
@@ -241,7 +250,9 @@ if (string.IsNullOrWhiteSpace(manifestSigningKey))
 }
 else
 {
-    farmManifestSigning = new FarmManifestSigningOptions(manifestSigningKey);
+    farmManifestSigning = new FarmManifestSigningOptions(
+        manifestSigningKey,
+        retiredManifestSigningKeys);
 }
 var nodeReliabilityPolicy = new FarmNodeReliabilityPolicy(
     builder.Configuration.GetValue("AIFarm:Farm:Reliability:SampleSize", 20),
@@ -1203,10 +1214,16 @@ static Task WriteHealthResponse(HttpContext context, HealthReport report, string
     {
         name = entry.Key,
         status = entry.Value.Status.ToString().ToLowerInvariant(),
+        description = entry.Value.Description,
     });
     return context.Response.WriteAsJsonAsync(new
     {
-        status = report.Status == HealthStatus.Healthy ? "ok" : "unavailable",
+        status = report.Status switch
+        {
+            HealthStatus.Healthy => "ok",
+            HealthStatus.Degraded => "degraded",
+            _ => "unavailable",
+        },
         check,
         timestampUtc = context.RequestServices
             .GetRequiredService<TimeProvider>()
