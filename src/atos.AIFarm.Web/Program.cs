@@ -55,6 +55,7 @@ builder.Services.AddAuthorization(options =>
     AddApiPolicy(options, AIFarmApiTokenDefaults.IrisExecutePolicy, ApiTokenScope.IrisExecute);
     AddApiPolicy(options, AIFarmApiTokenDefaults.FarmReadPolicy, ApiTokenScope.FarmRead);
     AddApiPolicy(options, AIFarmApiTokenDefaults.FarmExecutePolicy, ApiTokenScope.FarmExecute);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.WalletCreditPolicy, ApiTokenScope.WalletCredit);
 });
 builder.Services.AddHttpContextAccessor();
 if (builder.Configuration.GetValue<bool>("RENDER"))
@@ -111,6 +112,17 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("wallet-credit", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst
@@ -1041,6 +1053,34 @@ personalApi.MapPost("/iris/responses", async (
   .RequireAuthorization(AIFarmApiTokenDefaults.IrisExecutePolicy)
   .RequireRateLimiting("iris-execute")
   .WithMetadata(new RequestSizeLimitAttribute(32 * 1024));
+
+personalApi.MapPost("/wallet/credits", async (
+    WalletCreditApiRequest credit,
+    HttpResponse response,
+    IWalletService wallet,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        var result = await wallet.GrantPurchasedAsync(
+            credit.AmountMinor,
+            credit.CorrelationId,
+            cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.WalletCreditPolicy)
+  .RequireRateLimiting("wallet-credit")
+  .WithMetadata(new RequestSizeLimitAttribute(1024));
 
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,

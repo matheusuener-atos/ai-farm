@@ -49,6 +49,40 @@ public sealed class WalletAggregate
             Entry(AccountCode.PromotionalPool, CreditBucket.Promotional, LedgerDirection.Credit, amountMinor, now));
     }
 
+    public (LedgerTransaction Transaction, bool WasReplayed) GrantPurchased(
+        long amountMinor,
+        Guid correlationId,
+        DateTimeOffset now)
+    {
+        EnsurePositive(amountMinor);
+        if (amountMinor > WalletLimits.MaximumAdministrativeCreditMinor)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(amountMinor),
+                "O crédito administrativo excede o teto por requisição.");
+        }
+
+        var idempotencyKey = PurchasedCreditKey(correlationId);
+        var existing = FindTransaction(idempotencyKey);
+        if (existing is not null)
+        {
+            return (existing, true);
+        }
+
+        var transaction = AddBalancedTransaction(
+            LedgerTransactionType.Grant,
+            correlationId,
+            idempotencyKey,
+            "Crédito administrativo no bucket Purchased",
+            now,
+            Entry(AccountCode.Available(Id, CreditBucket.Purchased), CreditBucket.Purchased, LedgerDirection.Debit, amountMinor, now),
+            Entry(AccountCode.PurchasedAdminPool, CreditBucket.Purchased, LedgerDirection.Credit, amountMinor, now));
+        return (transaction, false);
+    }
+
+    public static string PurchasedCreditKey(Guid correlationId) =>
+        $"wallet:purchased:admin:{correlationId:N}";
+
     public BalanceReservation ReservePromotional(
         long amountMinor,
         Guid operationId,
@@ -264,6 +298,7 @@ public sealed class WalletAggregate
     private static class AccountCode
     {
         public const string PromotionalPool = "atos:PROMOTIONAL_POOL";
+        public const string PurchasedAdminPool = "atos:PURCHASED_POOL:ADMIN:v1";
         public const string AiConsumption = "atos:AI_CONSUMPTION";
         public static string Available(Guid walletId, CreditBucket bucket) => $"WALLET:{walletId}:{bucket}:AVAILABLE";
         public static string Reserved(Guid walletId, CreditBucket bucket) => $"WALLET:{walletId}:{bucket}:RESERVED";

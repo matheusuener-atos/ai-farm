@@ -35,7 +35,17 @@ public sealed class ApiTokenContractTests
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
             "token válido", ApiTokenScope.ProfileRead, Now.AddDays(367)).Normalize(Now));
         Assert.Throws<ArgumentException>(() => new ApiTokenCreateRequest(
-            "token válido", (ApiTokenScope)256, Now.AddDays(1)).Normalize(Now));
+            "token válido", (ApiTokenScope)512, Now.AddDays(1)).Normalize(Now));
+    }
+
+    [Fact]
+    public void WalletCreditScopeIsAcceptedAndListedInAll()
+    {
+        var normalized = new ApiTokenCreateRequest(
+            "crédito administrativo", ApiTokenScope.WalletCredit, Now.AddDays(1)).Normalize(Now);
+
+        Assert.True(normalized.Scopes.HasFlag(ApiTokenScope.WalletCredit));
+        Assert.True(ApiTokenScope.All.HasFlag(ApiTokenScope.WalletCredit));
     }
 
     [Theory]

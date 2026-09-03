@@ -19,6 +19,7 @@ public static class AIFarmApiTokenDefaults
     public const string IrisExecutePolicy = "api:iris:execute";
     public const string FarmReadPolicy = "api:farm:read";
     public const string FarmExecutePolicy = "api:farm:execute";
+    public const string WalletCreditPolicy = "api:wallet:credit";
 }
 
 public sealed class ApiTokenAuthenticationHandler(
