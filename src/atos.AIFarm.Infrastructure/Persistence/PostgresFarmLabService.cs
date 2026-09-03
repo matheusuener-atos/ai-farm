@@ -12,7 +12,8 @@ internal sealed class PostgresFarmLabService(
     IDbContextFactory<AIFarmDbContext> factory,
     IAIFarmIdentityAccessor identityAccessor,
     TimeProvider timeProvider,
-    FarmManifestSigningOptions signingOptions) : IFarmLabService
+    FarmManifestSigningOptions signingOptions,
+    FarmNodeReliabilityPolicy nodeReliabilityPolicy) : IFarmLabService
 {
     private const string ManifestVersion = FarmManifestSecurity.EmbeddedVersion;
     internal const string RemoteManifestVersion = FarmManifestSecurity.AgentProfileVersion;
@@ -603,6 +604,9 @@ internal sealed class PostgresFarmLabService(
             .Select(group => new { NodeId = group.Key, LastAtUtc = group.Max(x => x.CreatedAtUtc) })
             .ToDictionaryAsync(x => x.NodeId, x => x.LastAtUtc, cancellationToken);
         var poolHasAgents = nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent.ToString());
+        var reliabilities = await FarmNodeReliabilityProjection.LoadAsync(
+            db, nodes.Select(x => x.Id).ToArray(), now, nodeReliabilityPolicy,
+            cancellationToken);
         var evaluated = nodes.Select(node =>
         {
             var snapshot = ToSnapshot(node);
@@ -615,16 +619,19 @@ internal sealed class PostgresFarmLabService(
             {
                 Node = node,
                 Snapshot = snapshot,
+                Reliability = reliabilities[node.Id],
                 AvailableProcessors = availableProcessors,
                 AvailableMemory = availableMemory,
                 Blocker = FarmCapacityEvaluator.Evaluate(
-                    snapshot, definition, availableProcessors, availableMemory, poolHasAgents)
+                    snapshot, definition, availableProcessors, availableMemory, poolHasAgents,
+                    reliabilities[node.Id].IsQuarantined)
             };
         }).ToArray();
         var selected = evaluated
             .Where(x => x.Blocker == FarmCapacityBlocker.None &&
                         (!excludedNodeId.HasValue || x.Node.Id != excludedNodeId.Value))
-            .OrderBy(x => x.AvailableProcessors - definition.RequiredLogicalProcessors)
+            .OrderByDescending(x => x.Reliability.Score)
+            .ThenBy(x => x.AvailableProcessors - definition.RequiredLogicalProcessors)
             .ThenBy(x => x.AvailableMemory - definition.RequiredMemoryBytes)
             .ThenBy(x => lastAssignments.GetValueOrDefault(x.Node.Id, DateTimeOffset.MinValue))
             .ThenBy(x => x.Node.Id)
@@ -653,6 +660,7 @@ internal sealed class PostgresFarmLabService(
         FarmCapacityBlocker.StaleHeartbeat => "HEARTBEAT_EXPIRADO",
         FarmCapacityBlocker.JobsDisabled => "POLÍTICA_LOCAL",
         FarmCapacityBlocker.AgentVersionMismatch => "VERSÃO_AGENT",
+        FarmCapacityBlocker.Quarantined => "QUARENTENA_CONFIABILIDADE",
         FarmCapacityBlocker.InsufficientProcessors => "CPU_INSUFICIENTE",
         FarmCapacityBlocker.InsufficientMemory => "MEMÓRIA_INSUFICIENTE",
         FarmCapacityBlocker.Busy => "OCUPADO",
