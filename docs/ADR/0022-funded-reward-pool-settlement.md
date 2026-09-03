@@ -1,5 +1,9 @@
 # ADR 0022 — Reward Pool financiado e settlement CP → AIC
 
+## Status
+
+Aceito em 2026-09-03.
+
 ## Contexto
 
 A Farm já executa workloads úteis, verifica evidências, mede CP e registra

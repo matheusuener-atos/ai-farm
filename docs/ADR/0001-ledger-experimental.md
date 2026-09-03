@@ -1,7 +1,25 @@
 # ADR 0001 — Ledger experimental do primeiro incremento
 
-- Status: aceito apenas para protótipo; revisar antes da primeira migration definitiva
+- Status: aceito para o protótipo; parcialmente superado — ver "Superado por"
 - Data: 2026-08-30
+
+## Superado por
+
+- Decisão 5 e a consequência "reiniciar o processo perde o estado" foram
+  superadas pela persistência PostgreSQL real: migration `InitialNeon`
+  (2026-08-31) criou `wallets`, `ledger_transactions`, `ledger_entries` e
+  `balance_reservations`, e `PostgresWalletService` é o repository
+  transacional em produção. O armazenamento em memória permanece apenas como
+  default de desenvolvimento.
+- A cláusula "antes de qualquer crédito real" foi materialmente atravessada
+  pelo ADR 0022: o settlement financiado credita o bucket `Earned` com
+  partida dobrada real.
+- Escala do AIC, ordem de buckets e modelo contábil de compra (decisão 4 e
+  última consequência) estão propostos no ADR 0026 — aguardando aprovação;
+  até lá, o consumo continua sacando somente de `Promotional`.
+- Permanecem válidas: unidade mAIC em `long` (decisão 1), partida dobrada com
+  saldo como projeção (decisão 2) e a semântica reserva/captura/liberação
+  (decisão 3), estendida pelo ADR 0006 com a retenção de orçamento.
 
 ## Contexto
 

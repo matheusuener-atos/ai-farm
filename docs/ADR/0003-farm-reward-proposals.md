@@ -1,6 +1,8 @@
 # ADR 0003 — Propostas de recompensa antes da liquidação
 
-- Status: aceito; liquidação continua bloqueada
+- Status: aceito; a cláusula "liquidação bloqueada" foi superada pelo ADR
+  0022, que implementou o settlement sob política financiada (desligada por
+  padrão) cumprindo os pré-requisitos listados aqui
 - Data: 2026-09-02
 
 ## Contexto
