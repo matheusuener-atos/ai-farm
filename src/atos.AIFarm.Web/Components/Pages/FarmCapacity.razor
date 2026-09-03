@@ -21,8 +21,8 @@ else
 {
     <section class="capacity-summary">
         <div><small>NODES</small><strong>@_dashboard.Nodes.Count</strong></div>
-        <div><small>DISPONÍVEIS</small><strong>@_dashboard.Nodes.Count(x => !x.Busy && x.EligibleWorkloadCount > 0)</strong></div>
-        <div><small>OCUPADOS</small><strong>@_dashboard.Nodes.Count(x => x.Busy)</strong></div>
+        <div><small>ACEITANDO</small><strong>@_dashboard.Nodes.Count(x => x.EligibleWorkloadCount > 0)</strong></div>
+        <div><small>EM USO</small><strong>@_dashboard.Nodes.Count(x => x.Busy)</strong></div>
         <div><small>NA FILA</small><strong>@_dashboard.QueuedDemandCount</strong></div>
     </section>
 
@@ -51,11 +51,12 @@ else
             <article class="node-capacity">
                 <header>
                     <div><strong>@item.Node.Name</strong><small>@item.Node.ConnectionKind // @item.Node.AgentVersion</small></div>
-                    <span class="@(item.Busy ? "amber" : item.EligibleWorkloadCount > 0 ? "green" : "error")">[ @(item.Busy ? "OCUPADO" : item.EligibleWorkloadCount > 0 ? "DISPONÍVEL" : "BLOQUEADO") ]</span>
+                    <span class="@(item.EligibleWorkloadCount > 0 ? "green" : item.Busy ? "amber" : "error")">[ @(item.EligibleWorkloadCount > 0 ? "ACEITANDO" : item.Busy ? "SATURADO" : "BLOQUEADO") ]</span>
                 </header>
                 <div class="resource-bars">
                     <div><small>CPU AUTORIZADA</small><strong>@item.AvailableLogicalProcessors / @item.Node.AuthorizedLogicalProcessors</strong></div>
                     <div><small>MEMÓRIA AUTORIZADA</small><strong>@FormatBytes(item.AvailableMemoryBytes) / @FormatBytes(item.Node.AuthorizedMemoryBytes)</strong></div>
+                    <div><small>JOBS ATIVOS</small><strong>@item.ActiveJobCount</strong></div>
                     <div><small>HEARTBEAT</small><strong>@(item.Node.IsHeartbeatFresh ? "ATUAL" : "EXPIRADO")</strong></div>
                 </div>
                 <div class="compatibility-row">

@@ -7,6 +7,7 @@ using System.Text.Json;
 
 namespace atos.AIFarm.IntegrationTests;
 
+[Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmDemandQueueTests
 {
     [Fact]
@@ -28,10 +29,12 @@ public sealed class PostgresFarmDemandQueueTests
                 FarmDemandPriority.High, 60));
             Assert.Equal(FarmDemandStatus.Queued, demand.Status);
 
-            var processed = await Task.WhenAll(
+            _ = await Task.WhenAll(
                 providerA.GetRequiredService<IFarmDemandDispatcher>().DispatchDueAsync(),
                 providerB.GetRequiredService<IFarmDemandDispatcher>().DispatchDueAsync());
-            Assert.Equal(1, processed.Sum());
+            var dispatcher = providerA.GetRequiredService<IFarmDemandDispatcher>();
+            _ = await DispatchUntilAsync(queue, dispatcher, demand.Id,
+                state => state.Status == FarmDemandStatus.Submitted);
 
             var dashboard = await queue.GetDashboardAsync();
             var submitted = Assert.Single(dashboard.Demands);
@@ -115,8 +118,8 @@ public sealed class PostgresFarmDemandQueueTests
             var demand = await queue.SubmitAsync(new(
                 "iris-text-index-v1", "Retomar capacidade", "Fila aguarda o Agent.",
                 FarmDemandPriority.Normal, 60));
-            Assert.Equal(1, await dispatcher.DispatchDueAsync());
-            var deferred = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            var deferred = await DispatchUntilAsync(
+                queue, dispatcher, demand.Id, state => state.Attempts >= 1);
             Assert.Equal(FarmDemandStatus.Queued, deferred.Status);
             Assert.Equal(1, deferred.Attempts);
             Assert.Null(deferred.JobId);
@@ -129,8 +132,8 @@ public sealed class PostgresFarmDemandQueueTests
                 await db.SaveChangesAsync();
             }
             clock.Advance(TimeSpan.FromSeconds(6));
-            Assert.Equal(1, await dispatcher.DispatchDueAsync());
-            var submitted = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            var submitted = await DispatchUntilAsync(
+                queue, dispatcher, demand.Id, state => state.JobId is not null);
             Assert.Equal(FarmDemandStatus.Submitted, submitted.Status);
             Assert.Equal(FarmJobStatus.Offered, submitted.JobStatus);
             Assert.Equal(2, submitted.Attempts);
@@ -168,7 +171,9 @@ public sealed class PostgresFarmDemandQueueTests
             var demand = await queue.SubmitAsync(new(
                 "iris-text-index-v1", "Selecionar best fit", "Preservar o Node maior."));
             Assert.Equal(128L * 1024 * 1024, demand.RequiredMemoryBytes);
-            Assert.Equal(1, await provider.GetRequiredService<IFarmDemandDispatcher>().DispatchDueAsync());
+            var dispatcher = provider.GetRequiredService<IFarmDemandDispatcher>();
+            _ = await DispatchUntilAsync(queue, dispatcher, demand.Id,
+                state => state.DispatchedShards == 1);
             await using (var db = await factory.CreateDbContextAsync())
             {
                 var job = await db.FarmJobs.AsNoTracking().SingleAsync(x => x.DemandId == demand.Id);
@@ -223,8 +228,8 @@ public sealed class PostgresFarmDemandQueueTests
                 "iris-text-index-v1", "Índice distribuído", input,
                 FarmDemandPriority.High, 60, TargetShards: 2));
 
-            Assert.Equal(1, await dispatcher.DispatchDueAsync());
-            var dispatched = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            var dispatched = await DispatchUntilAsync(
+                queue, dispatcher, demand.Id, state => state.DispatchedShards == 2);
             Assert.Equal(FarmDemandStatus.Submitted, dispatched.Status);
             Assert.Equal(2, dispatched.DispatchedShards);
             Assert.Equal(2, dispatched.Shards.Select(x => x.JobId).Distinct().Count());
@@ -249,8 +254,8 @@ public sealed class PostgresFarmDemandQueueTests
             }
 
             clock.Advance(TimeSpan.FromSeconds(6));
-            Assert.Equal(1, await dispatcher.DispatchDueAsync());
-            var completed = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            var completed = await DispatchUntilAsync(
+                queue, dispatcher, demand.Id, state => state.Status == FarmDemandStatus.Completed);
             Assert.Equal(FarmDemandStatus.Completed, completed.Status);
             Assert.Equal(2, completed.CompletedShards);
             Assert.Equal(64, completed.OutputDigest?.Length);
@@ -269,6 +274,124 @@ public sealed class PostgresFarmDemandQueueTests
             Assert.Equal([1, 2], jobs.OrderBy(x => x.DemandShardIndex).Select(x => x.DemandShardIndex!.Value));
         }
         finally { await CleanupAsync(connectionString, accountId); }
+    }
+
+    [Fact]
+    [Trait("Category", "Postgres")]
+    public async Task MultiSlotAgentRunsTwoShardsWithinReservedResources()
+    {
+        var connectionString = ReadLocalVariable("DATABASE_URL");
+        if (string.IsNullOrWhiteSpace(connectionString)) return;
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "multi slot agent test");
+        var clock = new AdjustableTimeProvider(DateTimeOffset.UtcNow);
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity, clock);
+            await provider.InitializeAIFarmAsync();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            await lab.SetNodeStatusAsync(FarmNodeStatus.Paused);
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+            var enrollment = await agents.CreateEnrollmentAsync();
+            var linked = Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
+                enrollment.Token,
+                new FarmAgentEnrollmentRequest(
+                    "MULTI-SLOT-A", ".NET 10 // TEST", 4, 1024L * 1024 * 1024,
+                    FarmAgentProtocol.CurrentAgentVersion)));
+            Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    ".NET 10 // TEST", 4, 1024L * 1024 * 1024,
+                    FarmAgentProtocol.CurrentAgentVersion, true, 2, 256L * 1024 * 1024)));
+
+            var queue = provider.GetRequiredService<IFarmDemandQueueService>();
+            var dispatcher = provider.GetRequiredService<IFarmDemandDispatcher>();
+            var demand = await queue.SubmitAsync(new(
+                "iris-text-index-v1", "Dois slots no mesmo Node",
+                "uma máquina potente processa duas partes úteis simultaneamente",
+                FarmDemandPriority.High, 60, TargetShards: 2));
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                _ = await dispatcher.DispatchDueAsync();
+                var state = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+                if (state.DispatchedShards == 2) break;
+            }
+            Assert.Equal(2, (await queue.GetDashboardAsync()).Demands
+                .Single(x => x.Id == demand.Id).DispatchedShards);
+
+            var first = Assert.IsType<FarmRemoteJobOffer>(
+                await agents.ClaimJobAsync(linked.Credential));
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, first.JobId));
+            var second = Assert.IsType<FarmRemoteJobOffer>(
+                await agents.ClaimJobAsync(
+                    linked.Credential, CancellationToken.None, [first.JobId]));
+            Assert.NotEqual(first.JobId, second.JobId);
+            Assert.True(await agents.MarkJobStartedAsync(linked.Credential, second.JobId));
+
+            var heartbeat = Assert.IsType<FarmAgentHeartbeatResult>(await agents.HeartbeatAsync(
+                linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    ".NET 10 // TEST", 4, 1024L * 1024 * 1024,
+                    FarmAgentProtocol.CurrentAgentVersion, true, 2, 256L * 1024 * 1024,
+                    first.JobId, [first.JobId, second.JobId])));
+            Assert.Empty(heartbeat.CancelActiveJobIds ?? []);
+            Assert.NotNull(heartbeat.LeaseExpiresAtUtc);
+
+            var trust = Assert.IsType<FarmAgentTrust>(await agents.GetTrustAsync(linked.Credential));
+            foreach (var offer in new[] { first, second })
+            {
+                Assert.True(FarmManifestSecurity.TryVerify(
+                    offer.ManifestPayload, offer.ManifestDigest, offer.ManifestSignature,
+                    new FarmManifestSigningOptions(trust.VerificationKey), out var manifest));
+                var verifiedManifest = Assert.IsType<FarmJobManifest>(manifest);
+                Assert.Equal(1, verifiedManifest.MaxLogicalProcessors);
+                Assert.Equal(128L * 1024 * 1024, verifiedManifest.MaxMemoryBytes);
+                var input = Assert.IsType<FarmRemoteJobInput>(offer.Input);
+                var execution = FarmDeterministicWorkloads.Execute(
+                    verifiedManifest.Workload, verifiedManifest.Nonce,
+                    verifiedManifest.Iterations, input.Payload);
+                Assert.True((await agents.SubmitResultAsync(
+                    linked.Credential, offer.JobId,
+                    RemoteResult(execution.Digest, 10) with
+                    { OutputPayload = execution.OutputPayload }))?.Verified);
+            }
+
+            clock.Advance(TimeSpan.FromSeconds(6));
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                _ = await dispatcher.DispatchDueAsync();
+                var state = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+                if (state.Status == FarmDemandStatus.Completed) break;
+            }
+            var completed = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            Assert.Equal(FarmDemandStatus.Completed, completed.Status);
+            var factory = provider.GetRequiredService<IDbContextFactory<AIFarmDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var jobs = await db.FarmJobs.AsNoTracking().Where(x => x.DemandId == demand.Id).ToArrayAsync();
+            Assert.Single(jobs.Select(x => x.NodeId).Distinct());
+            Assert.All(jobs, job =>
+            {
+                Assert.Equal(1, job.ReservedLogicalProcessors);
+                Assert.Equal(128L * 1024 * 1024, job.ReservedMemoryBytes);
+            });
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
+    private static async Task<FarmDemandSnapshot> DispatchUntilAsync(
+        IFarmDemandQueueService queue,
+        IFarmDemandDispatcher dispatcher,
+        Guid demandId,
+        Func<FarmDemandSnapshot, bool> predicate)
+    {
+        FarmDemandSnapshot? state = null;
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            _ = await dispatcher.DispatchDueAsync();
+            state = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demandId);
+            if (predicate(state)) return state;
+        }
+        throw new InvalidOperationException(
+            $"A demanda {demandId:N} não atingiu o estado esperado. Estado atual: {state?.Status}.");
     }
 
     private static ServiceProvider BuildProvider(string connectionString, AIFarmIdentity identity, TimeProvider? timeProvider = null)

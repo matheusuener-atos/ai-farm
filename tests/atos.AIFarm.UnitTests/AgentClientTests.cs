@@ -94,16 +94,17 @@ public sealed class AgentClientTests
             configuration,
             "secret-value",
             CancellationToken.None,
-            activeJobId);
+            [activeJobId]);
 
         Assert.Equal(FarmNodeStatus.Online, result.Status);
         Assert.Equal("Bearer", captured!.Headers.Authorization!.Scheme);
         Assert.Equal("secret-value", captured.Headers.Authorization.Parameter);
-        Assert.Contains("\"agentVersion\":\"atos-agent/0.7.0\"", body);
+        Assert.Contains("\"agentVersion\":\"atos-agent/0.8.0\"", body);
         Assert.Contains("\"acceptJobs\":true", body);
         Assert.Contains("\"maxLogicalProcessors\":1", body);
         Assert.Contains("\"maxMemoryBytes\":268435456", body);
         Assert.Contains($"\"activeJobId\":\"{activeJobId}\"", body);
+        Assert.Contains($"\"activeJobIds\":[\"{activeJobId}\"]", body);
         Assert.Equal(activeJobId, result.ActiveJobId);
         Assert.Equal(2, result.ActiveHeartbeatIntervalSeconds);
         Assert.True(result.CancelActiveJob);

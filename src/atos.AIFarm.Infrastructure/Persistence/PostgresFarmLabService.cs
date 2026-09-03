@@ -222,10 +222,8 @@ internal sealed class PostgresFarmLabService(
                 Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant(),
                 definition.Iterations,
                 definition.TimeoutSeconds,
-                definition.MaxLogicalProcessors,
-                Math.Min(
-                    Math.Min(node.MemoryBytes, definition.MaxMemoryBytes),
-                    node.AgentMaxMemoryBytes ?? node.MemoryBytes),
+                definition.RequiredLogicalProcessors,
+                definition.RequiredMemoryBytes,
                 definition.NetworkPolicy,
                 definition.DataClassification,
                 now,
@@ -242,6 +240,8 @@ internal sealed class PostgresFarmLabService(
             Id = jobId,
             AccountId = accountId,
             NodeId = node.Id,
+            ReservedLogicalProcessors = signedManifest.Manifest.MaxLogicalProcessors,
+            ReservedMemoryBytes = signedManifest.Manifest.MaxMemoryBytes,
             ApiTokenId = apiTokenId,
             ApiIdempotencyKey = apiIdempotencyKey,
             ScheduleId = scheduleId,
@@ -574,25 +574,43 @@ internal sealed class PostgresFarmLabService(
         var now = timeProvider.GetUtcNow();
         var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
             .ToArrayAsync(cancellationToken);
-        var activeNodeIds = await db.FarmJobs
+        var reservations = await db.FarmJobs
             .Where(x => x.AccountId == accountId && FarmJobLifecycle.ActiveStatuses.Contains(x.Status))
-            .Select(x => x.NodeId).ToArrayAsync(cancellationToken);
+            .GroupBy(x => x.NodeId)
+            .Select(group => new
+            {
+                NodeId = group.Key,
+                LogicalProcessors = group.Sum(x => x.ReservedLogicalProcessors),
+                MemoryBytes = group.Sum(x => x.ReservedMemoryBytes)
+            })
+            .ToDictionaryAsync(x => x.NodeId, cancellationToken);
         var lastAssignments = await db.FarmJobs.Where(x => x.AccountId == accountId)
             .GroupBy(x => x.NodeId)
             .Select(group => new { NodeId = group.Key, LastAtUtc = group.Max(x => x.CreatedAtUtc) })
             .ToDictionaryAsync(x => x.NodeId, x => x.LastAtUtc, cancellationToken);
         var poolHasAgents = nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent.ToString());
-        var evaluated = nodes.Select(node => new
+        var evaluated = nodes.Select(node =>
         {
-            Node = node,
-            Snapshot = ToSnapshot(node),
-            Blocker = FarmCapacityEvaluator.Evaluate(
-                ToSnapshot(node), definition, activeNodeIds.Contains(node.Id), poolHasAgents)
+            var snapshot = ToSnapshot(node);
+            reservations.TryGetValue(node.Id, out var reserved);
+            var availableProcessors = Math.Max(0,
+                snapshot.AuthorizedLogicalProcessors - (reserved?.LogicalProcessors ?? 0));
+            var availableMemory = Math.Max(0,
+                snapshot.AuthorizedMemoryBytes - (reserved?.MemoryBytes ?? 0));
+            return new
+            {
+                Node = node,
+                Snapshot = snapshot,
+                AvailableProcessors = availableProcessors,
+                AvailableMemory = availableMemory,
+                Blocker = FarmCapacityEvaluator.Evaluate(
+                    snapshot, definition, availableProcessors, availableMemory, poolHasAgents)
+            };
         }).ToArray();
         var selected = evaluated
             .Where(x => x.Blocker == FarmCapacityBlocker.None)
-            .OrderBy(x => x.Snapshot.AuthorizedLogicalProcessors - definition.RequiredLogicalProcessors)
-            .ThenBy(x => x.Snapshot.AuthorizedMemoryBytes - definition.RequiredMemoryBytes)
+            .OrderBy(x => x.AvailableProcessors - definition.RequiredLogicalProcessors)
+            .ThenBy(x => x.AvailableMemory - definition.RequiredMemoryBytes)
             .ThenBy(x => lastAssignments.GetValueOrDefault(x.Node.Id, DateTimeOffset.MinValue))
             .ThenBy(x => x.Node.Id)
             .Select(x => x.Node)

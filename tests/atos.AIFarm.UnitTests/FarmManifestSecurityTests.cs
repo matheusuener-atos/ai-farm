@@ -88,6 +88,8 @@ public sealed class FarmManifestSecurityTests
             Id = jobId,
             AttemptId = attemptId,
             NodeId = nodeId,
+            ReservedLogicalProcessors = manifest.MaxLogicalProcessors,
+            ReservedMemoryBytes = manifest.MaxMemoryBytes,
             Workload = "SHA256_CHAIN",
             WorkloadVersion = "atos-sha256-chain-v1",
             VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1",
@@ -131,6 +133,12 @@ public sealed class FarmManifestSecurityTests
         Assert.True(verification.LifecycleValid);
         Assert.Equal(job.Id, restored?.JobId);
         Assert.Equal(2, restored?.Events.Count);
+
+        job.ReservedMemoryBytes /= 2;
+        verification = FarmEvidenceSecurity.Verify(job, events, Signing, out _);
+        Assert.False(verification.IsValid);
+        Assert.False(verification.ManifestValid);
+        job.ReservedMemoryBytes = manifest.MaxMemoryBytes;
 
         job.ResultDigest = new string('d', 64);
         verification = FarmEvidenceSecurity.Verify(job, events, Signing, out _);

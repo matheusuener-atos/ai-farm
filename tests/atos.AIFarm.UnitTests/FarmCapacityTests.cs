@@ -24,6 +24,14 @@ public sealed class FarmCapacityTests
             FarmCapacityEvaluator.Evaluate(node, definition, false, true));
         Assert.Equal(FarmCapacityBlocker.Busy,
             FarmCapacityEvaluator.Evaluate(node, definition, true, true));
+        Assert.Equal(FarmCapacityBlocker.None,
+            FarmCapacityEvaluator.Evaluate(
+                node with { AuthorizedMemoryBytes = definition.RequiredMemoryBytes * 2 },
+                definition, 1, definition.RequiredMemoryBytes, true));
+        Assert.Equal(FarmCapacityBlocker.Busy,
+            FarmCapacityEvaluator.Evaluate(
+                node with { AuthorizedMemoryBytes = definition.RequiredMemoryBytes * 2 },
+                definition, 0, definition.RequiredMemoryBytes, true));
         Assert.Equal(FarmCapacityBlocker.InsufficientMemory,
             FarmCapacityEvaluator.Evaluate(Node(memory: definition.RequiredMemoryBytes - 1), definition, false, true));
         Assert.Equal(FarmCapacityBlocker.StaleHeartbeat,

@@ -7,6 +7,7 @@ using System.Text;
 
 namespace atos.AIFarm.IntegrationTests;
 
+[Collection("Farm dispatch persistence")]
 public sealed class PostgresFarmLabTests
 {
     [Fact]
@@ -158,8 +159,9 @@ public sealed class PostgresFarmLabTests
 
         var accountId = Guid.NewGuid();
         var identity = new AIFarmIdentity(accountId, accountId, "atos schedule test");
-        var clock = new AdjustableTimeProvider(
-            new DateTimeOffset(2026, 9, 2, 12, 0, 0, TimeSpan.Zero));
+        var future = DateTimeOffset.UtcNow.AddYears(1);
+        var start = new DateTimeOffset(future.Ticks - future.Ticks % 10, TimeSpan.Zero);
+        var clock = new AdjustableTimeProvider(start);
         try
         {
             await using var provider = BuildProvider(connectionString, identity, clock);
@@ -179,17 +181,29 @@ public sealed class PostgresFarmLabTests
                     FarmWorkloadCatalog.DefaultId,
                     30)));
 
+            async Task<FarmScheduleDashboard> DispatchUntilTriggersAsync(int expected)
+            {
+                FarmScheduleDashboard? state = null;
+                for (var attempt = 0; attempt < 10; attempt++)
+                {
+                    _ = await dispatcher.DispatchDueAsync();
+                    state = await schedules.GetDashboardAsync();
+                    if (state.RecentTriggers.Count >= expected) return state;
+                }
+                throw new InvalidOperationException(
+                    $"A agenda {created.Id:N} não alcançou {expected} disparo(s).");
+            }
+
             await schedules.SetStatusAsync(created.Id, FarmScheduleStatus.Paused);
-            Assert.Equal(0, await dispatcher.DispatchDueAsync());
+            _ = await dispatcher.DispatchDueAsync();
+            Assert.Empty((await schedules.GetDashboardAsync()).RecentTriggers);
             await schedules.SetStatusAsync(created.Id, FarmScheduleStatus.Active);
 
-            var dispatches = await Task.WhenAll(
+            _ = await Task.WhenAll(
                 dispatcher.DispatchDueAsync(),
                 dispatcher.DispatchDueAsync());
-            Assert.Equal(1, dispatches.Sum());
-            Assert.Equal(0, await dispatcher.DispatchDueAsync());
 
-            var dashboard = await schedules.GetDashboardAsync();
+            var dashboard = await DispatchUntilTriggersAsync(1);
             var trigger = Assert.Single(dashboard.RecentTriggers);
             Assert.Equal(FarmScheduleTriggerStatus.Submitted, trigger.Status);
             Assert.NotNull(trigger.JobId);
@@ -203,11 +217,10 @@ public sealed class PostgresFarmLabTests
             Assert.True(scheduled.Job.Evidence?.IsValid);
 
             clock.Advance(TimeSpan.FromMinutes(46));
-            Assert.Equal(1, await dispatcher.DispatchDueAsync());
-            dashboard = await schedules.GetDashboardAsync();
+            dashboard = await DispatchUntilTriggersAsync(2);
             Assert.Equal(2, dashboard.RecentTriggers.Count);
             Assert.Equal(
-                new DateTimeOffset(2026, 9, 2, 13, 0, 0, TimeSpan.Zero),
+                start.AddHours(1),
                 dashboard.Schedules[0].NextRunAtUtc);
         }
         finally
@@ -283,7 +296,7 @@ public sealed class PostgresFarmLabTests
 
     [Fact]
     [Trait("Category", "Postgres")]
-    public async Task DatabaseRejectsTwoActiveJobsForTheSameAccount()
+    public async Task DatabasePersistsIndependentResourceReservationsForConcurrentJobs()
     {
         var connectionString = ReadLocalVariable("DATABASE_URL");
         if (string.IsNullOrWhiteSpace(connectionString)) return;
@@ -303,7 +316,12 @@ public sealed class PostgresFarmLabTests
                 CreateQueuedJob(accountId, dashboard.Node.Id, now),
                 CreateQueuedJob(accountId, dashboard.Node.Id, now.AddTicks(1)));
 
-            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            await db.SaveChangesAsync();
+            var active = await db.FarmJobs.AsNoTracking()
+                .Where(x => x.AccountId == accountId).ToArrayAsync();
+            Assert.Equal(2, active.Length);
+            Assert.Equal(2, active.Sum(x => x.ReservedLogicalProcessors));
+            Assert.Equal(128L * 1024 * 1024, active.Sum(x => x.ReservedMemoryBytes));
         }
         finally
         {

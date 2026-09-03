@@ -25,7 +25,8 @@ public sealed record FarmNodeCapacitySnapshot(
     bool Busy,
     int AvailableLogicalProcessors,
     long AvailableMemoryBytes,
-    IReadOnlyList<FarmNodeWorkloadCapacity> Workloads)
+    IReadOnlyList<FarmNodeWorkloadCapacity> Workloads,
+    int ActiveJobCount = 0)
 {
     public int EligibleWorkloadCount => Workloads.Count(x => x.Eligible);
 }
@@ -56,6 +57,17 @@ public static class FarmCapacityEvaluator
         FarmNodeSnapshot node,
         FarmWorkloadDefinition definition,
         bool busy,
+        bool poolHasAgents) => Evaluate(
+            node, definition,
+            busy ? 0 : node.AuthorizedLogicalProcessors,
+            busy ? 0 : node.AuthorizedMemoryBytes,
+            poolHasAgents);
+
+    public static FarmCapacityBlocker Evaluate(
+        FarmNodeSnapshot node,
+        FarmWorkloadDefinition definition,
+        int availableLogicalProcessors,
+        long availableMemoryBytes,
         bool poolHasAgents)
     {
         definition.ValidateResources();
@@ -73,6 +85,9 @@ public static class FarmCapacityEvaluator
             return FarmCapacityBlocker.InsufficientProcessors;
         if (node.AuthorizedMemoryBytes < definition.RequiredMemoryBytes)
             return FarmCapacityBlocker.InsufficientMemory;
-        return busy ? FarmCapacityBlocker.Busy : FarmCapacityBlocker.None;
+        return availableLogicalProcessors < definition.RequiredLogicalProcessors ||
+               availableMemoryBytes < definition.RequiredMemoryBytes
+            ? FarmCapacityBlocker.Busy
+            : FarmCapacityBlocker.None;
     }
 }

@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.7.0";
+    public const string CurrentAgentVersion = "atos-agent/0.8.0";
 }
 
 public static class FarmWorkerEnforcement
@@ -81,7 +81,8 @@ public sealed record FarmAgentHeartbeatRequest(
     bool AcceptJobs = true,
     int MaxLogicalProcessors = 0,
     long MaxMemoryBytes = 0,
-    Guid? ActiveJobId = null);
+    Guid? ActiveJobId = null,
+    IReadOnlyList<Guid>? ActiveJobIds = null);
 
 public sealed record FarmAgentHeartbeatResult(
     Guid NodeId,
@@ -92,7 +93,10 @@ public sealed record FarmAgentHeartbeatResult(
     int ActiveHeartbeatIntervalSeconds,
     Guid? ActiveJobId,
     DateTimeOffset? LeaseExpiresAtUtc,
-    bool CancelActiveJob);
+    bool CancelActiveJob,
+    IReadOnlyList<Guid>? CancelActiveJobIds = null);
+
+public sealed record FarmAgentClaimRequest(IReadOnlyList<Guid>? ActiveJobIds = null);
 
 public sealed record FarmAgentTrust(
     string Algorithm,
@@ -250,7 +254,8 @@ public interface IFarmAgentService
         CancellationToken cancellationToken = default);
     Task<FarmRemoteJobOffer?> ClaimJobAsync(
         string credential,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? activeJobIds = null);
     Task<bool> MarkJobStartedAsync(
         string credential,
         Guid jobId,

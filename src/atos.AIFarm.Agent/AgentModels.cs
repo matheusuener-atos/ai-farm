@@ -202,7 +202,7 @@ internal static class AgentInventory
 
     public static FarmAgentHeartbeatRequest Heartbeat(
         AgentLocalPolicy? policy = null,
-        Guid? activeJobId = null)
+        IReadOnlyList<Guid>? activeJobIds = null)
     {
         var effective = AgentLocalPolicy.Normalize(policy ?? AgentLocalPolicy.Default());
         return new(
@@ -213,7 +213,8 @@ internal static class AgentInventory
         effective.AcceptJobs,
         effective.MaxLogicalProcessors,
         effective.MaxMemoryBytes,
-        activeJobId);
+        activeJobIds?.FirstOrDefault(),
+        activeJobIds);
     }
 
     private static string Runtime() =>

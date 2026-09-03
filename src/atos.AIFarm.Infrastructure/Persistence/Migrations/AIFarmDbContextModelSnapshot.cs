@@ -1178,6 +1178,12 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
+                    b.Property<int>("ReservedLogicalProcessors")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("ReservedMemoryBytes")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("ResultDigest")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -1227,9 +1233,7 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("NodeId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_farm_jobs_node_active")
-                        .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
+                        .HasDatabaseName("IX_farm_jobs_node");
 
                     b.HasIndex("AccountId", "CreatedAtUtc");
 
@@ -1255,6 +1259,8 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("CK_farm_jobs_evidence_complete", "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR (\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_farm_jobs_manifest_complete", "(\"AttemptId\" IS NULL AND \"ManifestVersion\" IS NULL AND \"ManifestPayload\" IS NULL AND \"ManifestDigest\" IS NULL AND \"ManifestSignature\" IS NULL AND \"ManifestIssuedAtUtc\" IS NULL AND \"ManifestExpiresAtUtc\" IS NULL) OR (\"AttemptId\" IS NOT NULL AND \"ManifestVersion\" IS NOT NULL AND \"ManifestPayload\" IS NOT NULL AND \"ManifestDigest\" IS NOT NULL AND \"ManifestSignature\" IS NOT NULL AND \"ManifestIssuedAtUtc\" IS NOT NULL AND \"ManifestExpiresAtUtc\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_farm_jobs_resource_reservation", "\"ReservedLogicalProcessors\" >= 1 AND \"ReservedMemoryBytes\" >= 1");
 
                             t.HasCheckConstraint("CK_farm_jobs_schedule_attribution_complete", "(\"ScheduleId\" IS NULL AND \"ScheduledForUtc\" IS NULL) OR (\"ScheduleId\" IS NOT NULL AND \"ScheduledForUtc\" IS NOT NULL)");
 

@@ -14,9 +14,16 @@ internal sealed class PostgresFarmCapacityQuery(
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         var farm = await farmLab.GetDashboardAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var activeNodeIds = await db.FarmJobs.AsNoTracking()
+        var reservations = await db.FarmJobs.AsNoTracking()
             .Where(x => x.AccountId == identity.AccountId && FarmJobLifecycle.ActiveStatuses.Contains(x.Status))
-            .Select(x => x.NodeId).ToArrayAsync(cancellationToken);
+            .GroupBy(x => x.NodeId)
+            .Select(group => new
+            {
+                NodeId = group.Key,
+                JobCount = group.Count(),
+                LogicalProcessors = group.Sum(x => x.ReservedLogicalProcessors),
+                MemoryBytes = group.Sum(x => x.ReservedMemoryBytes)
+            }).ToDictionaryAsync(x => x.NodeId, cancellationToken);
         var queued = await db.FarmDemands.AsNoTracking().CountAsync(
             x => x.AccountId == identity.AccountId &&
                  (x.Status == FarmDemandStatus.Queued.ToString() ||
@@ -26,19 +33,23 @@ internal sealed class PostgresFarmCapacityQuery(
         var hasAgents = farm.Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent);
         var nodes = farm.Nodes.Select(node =>
         {
-            var busy = activeNodeIds.Contains(node.Id);
+            reservations.TryGetValue(node.Id, out var reserved);
+            var activeJobCount = reserved?.JobCount ?? 0;
+            var availableProcessors = Math.Max(0,
+                node.AuthorizedLogicalProcessors - (reserved?.LogicalProcessors ?? 0));
+            var availableMemory = Math.Max(0,
+                node.AuthorizedMemoryBytes - (reserved?.MemoryBytes ?? 0));
+            var busy = activeJobCount > 0;
             var workloads = FarmWorkloadCatalog.Definitions.Select(definition =>
             {
-                var blocker = FarmCapacityEvaluator.Evaluate(node, definition, busy, hasAgents);
+                var blocker = FarmCapacityEvaluator.Evaluate(
+                    node, definition, availableProcessors, availableMemory, hasAgents);
                 return new FarmNodeWorkloadCapacity(
                     definition.Id, definition.Version,
                     blocker == FarmCapacityBlocker.None, blocker);
             }).ToArray();
             return new FarmNodeCapacitySnapshot(
-                node, busy,
-                busy ? 0 : node.AuthorizedLogicalProcessors,
-                busy ? 0 : node.AuthorizedMemoryBytes,
-                workloads);
+                node, busy, availableProcessors, availableMemory, workloads, activeJobCount);
         }).ToArray();
         var workloadsSummary = FarmWorkloadCatalog.Definitions.Select(definition =>
         {

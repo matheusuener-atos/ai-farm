@@ -155,31 +155,34 @@ internal sealed class PostgresFarmAgentService(
             node.Status = FarmNodeStatus.Online.ToString();
 
         DateTimeOffset? leaseExpiresAtUtc = null;
-        var cancelActiveJob = false;
-        if (normalized.ActiveJobId is not null)
+        var activeJobIds = NormalizeActiveJobIds(normalized.ActiveJobId, normalized.ActiveJobIds);
+        var cancelJobIds = new List<Guid>();
+        if (activeJobIds.Length > 0)
         {
             await FarmJobLifecycle.ExpireAsync(
                 db,
                 now,
                 cancellationToken,
                 nodeId: node.Id);
-            var activeJob = await db.FarmJobs.SingleOrDefaultAsync(
-                x => x.Id == normalized.ActiveJobId && x.NodeId == node.Id &&
+            var activeJobs = await db.FarmJobs.Where(
+                x => activeJobIds.Contains(x.Id) && x.NodeId == node.Id &&
                      (x.Status == "Running" ||
                       x.Status == "Uploading" ||
-                      x.Status == "Verifying"),
-                cancellationToken);
-            if (activeJob is null)
+                      x.Status == "Verifying"))
+                .ToArrayAsync(cancellationToken);
+            foreach (var jobId in activeJobIds)
             {
-                cancelActiveJob = true;
-            }
-            else
-            {
+                var activeJob = activeJobs.SingleOrDefault(x => x.Id == jobId);
+                if (activeJob is null || activeJob.CancellationRequestedAtUtc is not null)
+                {
+                    cancelJobIds.Add(jobId);
+                    continue;
+                }
                 activeJob.AgentLeaseRenewedAtUtc = now;
                 activeJob.AgentLeaseExpiresAtUtc = now.Add(AgentLeaseLifetime);
-                leaseExpiresAtUtc = activeJob.AgentLeaseExpiresAtUtc;
-                cancelActiveJob = activeJob.CancellationRequestedAtUtc is not null;
             }
+            leaseExpiresAtUtc = activeJobs.Where(x => x.AgentLeaseExpiresAtUtc is not null)
+                .Select(x => x.AgentLeaseExpiresAtUtc).Max();
         }
         await db.SaveChangesAsync(cancellationToken);
 
@@ -191,9 +194,10 @@ internal sealed class PostgresFarmAgentService(
             now,
             HeartbeatIntervalSeconds,
             ActiveHeartbeatIntervalSeconds,
-            normalized.ActiveJobId,
+            activeJobIds.FirstOrDefault() == Guid.Empty ? null : activeJobIds[0],
             leaseExpiresAtUtc,
-            cancelActiveJob);
+            cancelJobIds.Count > 0,
+            cancelJobIds);
     }
 
     public async Task<FarmAgentTrust?> GetTrustAsync(
@@ -209,7 +213,8 @@ internal sealed class PostgresFarmAgentService(
 
     public async Task<FarmRemoteJobOffer?> ClaimJobAsync(
         string credential,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? activeJobIds = null)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
@@ -223,9 +228,11 @@ internal sealed class PostgresFarmAgentService(
             cancellationToken,
             nodeId: node.Id);
 
+        var reportedActiveIds = NormalizeActiveJobIds(null, activeJobIds);
         var jobId = await db.FarmJobs
             .Where(x => x.NodeId == node.Id &&
-                        (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running"))
+                        (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running") &&
+                        !reportedActiveIds.Contains(x.Id))
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (Guid?)x.Id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -715,7 +722,17 @@ internal sealed class PostgresFarmAgentService(
             request.AcceptJobs,
             maxLogicalProcessors,
             maxMemoryBytes,
-            request.ActiveJobId);
+            request.ActiveJobId,
+            NormalizeActiveJobIds(request.ActiveJobId, request.ActiveJobIds));
+    }
+
+    private static Guid[] NormalizeActiveJobIds(Guid? legacyJobId, IReadOnlyList<Guid>? jobIds)
+    {
+        var normalized = (jobIds ?? []).Append(legacyJobId ?? Guid.Empty)
+            .Where(x => x != Guid.Empty).Distinct().ToArray();
+        if (normalized.Length > 64)
+            throw new ArgumentOutOfRangeException(nameof(jobIds), "O Agent pode reportar até 64 Jobs ativos.");
+        return normalized;
     }
 
     private static string Required(string value, string name, int minimum, int maximum)

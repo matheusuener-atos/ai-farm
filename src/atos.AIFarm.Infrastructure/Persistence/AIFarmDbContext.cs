@@ -341,16 +341,16 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "CK_farm_jobs_evidence_complete",
                     "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR " +
                     "(\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_resource_reservation",
+                    "\"ReservedLogicalProcessors\" >= 1 AND \"ReservedMemoryBytes\" >= 1");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
             entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
             entity.HasIndex(x => new { x.DemandId, x.DemandShardIndex }).IsUnique();
-            entity.HasIndex(x => x.NodeId)
-                .HasDatabaseName("UX_farm_jobs_node_active")
-                .IsUnique()
-                .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
+            entity.HasIndex(x => x.NodeId).HasDatabaseName("IX_farm_jobs_node");
             entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);
             entity.Property(x => x.ApiIdempotencyKey).HasMaxLength(120);
@@ -625,6 +625,8 @@ public sealed class FarmJobRecord
     public Guid Id { get; set; }
     public Guid AccountId { get; set; }
     public Guid NodeId { get; set; }
+    public int ReservedLogicalProcessors { get; set; } = 1;
+    public long ReservedMemoryBytes { get; set; } = 64L * 1024 * 1024;
     public Guid? ApiTokenId { get; set; }
     public string? ApiIdempotencyKey { get; set; }
     public Guid? ScheduleId { get; set; }

@@ -281,8 +281,8 @@ dotnet run --project src/atos.AIFarm.Agent -- resume
 dotnet run --project src/atos.AIFarm.Agent -- limits 1 256
 ```
 
-`limits` recebe CPU lógica e memória em MiB. `pause` não interrompe o Job
-atual: apenas drena o Agent e impede novos despachos e claims. O painel mantém o
+`limits` recebe CPU lógica e memória em MiB. `pause` não interrompe os Jobs
+atuais: apenas drena o Agent e impede novos despachos e claims. O painel mantém o
 Node online, mas mostra a política local pausada e seus limites efetivos. Esses
 limites são uma política de admissão assinada; isolamento rígido de CPU/memória
 no sistema operacional ainda não faz parte deste runtime experimental.
@@ -345,15 +345,22 @@ O **Compute Pool v1** remove o limite histórico de um único Agent por conta.
 Cada nome de máquina representa um Node independente; vincular novamente o
 mesmo nome rotaciona somente sua credencial. Quando há Agents cadastrados, o
 scheduler escolhe apenas entre Agents online, compatíveis, com heartbeat atual,
-política local ativa e sem Job em andamento. Entre os elegíveis, ganha o menos
-recentemente utilizado. Sem Agents cadastrados, o runtime embedded continua
-disponível para desenvolvimento.
+política local ativa e capacidade residual. Sem Agents cadastrados, o runtime
+embedded continua disponível para desenvolvimento.
 
 A alocação usa um advisory lock transacional por conta no PostgreSQL. Assim,
-duas instâncias web podem receber submissões simultâneas sem reservar o mesmo
-Node. O índice parcial garante no máximo um Job ativo por Node, enquanto Nodes
-distintos processam Jobs em paralelo. O painel `/farm` lista todo o pool e a API
-permite operar cada Node separadamente.
+duas instâncias web podem receber submissões simultâneas sem exceder o mesmo
+Node. Cada Job congela sua reserva de CPU e memória; o scheduler soma reservas
+ativas e usa o saldo como critério de admissão. O painel `/farm` lista todo o
+pool e a API permite operar cada Node separadamente.
+
+O Agent `0.8.0` introduz **multi-slot**. Um único Agent pode manter vários
+workers isolados em paralelo quando a soma dos limites assinados cabe em
+`limits <cpu> <memoria-mb>`. Claim informa os Jobs já ativos, heartbeat renova
+todos os leases e recebe cancelamentos individualizados. Reduzir a política
+local impede novos claims, mas permite que os processos em curso terminem. A
+matriz `/farm/capacity` mostra Jobs ativos e CPU/memória restantes; um Node em
+uso continua aceitando trabalho enquanto possuir saldo suficiente.
 
 A **Demand Queue v1** separa aceitação de execução. `/farm/demands` persiste a
 entrada antes de procurar capacidade, aceita prioridades baixa, normal e alta,

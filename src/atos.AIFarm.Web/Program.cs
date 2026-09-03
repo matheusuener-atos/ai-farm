@@ -1041,11 +1041,13 @@ app.MapGet("/api/farm/agents/trust", async (
 app.MapPost("/api/farm/agents/jobs/claim", async (
     HttpRequest request,
     HttpResponse response,
+    FarmAgentClaimRequest claim,
     IFarmAgentService farmAgents,
     CancellationToken cancellationToken) =>
 {
     response.Headers.CacheControl = "no-store";
-    var offer = await farmAgents.ClaimJobAsync(ReadBearer(request), cancellationToken);
+    var offer = await farmAgents.ClaimJobAsync(
+        ReadBearer(request), cancellationToken, claim.ActiveJobIds);
     return offer is null ? Results.NoContent() : Results.Ok(offer);
 }).DisableAntiforgery()
   .RequireRateLimiting("farm-agent")

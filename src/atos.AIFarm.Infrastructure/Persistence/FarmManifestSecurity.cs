@@ -144,6 +144,8 @@ internal static class FarmManifestSecurity
             manifest.WorkloadVersion == job.WorkloadVersion &&
             manifest.VerificationPolicy == job.VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
+            manifest.MaxLogicalProcessors == job.ReservedLogicalProcessors &&
+            manifest.MaxMemoryBytes == job.ReservedMemoryBytes &&
             manifest.InputDigest == job.InputDigest &&
             SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
             SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
