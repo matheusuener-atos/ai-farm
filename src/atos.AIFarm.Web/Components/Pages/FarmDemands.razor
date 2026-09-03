@@ -1,0 +1,177 @@
+@page "/farm/demands"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@implements IAsyncDisposable
+@inject IFarmDemandQueueService DemandQueue
+
+<PageTitle>Fila de demandas // atos AI Farm</PageTitle>
+
+<div class="page-head">
+    <p class="eyebrow amber">atos:/FARM/DEMAND_QUEUE</p>
+    <h1>FILA DE TRABALHO</h1>
+    <p>A Iris retém, prioriza e despacha cada demanda quando um Compute Agent compatível estiver disponível.</p>
+    <a class="text-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
+</div>
+
+@if (_message is not null)
+{
+    <p class="@(_error ? "error" : "green")" role="status">@_message</p>
+}
+
+<section class="queue-metrics">
+    <div><small>AGUARDANDO</small><strong>@_dashboard.QueuedCount</strong></div>
+    <div><small>DESPACHANDO</small><strong>@_dashboard.InFlightCount</strong></div>
+    <div><small>SUBMETIDAS</small><strong>@_dashboard.SubmittedCount</strong></div>
+    <div><small>CONCLUÍDAS</small><strong>@_dashboard.CompletedCount</strong></div>
+</section>
+
+<section class="panel">
+    <div class="panel-head"><h2>NOVA DEMANDA</h2><span>STANDARD // MÁX. 32 KiB // SEM REDE</span></div>
+    <div class="useful-form">
+        <label>RÓTULO
+            <input @bind="_label" maxlength="120" placeholder="indexar documentação do produto" disabled="@_working" />
+        </label>
+        <div class="form-row">
+            <label>WORKLOAD
+                <select @bind="_workloadId" disabled="@_working">
+                    @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is not null))
+                    {
+                        <option value="@workload.Id">@workload.DisplayName // @workload.Version</option>
+                    }
+                </select>
+            </label>
+            <label>PRIORIDADE
+                <select @bind="_priority" disabled="@_working">
+                    <option value="@FarmDemandPriority.Low">BAIXA</option>
+                    <option value="@FarmDemandPriority.Normal">NORMAL</option>
+                    <option value="@FarmDemandPriority.High">ALTA</option>
+                </select>
+            </label>
+            <label>VALIDADE
+                <select @bind="_lifetimeMinutes" disabled="@_working">
+                    <option value="60">1 HORA</option>
+                    <option value="1440">24 HORAS</option>
+                    <option value="10080">7 DIAS</option>
+                </select>
+            </label>
+            <label>PARALELISMO
+                <select @bind="_targetShards" disabled="@_working">
+                    <option value="1">1 SHARD</option>
+                    <option value="2">2 SHARDS</option>
+                    <option value="4">4 SHARDS</option>
+                    <option value="8">8 SHARDS</option>
+                </select>
+            </label>
+        </div>
+        <label>TEXTO DA DEMANDA
+            <textarea @bind="_input" rows="12" maxlength="32768" placeholder="Cole aqui o conteúdo STANDARD que será processado..." disabled="@_working"></textarea>
+        </label>
+        <small>O envio confirma a entrada na fila; a execução ocorrerá quando houver capacidade. Não envie conteúdo PRIVATE ou CONFIDENTIAL.</small>
+        <button type="button" @onclick="SubmitAsync" disabled="@_working">
+            @(_working ? "[ ENFILEIRANDO... ]" : "[ ENFILEIRAR DEMANDA ]")
+        </button>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-head"><h2>DEMANDAS RECENTES</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">[ ATUALIZAR ]</button></div>
+    @if (_dashboard.Demands.Count == 0) { <p class="empty">NENHUMA DEMANDA ENFILEIRADA.</p> }
+    @foreach (var demand in _dashboard.Demands)
+    {
+        <article class="useful-job">
+            <div><strong>@demand.Label</strong><small>@demand.WorkloadVersion // @demand.Id.ToString("N")[..8]</small></div>
+            <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>REQUER @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) // TENTATIVAS @demand.Attempts</small><small>INPUT @Short(demand.InputDigest)</small></div>
+            <div><span class="@StatusClass(demand.Status)">[ @Status(demand.Status) ]</span><small>SHARDS @demand.CompletedShards/@demand.TargetShards // DESPACHADOS @demand.DispatchedShards // FALHAS @demand.FailedShards</small><small>@demand.Detail</small></div>
+            <div class="queue-actions">
+                @if (demand.Status == FarmDemandStatus.Queued)
+                {
+                    <button class="button-danger" @onclick="() => CancelAsync(demand.Id)" disabled="@_working">[ CANCELAR ]</button>
+                }
+                @if (demand.JobId is Guid jobId)
+                {
+                    <a class="text-link" href="/farm/jobs">[ JOB @jobId.ToString("N")[..8] // @(demand.JobStatus?.ToString().ToUpperInvariant()) ]</a>
+                }
+                @if (demand.Status == FarmDemandStatus.Completed)
+                {
+                    <a class="text-link" href="@OutputUrl(demand.Id)">[ BAIXAR ÍNDICE DISTRIBUÍDO ]</a>
+                }
+            </div>
+        </article>
+        @if (demand.Shards.Count > 1)
+        {
+            <div class="shard-row">
+                @foreach (var shard in demand.Shards)
+                {
+                    <span>#@shard.Sequence // @(shard.JobStatus?.ToString().ToUpperInvariant() ?? "AGUARDANDO") // @Short(shard.InputDigest)</span>
+                }
+            </div>
+        }
+    }
+</section>
+
+@code {
+    private FarmDemandDashboard _dashboard = new([]);
+    private string _workloadId = "iris-text-index-v1";
+    private string _label = string.Empty;
+    private string _input = string.Empty;
+    private FarmDemandPriority _priority = FarmDemandPriority.Normal;
+    private int _lifetimeMinutes = 1440;
+    private int _targetShards = 1;
+    private bool _working;
+    private bool _error;
+    private string? _message;
+    private readonly CancellationTokenSource _pollCancellation = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _ = PollAsync(_pollCancellation.Token);
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_working) continue;
+                await InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private async Task LoadAsync() => _dashboard = await DemandQueue.GetDashboardAsync();
+
+    private async Task SubmitAsync()
+    {
+        _working = true; _message = null;
+        try
+        {
+            await DemandQueue.SubmitAsync(new(_workloadId, _label, _input, _priority, _lifetimeMinutes, _targetShards));
+            _message = "Demanda aceita. A fila fará o despacho automaticamente quando houver capacidade.";
+            _label = string.Empty; _input = string.Empty; _error = false;
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        { _message = exception.Message; _error = true; }
+        finally { _working = false; }
+    }
+
+    private async Task CancelAsync(Guid id)
+    {
+        _working = true; _message = null;
+        try { await DemandQueue.CancelAsync(id); _message = "Demanda cancelada antes do despacho."; _error = false; await LoadAsync(); }
+        catch (InvalidOperationException exception) { _message = exception.Message; _error = true; }
+        finally { _working = false; }
+    }
+
+    public ValueTask DisposeAsync() { _pollCancellation.Cancel(); _pollCancellation.Dispose(); return ValueTask.CompletedTask; }
+    private static string Short(string? value) => value is { Length: >= 12 } ? value[..12] : "---";
+    private static string Priority(FarmDemandPriority value) => value switch { FarmDemandPriority.High => "ALTA", FarmDemandPriority.Low => "BAIXA", _ => "NORMAL" };
+    private static string Status(FarmDemandStatus value) => value switch { FarmDemandStatus.Queued => "AGUARDANDO", FarmDemandStatus.Dispatching => "DESPACHANDO", FarmDemandStatus.Processing => "FAN-OUT", FarmDemandStatus.Submitted => "PROCESSANDO", FarmDemandStatus.Completed => "CONCLUÍDA", FarmDemandStatus.Cancelled => "CANCELADA", FarmDemandStatus.Expired => "EXPIRADA", _ => "FALHA" };
+    private static string StatusClass(FarmDemandStatus value) => value == FarmDemandStatus.Completed ? "green" : value is FarmDemandStatus.Failed or FarmDemandStatus.Expired ? "error" : "amber";
+    private static string OutputUrl(Guid id) => $"/api/farm/demands/{id}/output";
+    private static string FormatBytes(long bytes) => $"{bytes / 1024d / 1024d:N0} MiB";
+}

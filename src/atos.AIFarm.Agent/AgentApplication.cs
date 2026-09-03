@@ -136,7 +136,7 @@ internal static class AgentApplication
         var worker = AgentWorkerProcessRunner.CreateCurrent();
         var failures = 0;
         var interval = Math.Clamp(configuration.HeartbeatIntervalSeconds, 10, 300);
-        ActiveJobExecution? activeJob = null;
+        var activeJobs = new Dictionary<Guid, ActiveJobExecution>();
         Write(
             "START",
             $"Node {configuration.NodeId} // {configuration.BaseUrl} // {ProfileLabel()} // {PolicyLabel(configuration.EffectivePolicy)} // Ctrl+C para parar.");
@@ -146,10 +146,10 @@ internal static class AgentApplication
             {
                 try
                 {
-                    if (activeJob?.Completion.IsCompleted == true)
+                    foreach (var completedJob in activeJobs.Values
+                                 .Where(x => x.Completion.IsCompleted).ToArray())
                     {
-                        var completedJob = activeJob;
-                        activeJob = null;
+                        activeJobs.Remove(completedJob.JobId);
                         try { await completedJob.Completion; }
                         finally { completedJob.Dispose(); }
                     }
@@ -160,36 +160,44 @@ internal static class AgentApplication
                         throw new AgentAuthenticationException(
                             "O vínculo local mudou. Reinicie o processo do Agent.");
                     configuration = latest with { Policy = latest.EffectivePolicy };
+                    var activeJobIds = activeJobs.Keys.ToArray();
                     var heartbeat = await client.HeartbeatAsync(
                         configuration,
                         credential,
                         cancellation.Source.Token,
-                        activeJob?.JobId);
+                        activeJobIds);
                     failures = 0;
-                    interval = activeJob is null
+                    interval = activeJobs.Count == 0
                         ? Math.Clamp(heartbeat.HeartbeatIntervalSeconds, 10, 300)
                         : Math.Clamp(heartbeat.ActiveHeartbeatIntervalSeconds, 1, 10);
                     Write(
                         "HEARTBEAT",
-                        $"{heartbeat.Status.ToString().ToUpperInvariant()} // ACCEPT_JOBS={heartbeat.AcceptJobs} // JOB={(activeJob is null ? "---" : activeJob.JobId.ToString("N")[..8])} // PRÓXIMO={interval}s");
-                    if (activeJob is not null &&
-                        heartbeat.CancelActiveJob &&
-                        heartbeat.ActiveJobId == activeJob.JobId)
+                        $"{heartbeat.Status.ToString().ToUpperInvariant()} // ACCEPT_JOBS={heartbeat.AcceptJobs} // JOBS={activeJobs.Count} // PRÓXIMO={interval}s");
+                    var cancellationIds = heartbeat.CancelActiveJobIds ??
+                        (heartbeat.CancelActiveJob && heartbeat.ActiveJobId is Guid legacyId ? [legacyId] : []);
+                    foreach (var jobId in cancellationIds)
                     {
+                        if (!activeJobs.TryGetValue(jobId, out var activeJob)) continue;
                         Write("CANCEL", $"JOB={activeJob.JobId:N} // solicitação recebida do servidor.");
                         activeJob.Cancel();
                     }
-                    if (activeJob is null && heartbeat.AcceptJobs)
+                    if (heartbeat.AcceptJobs)
                     {
-                        activeJob = await TryStartNextJobAsync(
-                            client,
-                            configuration,
-                            credential,
-                            manifestVerificationKey,
-                            worker,
-                            cancellation.Source.Token);
-                        if (activeJob is not null)
+                        while (true)
+                        {
+                            var availableProcessors = configuration.EffectivePolicy.MaxLogicalProcessors -
+                                activeJobs.Values.Sum(x => x.LogicalProcessors);
+                            var availableMemory = configuration.EffectivePolicy.MaxMemoryBytes -
+                                activeJobs.Values.Sum(x => x.MemoryBytes);
+                            if (availableProcessors <= 0 || availableMemory <= 0) break;
+                            var activeJob = await TryStartNextJobAsync(
+                                client, configuration, credential, manifestVerificationKey, worker,
+                                activeJobs.Keys.ToArray(), availableProcessors, availableMemory,
+                                cancellation.Source.Token);
+                            if (activeJob is null) break;
+                            activeJobs.Add(activeJob.JobId, activeJob);
                             interval = Math.Clamp(heartbeat.ActiveHeartbeatIntervalSeconds, 1, 10);
+                        }
                     }
                 }
                 catch (AgentAuthenticationException)
@@ -201,7 +209,7 @@ internal static class AgentApplication
                     !cancellation.Source.IsCancellationRequested)
                 {
                     failures++;
-                    interval = activeJob is null
+                    interval = activeJobs.Count == 0
                         ? Math.Min(60, Math.Max(5, 5 * (1 << Math.Min(failures - 1, 3))))
                         : 2;
                     Write("RETRY", $"{exception.Message} // NOVA TENTATIVA={interval}s");
@@ -212,9 +220,10 @@ internal static class AgentApplication
         }
         finally
         {
-            if (activeJob is not null)
-            {
+            foreach (var activeJob in activeJobs.Values)
                 activeJob.Cancel();
+            foreach (var activeJob in activeJobs.Values)
+            {
                 await activeJob.Completion;
                 activeJob.Dispose();
             }
@@ -287,9 +296,13 @@ internal static class AgentApplication
         string credential,
         string manifestVerificationKey,
         AgentWorkerProcessRunner worker,
+        IReadOnlyList<Guid> activeJobIds,
+        int availableLogicalProcessors,
+        long availableMemoryBytes,
         CancellationToken cancellationToken)
     {
-        var offer = await client.ClaimJobAsync(configuration, credential, cancellationToken);
+        var offer = await client.ClaimJobAsync(
+            configuration, credential, cancellationToken, activeJobIds);
         if (offer is null) return null;
         RemoteJobManifest manifest;
         try
@@ -309,6 +322,17 @@ internal static class AgentApplication
                 exception.Message[..Math.Min(exception.Message.Length, 200)],
                 cancellationToken);
             Write("REJECT", $"JOB={offer.JobId:N} // {exception.Message}");
+            return null;
+        }
+
+        if (manifest.MaxLogicalProcessors > availableLogicalProcessors ||
+            manifest.MaxMemoryBytes > availableMemoryBytes)
+        {
+            await client.RejectJobAsync(
+                configuration, credential, offer.JobId,
+                "Capacidade residual local insuficiente para o manifesto.",
+                cancellationToken);
+            Write("REJECT", $"JOB={offer.JobId:N} // capacidade residual insuficiente.");
             return null;
         }
 
@@ -338,7 +362,9 @@ internal static class AgentApplication
             worker,
             remoteCancellation.Token,
             cancellationToken);
-        return new ActiveJobExecution(offer.JobId, remoteCancellation, completion);
+        return new ActiveJobExecution(
+            offer.JobId, manifest.MaxLogicalProcessors, manifest.MaxMemoryBytes,
+            remoteCancellation, completion);
     }
 
     private static async Task ExecuteClaimedJobAsync(
@@ -358,7 +384,7 @@ internal static class AgentApplication
         timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
         try
         {
-            var workerResult = await worker.RunAsync(manifest, timeout.Token);
+            var workerResult = await worker.RunAsync(manifest, offer.Input, timeout.Token);
             var acknowledgement = await client.SubmitResultAsync(
                 configuration,
                 credential,
@@ -368,7 +394,8 @@ internal static class AgentApplication
                     workerResult.DurationMilliseconds,
                     workerResult.PeakMemoryBytes,
                     workerResult.ProcessorTimeMilliseconds,
-                    workerResult.Enforcement),
+                    workerResult.Enforcement,
+                    workerResult.OutputPayload),
                 execution.Token);
             Write(
                 "JOB",
@@ -414,10 +441,14 @@ internal static class AgentApplication
 
     private sealed class ActiveJobExecution(
         Guid jobId,
+        int logicalProcessors,
+        long memoryBytes,
         CancellationTokenSource cancellation,
         Task completion) : IDisposable
     {
         public Guid JobId { get; } = jobId;
+        public int LogicalProcessors { get; } = logicalProcessors;
+        public long MemoryBytes { get; } = memoryBytes;
         public Task Completion { get; } = completion;
         public void Cancel() => cancellation.Cancel();
         public void Dispose() => cancellation.Dispose();

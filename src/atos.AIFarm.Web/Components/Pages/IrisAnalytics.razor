@@ -1,0 +1,186 @@
+@page "/iris/analytics"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IAiUsageQuery Usage
+
+<PageTitle>Análise da Iris // atos AI Farm</PageTitle>
+
+<div class="page-head analytics-head">
+    <div>
+        <p class="eyebrow">atos:/IRIS/ANALYTICS</p>
+        <h1>CENTRO ANALÍTICO</h1>
+        <p>TELEMETRIA AGREGADA // SEM PROMPTS // ISOLADA POR CONTA</p>
+    </div>
+    <label class="analytics-period">PERÍODO UTC
+        <select value="@_days" @onchange="ChangePeriodAsync" disabled="@_loading">
+            <option value="7">7 DIAS</option>
+            <option value="30">30 DIAS</option>
+            <option value="90">90 DIAS</option>
+        </select>
+    </label>
+</div>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else if (_analytics is null)
+{
+    <p>CALCULANDO TELEMETRIA...</p>
+}
+else
+{
+    <div class="analytics-kpis">
+        <section class="kpi kpi-purple">
+            <span>EXECUÇÕES</span>
+            <strong>@_analytics.Totals.ExecutionCount</strong>
+            <small>@_analytics.Totals.ConversationCount CONVERSA(S)</small>
+        </section>
+        <section class="kpi kpi-green">
+            <span>TAXA DE SUCESSO</span>
+            <strong>@_analytics.SuccessRatePercent.ToString("0.0")%</strong>
+            <small>@SuccessfulCount CONCLUÍDA(S)</small>
+        </section>
+        <section class="kpi kpi-amber">
+            <span>CUSTO REAL</span>
+            <strong>@Aic.Format(_analytics.Totals.ActualCostMinor)</strong>
+            <small>ESTIMADO @Aic.Format(_analytics.Totals.EstimatedCostMinor)</small>
+        </section>
+        <section class="kpi kpi-green">
+            <span>AIC LIBERADO</span>
+            <strong>@Aic.Format(_analytics.Totals.ReleasedCostMinor)</strong>
+            <small>RESERVA NÃO CONSUMIDA</small>
+        </section>
+        <section class="kpi">
+            <span>LATÊNCIA MÉDIA</span>
+            <strong>@FormatDuration(_analytics.AverageDurationMilliseconds)</strong>
+            <small>EXECUÇÕES FINALIZADAS</small>
+        </section>
+        <section class="kpi @CostTrendClass">
+            <span>VARIAÇÃO DE CUSTO</span>
+            <strong>@FormatChange(_analytics.ActualCostChangePercent)</strong>
+            <small>PERÍODO ANTERIOR @Aic.Format(_analytics.PreviousPeriodActualCostMinor)</small>
+        </section>
+    </div>
+
+    <section class="panel analytics-timeline">
+        <div class="panel-head section-heading">
+            <div>
+                <h2>CUSTO DIÁRIO</h2>
+                <p class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</p>
+            </div>
+            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">
+                @(_loading ? "[ ATUALIZANDO... ]" : "[ ATUALIZAR ]")
+            </button>
+        </div>
+        <div class="analytics-bars" role="img" aria-label="Custo real diário da Iris">
+            @foreach (var day in _analytics.Daily)
+            {
+                <div class="analytics-bar-row">
+                    <time datetime="@day.DateUtc.ToString("yyyy-MM-dd")">@day.DateUtc.ToString("dd/MM")</time>
+                    <div class="analytics-bar-track">
+                        <span style="width: @BarWidth(day.ActualCostMinor)"></span>
+                    </div>
+                    <strong>@Aic.Format(day.ActualCostMinor)</strong>
+                    <small>@day.ExecutionCount EXEC // @day.FailureCount FALHA(S)</small>
+                </div>
+            }
+        </div>
+    </section>
+
+    <div class="analytics-detail-grid">
+        <section class="panel">
+            <div class="panel-head"><h2>PROVEDORES E MODELOS</h2></div>
+            @if (_analytics.Routes.Count == 0)
+            {
+                <p class="analytics-empty muted">SEM EXECUÇÕES NO PERÍODO.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>ROTA</th><th>EXEC</th><th>UNIDADES</th><th>CUSTO</th><th>LATÊNCIA</th></tr></thead>
+                        <tbody>
+                            @foreach (var route in _analytics.Routes)
+                            {
+                                <tr>
+                                    <td><span class="purple">@route.Provider</span><br /><small>@route.Model</small></td>
+                                    <td>@route.ExecutionCount<br /><small class="green">@route.SuccessCount OK</small> // <small class="amber">@route.FailureCount FALHA</small></td>
+                                    <td>@route.InputUnits IN<br />@route.OutputUnits OUT</td>
+                                    <td>@Aic.Format(route.ActualCostMinor)<br /><small>EST. @Aic.Format(route.EstimatedCostMinor)</small></td>
+                                    <td>@FormatDuration(route.AverageDurationMilliseconds)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="panel analytics-statuses">
+            <div class="panel-head"><h2>RESULTADOS</h2></div>
+            @if (_analytics.Statuses.Count == 0)
+            {
+                <p class="analytics-empty muted">SEM RESULTADOS NO PERÍODO.</p>
+            }
+            else
+            {
+                @foreach (var status in _analytics.Statuses)
+                {
+                    <div>
+                        <span class="@StatusClass(status.Status)">@status.Status.ToUpperInvariant()</span>
+                        <strong>@status.ExecutionCount</strong>
+                        <small>@status.Percentage.ToString("0.0")%</small>
+                    </div>
+                }
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private AiUsageAnalytics? _analytics;
+    private int _days = 30;
+    private bool _loading;
+    private string? _error;
+
+    private int SuccessfulCount => _analytics?.Statuses
+        .FirstOrDefault(x => x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase))
+        ?.ExecutionCount ?? 0;
+    private long MaximumDailyCost => Math.Max(1, _analytics?.Daily.Max(x => x.ActualCostMinor) ?? 0);
+    private string CostTrendClass => _analytics?.ActualCostChangePercent switch
+    {
+        <= 0 => "kpi-green",
+        > 0 => "kpi-amber",
+        _ => string.Empty
+    };
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task ChangePeriodAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var days))
+            _days = days;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try { _analytics = await Usage.GetAnalyticsAsync(_days); }
+        catch (Exception) { _error = "Não foi possível calcular a telemetria analítica."; }
+        finally { _loading = false; }
+    }
+
+    private string BarWidth(long value) => $"{value * 100m / MaximumDailyCost:0.##}%";
+    private static string FormatChange(decimal? value) => value is null ? "SEM BASE" : $"{value:+0.0;-0.0;0.0}%";
+    private static string FormatDuration(decimal? milliseconds) => milliseconds switch
+    {
+        null => "---",
+        < 1_000 => $"{milliseconds:0} ms",
+        _ => $"{milliseconds / 1_000:0.00} s"
+    };
+    private static string StatusClass(string status) =>
+        status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ? "green" : "amber";
+}

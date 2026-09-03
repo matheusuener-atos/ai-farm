@@ -10,7 +10,10 @@
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/COMPUTE_LAB</p>
     <h1>COMPUTE CONTROLADO</h1>
-    <p>Benchmark determinístico em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
+    <p>Workloads determinísticos em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
+    <a class="farm-economics-link" href="/farm/jobs">[ ABRIR CENTRO DE JOBS → ]</a>
+    <a class="farm-economics-link" href="/farm/demands">[ ENVIAR DEMANDA ÚTIL → ]</a>
+    <a class="farm-economics-link" href="/farm/schedules">[ AUTOMATIZAR WORKLOADS → ]</a>
     <a class="farm-economics-link" href="/farm/economy">[ SIMULAR ECONOMIA → ]</a>
     <a class="farm-economics-link" href="/saldo-farm">[ VER SALDO DA FARM → ]</a>
 </div>
@@ -28,6 +31,48 @@
 }
 else
 {
+    <section class="terminal farm-workload-catalog">
+        <div class="terminal-title">CATÁLOGO DE WORKLOADS // @FarmWorkloadCatalog.Version</div>
+        <div class="farm-workload-grid">
+            @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is null))
+            {
+                <label class="farm-workload-card @(workload.Id == _selectedWorkloadId ? "selected" : null)">
+                    <input type="radio" name="farm-workload" value="@workload.Id"
+                           checked="@(workload.Id == _selectedWorkloadId)"
+                           @onchange="() => _selectedWorkloadId = workload.Id"
+                           disabled="@_working" />
+                    <span>@workload.DisplayName</span>
+                    <strong>@workload.Version</strong>
+                    <small>@workload.Description</small>
+                    <small>@workload.Iterations.ToString("N0") UNIDADES // @FormatCp(workload.ProcessingPointsMilli) // @workload.NetworkPolicy</small>
+                </label>
+            }
+        </div>
+    </section>
+
+    <section class="terminal farm-pool">
+        <div class="terminal-title">COMPUTE POOL // @_dashboard.AvailableNodeCount DISPONÍVEIS // @_dashboard.Nodes.Count TOTAL</div>
+        <div class="farm-pool-grid">
+            @foreach (var poolNode in _dashboard.Nodes)
+            {
+                <article>
+                    <header><strong>@poolNode.Name</strong><span class="@(poolNode.AcceptJobs ? "green" : "amber")">[ @NodeStatusLabel(poolNode.Status) ]</span></header>
+                    <small>@ConnectionLabel(poolNode.ConnectionKind) // @(poolNode.AgentVersion ?? "HOST WEB")</small>
+                    <dl>
+                        <div><dt>CPU</dt><dd>@poolNode.AuthorizedLogicalProcessors / @poolNode.LogicalProcessors</dd></div>
+                        <div><dt>MEMÓRIA</dt><dd>@FormatBytes(poolNode.AuthorizedMemoryBytes)</dd></div>
+                        <div><dt>HEARTBEAT</dt><dd>@(poolNode.IsHeartbeatFresh ? "ATUAL" : "EXPIRADO")</dd></div>
+                        <div><dt>PERFIL</dt><dd>@VerificationLabel(poolNode.VerificationLevel)</dd></div>
+                    </dl>
+                    <button type="button" class="button-secondary"
+                            @onclick="() => ToggleNodeAsync(poolNode)" disabled="@_working">
+                        [ @(poolNode.Status == FarmNodeStatus.Paused ? "RETOMAR" : "PAUSAR") ]
+                    </button>
+                </article>
+            }
+        </div>
+    </section>
+
     <section class="farm-node-panel">
         <header class="farm-node-header">
             <div>
@@ -83,7 +128,7 @@ else
             }
             else
             {
-                <text> // PERFIL AGUARDANDO BENCHMARK</text>
+                <text> // PERFIL AGUARDANDO EXECUÇÃO VERIFICADA</text>
             }
         </p>
 
@@ -91,15 +136,15 @@ else
             @if (IsOnline && IsEmbedded)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR NODE ]</button>
-                <button type="button" @onclick="RunBenchmarkAsync" disabled="@_working">
-                    @(_working ? "[ EXECUTANDO... ]" : "[ EXECUTAR BENCHMARK ]")
+                <button type="button" @onclick="RunWorkloadAsync" disabled="@_working">
+                    @(_working ? "[ EXECUTANDO... ]" : $"[ EXECUTAR {SelectedWorkload.DisplayName} ]")
                 </button>
             }
             else if (IsOnline)
             {
                 <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">[ PAUSAR AGENT ]</button>
-                <button type="button" @onclick="RunBenchmarkAsync" disabled="@(_working || !CanAcceptJobs)">
-                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : "[ DESPACHAR BENCHMARK ]")
+                <button type="button" @onclick="RunWorkloadAsync" disabled="@(_working || !CanAcceptJobs)">
+                    @(!CanAcceptJobs ? "[ POLÍTICA LOCAL PAUSADA ]" : _working ? "[ DESPACHANDO... ]" : $"[ DESPACHAR {SelectedWorkload.DisplayName} ]")
                 </button>
             }
             else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
@@ -111,7 +156,7 @@ else
                 <button type="button" disabled>[ AGUARDANDO HEARTBEAT ]</button>
             }
         </div>
-        <small class="classification-note">ALLOWLIST // SHA256_CHAIN V1 // LIMITES LOCAIS // SEM SHELL // SEM REDE // SEM AIC</small>
+        <small class="classification-note">ALLOWLIST // @SelectedWorkload.Workload // @SelectedWorkload.VerificationPolicy // SEM SHELL // SEM REDE // SEM AIC</small>
     </section>
 
     <section class="terminal farm-agent-panel">
@@ -119,7 +164,7 @@ else
         <p>
             @if (IsEmbedded)
             {
-                <text>Modo EMBEDDED: o benchmark roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
+                <text>Modo EMBEDDED: o workload roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
             }
             else
             {
@@ -127,7 +172,7 @@ else
             }
         </p>
         <button type="button" class="button-secondary" @onclick="CreateEnrollmentAsync" disabled="@_working">
-            [ @(IsEmbedded ? "GERAR CÓDIGO DE VÍNCULO" : "ROTACIONAR CREDENCIAL") ]
+            [ GERAR CÓDIGO PARA NOVO/RE-VÍNCULO ]
         </button>
         @if (_enrollment is not null)
         {
@@ -240,6 +285,10 @@ else
                                 <div><dt>EMITIDO</dt><dd>@job.Evidence.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</dd></div>
                                 <div><dt>PAYLOAD DIGEST</dt><dd title="@job.Evidence.Digest">@ShortHash(job.Evidence.Digest)</dd></div>
                                 <div><dt>ASSINATURA</dt><dd title="@job.Evidence.Signature">@ShortHash(job.Evidence.Signature)</dd></div>
+                                <div><dt>HMAC DO BUNDLE</dt><dd class="@IntegrityClass(job.Evidence.Verification.SignatureValid)">@IntegrityLabel(job.Evidence.Verification.SignatureValid)</dd></div>
+                                <div><dt>MANIFESTO</dt><dd class="@IntegrityClass(job.Evidence.Verification.ManifestValid)">@IntegrityLabel(job.Evidence.Verification.ManifestValid)</dd></div>
+                                <div><dt>VÍNCULO DO JOB</dt><dd class="@IntegrityClass(job.Evidence.Verification.JobBindingValid)">@IntegrityLabel(job.Evidence.Verification.JobBindingValid)</dd></div>
+                                <div><dt>LIFECYCLE</dt><dd class="@IntegrityClass(job.Evidence.Verification.LifecycleValid)">@IntegrityLabel(job.Evidence.Verification.LifecycleValid)</dd></div>
                             </dl>
                         </details>
                     }
@@ -264,11 +313,13 @@ else
     private bool _working;
     private string? _error;
     private FarmAgentEnrollment? _enrollment;
+    private string _selectedWorkloadId = FarmWorkloadCatalog.DefaultId;
     private readonly CancellationTokenSource _pollCancellation = new();
     private Task? _pollTask;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
     private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
     private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
+    private FarmWorkloadDefinition SelectedWorkload => FarmWorkloadCatalog.GetRequired(_selectedWorkloadId);
 
     protected override async Task OnInitializedAsync()
     {
@@ -293,14 +344,30 @@ else
         finally { _working = false; }
     }
 
-    private async Task RunBenchmarkAsync()
+    private async Task ToggleNodeAsync(FarmNodeSnapshot node)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            var status = node.Status == FarmNodeStatus.Paused
+                ? FarmNodeStatus.Online : FarmNodeStatus.Paused;
+            _dashboard = await FarmLab.SetNodeStatusAsync(node.Id, status);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        { _error = exception.Message; }
+        finally { _working = false; }
+    }
+
+    private async Task RunWorkloadAsync()
     {
         if (_working || !IsOnline) return;
         _working = true;
         _error = null;
         try
         {
-            await FarmLab.RunBenchmarkAsync();
+            await FarmLab.RunWorkloadAsync(_selectedWorkloadId);
             _dashboard = await FarmLab.GetDashboardAsync();
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
@@ -401,6 +468,9 @@ else
     private static string JobStatusClass(FarmJobStatus status) =>
         status == FarmJobStatus.Completed ? "green" :
         status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? "error-text" : "amber";
+
+    private static string IntegrityLabel(bool valid) => valid ? "VÁLIDO" : "INVÁLIDO";
+    private static string IntegrityClass(bool valid) => valid ? "green" : "error-text";
 
     private static bool CanCancel(FarmJobSnapshot job) =>
         job.CancellationRequestedAtUtc is null && CanCancelStatus(job.Status);

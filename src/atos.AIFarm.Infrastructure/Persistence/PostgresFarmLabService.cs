@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -13,36 +14,24 @@ internal sealed class PostgresFarmLabService(
     TimeProvider timeProvider,
     FarmManifestSigningOptions signingOptions) : IFarmLabService
 {
-    private const int BenchmarkIterations = 100_000;
-    private const int BenchmarkTimeoutSeconds = 30;
-    private const long BenchmarkMemoryLimitBytes = 256L * 1024 * 1024;
-    private const string ManifestVersion = "atos-farm-manifest-v1";
-    private const string LegacyRemoteManifestVersion = "atos-farm-manifest-v2-agent";
-    internal const string RemoteManifestVersion = "atos-farm-manifest-v3-agent-profile";
-    private const string Workload = "SHA256_CHAIN";
-    private const string WorkloadVersion = "atos-sha256-chain-v1";
-    private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
-    private const string NetworkPolicy = "DENY_ALL";
-    private const string DataClassification = "STANDARD";
+    private const string ManifestVersion = FarmManifestSecurity.EmbeddedVersion;
+    internal const string RemoteManifestVersion = FarmManifestSecurity.AgentProfileVersion;
     private static readonly TimeSpan AgentHeartbeatTolerance = TimeSpan.FromSeconds(90);
 
     public async Task<FarmDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        var embedded = await EnsureEmbeddedNodeAsync(db, identity.AccountId, cancellationToken);
         var now = timeProvider.GetUtcNow();
         await FarmJobLifecycle.ExpireAsync(
             db,
             now,
             cancellationToken,
             accountId: identity.AccountId);
-        if (node.ConnectionKind == FarmNodeConnectionKind.Embedded.ToString())
-        {
-            node.LastSeenAtUtc = now;
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        return await BuildDashboardAsync(db, node, cancellationToken);
+        embedded.LastSeenAtUtc = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
     }
 
     public async Task<FarmDashboard> SetNodeStatusAsync(
@@ -54,41 +43,165 @@ internal sealed class PostgresFarmLabService(
 
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        await EnsureEmbeddedNodeAsync(db, identity.AccountId, cancellationToken);
+        var node = await GetPrimaryNodeAsync(db, identity.AccountId, cancellationToken);
+        return await SetNodeStatusCoreAsync(db, identity.AccountId, node, status, cancellationToken);
+    }
+
+    public async Task<FarmDashboard> SetNodeStatusAsync(
+        Guid nodeId,
+        FarmNodeStatus status,
+        CancellationToken cancellationToken = default)
+    {
+        if (status is not (FarmNodeStatus.Online or FarmNodeStatus.Paused))
+            throw new ArgumentOutOfRangeException(nameof(status));
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.Id == nodeId && x.AccountId == identity.AccountId, cancellationToken)
+            ?? throw new InvalidOperationException("Node não encontrado para esta conta.");
+        return await SetNodeStatusCoreAsync(db, identity.AccountId, node, status, cancellationToken);
+    }
+
+    private async Task<FarmDashboard> SetNodeStatusCoreAsync(
+        AIFarmDbContext db,
+        Guid accountId,
+        FarmNodeRecord node,
+        FarmNodeStatus status,
+        CancellationToken cancellationToken)
+    {
         node.Status = status.ToString();
         if (node.ConnectionKind == FarmNodeConnectionKind.Embedded.ToString())
             node.LastSeenAtUtc = timeProvider.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
-        return await BuildDashboardAsync(db, node, cancellationToken);
+        return await BuildDashboardAsync(db, accountId, cancellationToken);
     }
 
-    public async Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default)
+    public Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default) =>
+        RunWorkloadAsync(FarmWorkloadCatalog.DefaultId, cancellationToken);
+
+    public Task<FarmJobSnapshot> RunWorkloadAsync(
+        string workloadId,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
+        string workloadId,
+        Guid tokenId,
+        string idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
+        FarmUsefulJobSubmission submission,
+        Guid? tokenId,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            submission.Definition.Id, null, tokenId, idempotencyKey,
+            null, null, null, null, null, submission, cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
+        Guid accountId,
+        string workloadId,
+        Guid scheduleId,
+        DateTimeOffset scheduledForUtc,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            workloadId,
+            accountId,
+            null,
+            null,
+            scheduleId,
+            scheduledForUtc.ToUniversalTime(),
+            null,
+            null,
+            null,
+            null,
+            cancellationToken);
+
+    internal Task<FarmJobSnapshot> RunQueuedDemandAsync(
+        Guid accountId,
+        Guid demandId,
+        int shardIndex,
+        int shardCount,
+        FarmUsefulJobSubmission submission,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            submission.Definition.Id, accountId, null, null, null, null,
+            demandId, shardIndex, shardCount, submission, cancellationToken);
+
+    private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
+        string workloadId,
+        Guid? explicitAccountId,
+        Guid? apiTokenId,
+        string? apiIdempotencyKey,
+        Guid? scheduleId,
+        DateTimeOffset? scheduledForUtc,
+        Guid? demandId,
+        int? demandShardIndex,
+        int? demandShardCount,
+        FarmUsefulJobSubmission? useful,
+        CancellationToken cancellationToken)
     {
-        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        var definition = useful?.Definition ?? FarmWorkloadCatalog.GetRequired(workloadId);
+        if (definition.Id != workloadId)
+            throw new ArgumentException("A entrada útil não corresponde ao workload solicitado.", nameof(workloadId));
+        if (useful is null && definition.InputSchema is not null)
+            throw new ArgumentException("Este workload exige uma demanda tipada.", nameof(workloadId));
+        if (demandId.HasValue != demandShardIndex.HasValue || demandId.HasValue != demandShardCount.HasValue ||
+            (demandShardIndex.HasValue && (demandShardIndex < 1 || demandShardCount < demandShardIndex)))
+            throw new ArgumentException("A atribuição do shard da demanda é inválida.", nameof(demandId));
+        var accountId = explicitAccountId ??
+            (await identityAccessor.GetRequiredIdentityAsync(cancellationToken)).AccountId;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
+        await using var schedulingTransaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({SchedulingLockKey(accountId)})",
+            cancellationToken);
+        if (apiTokenId is Guid tokenId && apiIdempotencyKey is not null)
+        {
+            var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                x => x.AccountId == accountId &&
+                     x.ApiTokenId == tokenId &&
+                     x.ApiIdempotencyKey == apiIdempotencyKey,
+                cancellationToken);
+            if (replay is not null)
+            {
+                if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version ||
+                    replay.InputDigest != useful?.InputDigest)
+                    throw new InvalidOperationException(
+                        "A chave de idempotência já foi usada com outro workload.");
+                return await LoadJobAsync(db, replay.Id, cancellationToken);
+            }
+        }
+        if (scheduleId is Guid recurringScheduleId && scheduledForUtc is DateTimeOffset occurrence)
+        {
+            var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                x => x.AccountId == accountId &&
+                     x.ScheduleId == recurringScheduleId &&
+                     x.ScheduledForUtc == occurrence,
+                cancellationToken);
+            if (replay is not null)
+                return await LoadJobAsync(db, replay.Id, cancellationToken);
+        }
+        if (demandId is Guid queuedDemandId)
+        {
+            var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                x => x.AccountId == accountId && x.DemandId == queuedDemandId &&
+                     x.DemandShardIndex == demandShardIndex,
+                cancellationToken);
+            if (replay is not null)
+                return await LoadJobAsync(db, replay.Id, cancellationToken);
+        }
+        await EnsureEmbeddedNodeAsync(db, accountId, cancellationToken);
         await FarmJobLifecycle.ExpireAsync(
             db,
             timeProvider.GetUtcNow(),
             cancellationToken,
-            accountId: identity.AccountId);
+            accountId: accountId);
+        var node = await SelectExecutionNodeAsync(db, accountId, definition, cancellationToken);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
-        if (!Enum.TryParse<FarmNodeStatus>(node.Status, out var nodeStatus) ||
-            nodeStatus != FarmNodeStatus.Online)
-            throw new InvalidOperationException("Retome o node antes de executar um benchmark.");
-        if (isAgent && timeProvider.GetUtcNow() - node.LastSeenAtUtc > AgentHeartbeatTolerance)
-            throw new InvalidOperationException("O Compute Agent está offline; aguarde um heartbeat válido.");
-        if (isAgent && !node.AgentAcceptJobs)
-            throw new InvalidOperationException("A política local do Compute Agent está pausada.");
-        if (isAgent && node.AgentVersion != FarmAgentProtocol.CurrentAgentVersion)
-            throw new InvalidOperationException(
-                $"Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion} antes de despachar.");
-
-        if (await db.FarmJobs.AnyAsync(
-                x => x.AccountId == identity.AccountId &&
-                     FarmJobLifecycle.ActiveStatuses.Contains(x.Status),
-                cancellationToken))
-            throw new InvalidOperationException("Já existe um Job do laboratório em execução.");
 
         var now = timeProvider.GetUtcNow();
         var jobId = Guid.NewGuid();
@@ -103,34 +216,47 @@ internal sealed class PostgresFarmLabService(
                 jobId,
                 attemptId,
                 node.Id,
-                Workload,
-                WorkloadVersion,
-                VerificationPolicy,
+                definition.Workload,
+                definition.Version,
+                definition.VerificationPolicy,
                 Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant(),
-                BenchmarkIterations,
-                BenchmarkTimeoutSeconds,
-                1,
-                Math.Min(
-                    Math.Min(node.MemoryBytes, BenchmarkMemoryLimitBytes),
-                    node.AgentMaxMemoryBytes ?? node.MemoryBytes),
-                NetworkPolicy,
-                DataClassification,
+                definition.Iterations,
+                definition.TimeoutSeconds,
+                definition.RequiredLogicalProcessors,
+                definition.RequiredMemoryBytes,
+                definition.NetworkPolicy,
+                definition.DataClassification,
                 now,
                 now.AddMinutes(5),
                 FarmNodeProfileFingerprint.Compute(
                     node.Runtime,
                     node.LogicalProcessors,
                     node.MemoryBytes,
-                    node.AgentVersion)),
+                    node.AgentVersion),
+                useful?.InputDigest),
             manifestSigning);
         var job = new FarmJobRecord
         {
             Id = jobId,
-            AccountId = identity.AccountId,
+            AccountId = accountId,
             NodeId = node.Id,
-            Workload = Workload,
-            WorkloadVersion = WorkloadVersion,
-            VerificationPolicy = VerificationPolicy,
+            ReservedLogicalProcessors = signedManifest.Manifest.MaxLogicalProcessors,
+            ReservedMemoryBytes = signedManifest.Manifest.MaxMemoryBytes,
+            ApiTokenId = apiTokenId,
+            ApiIdempotencyKey = apiIdempotencyKey,
+            ScheduleId = scheduleId,
+            ScheduledForUtc = scheduledForUtc,
+            DemandId = demandId,
+            DemandShardIndex = demandShardIndex,
+            DemandShardCount = demandShardCount,
+            DemandLabel = useful?.Label,
+            InputVersion = useful?.InputVersion,
+            InputPayload = useful?.InputPayload,
+            InputSizeBytes = useful?.InputSizeBytes,
+            InputDigest = useful?.InputDigest,
+            Workload = definition.Workload,
+            WorkloadVersion = definition.Version,
+            VerificationPolicy = definition.VerificationPolicy,
             Nonce = signedManifest.Manifest.Nonce,
             AttemptId = attemptId,
             ManifestVersion = signedManifest.Manifest.Version,
@@ -143,7 +269,14 @@ internal sealed class PostgresFarmLabService(
             CreatedAtUtc = now
         };
         db.FarmJobs.Add(job);
-        AddEvent(db, job, FarmJobStatus.Queued, now, "Manifest fixo criado pelo scheduler do laboratório.");
+        AddEvent(db, job, FarmJobStatus.Queued, now,
+            demandId is not null
+                ? $"Shard {demandShardIndex}/{demandShardCount} da demanda {demandId:N} vinculado ao manifesto assinado."
+                : scheduleId is null
+                ? useful is null
+                    ? $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo scheduler."
+                    : $"Demanda útil '{useful.Label}' vinculada ao manifesto assinado."
+                : $"Manifest do catálogo {FarmWorkloadCatalog.Version} criado pelo agendamento {scheduleId:N}.");
         if (isAgent)
         {
             job.Status = FarmJobStatus.Offered.ToString();
@@ -152,10 +285,51 @@ internal sealed class PostgresFarmLabService(
         try { await db.SaveChangesAsync(cancellationToken); }
         catch (DbUpdateException exception)
         {
+            if (apiTokenId is Guid replayTokenId && apiIdempotencyKey is not null)
+            {
+                await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
+                var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == accountId &&
+                         x.ApiTokenId == replayTokenId &&
+                         x.ApiIdempotencyKey == apiIdempotencyKey,
+                    cancellationToken);
+                if (replay is not null)
+                {
+                    if (replay.Workload != definition.Workload || replay.WorkloadVersion != definition.Version ||
+                        replay.InputDigest != useful?.InputDigest)
+                        throw new InvalidOperationException(
+                            "A chave de idempotência já foi usada com outro workload.", exception);
+                    return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
+                }
+            }
+            if (scheduleId is Guid replayScheduleId &&
+                scheduledForUtc is DateTimeOffset replayOccurrence)
+            {
+                await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
+                var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == accountId &&
+                         x.ScheduleId == replayScheduleId &&
+                         x.ScheduledForUtc == replayOccurrence,
+                    cancellationToken);
+                if (replay is not null)
+                    return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
+            }
+            if (demandId is Guid replayDemandId)
+            {
+                await using var replayDb = await factory.CreateDbContextAsync(cancellationToken);
+                var replay = await replayDb.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
+                    x => x.AccountId == accountId && x.DemandId == replayDemandId &&
+                         x.DemandShardIndex == demandShardIndex,
+                    cancellationToken);
+                if (replay is not null)
+                    return await LoadJobAsync(replayDb, replay.Id, cancellationToken);
+            }
             throw new InvalidOperationException(
                 "Não foi possível enfileirar o Job; pode existir outra execução ativa.",
                 exception);
         }
+
+        await schedulingTransaction.CommitAsync(cancellationToken);
 
         if (isAgent)
             return await LoadJobAsync(db, job.Id, cancellationToken);
@@ -170,33 +344,45 @@ internal sealed class PostgresFarmLabService(
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
             var stopwatch = Stopwatch.StartNew();
-            var resultDigest = await Task.Run(
-                () => DeterministicBenchmark.Compute(
+            var execution = await Task.Run(
+                () => FarmDeterministicWorkloads.Execute(
+                    manifest.Workload,
                     manifest.Nonce,
                     manifest.Iterations,
+                    job.InputPayload,
                     timeout.Token),
                 timeout.Token);
             stopwatch.Stop();
 
             Transition(db, job, FarmJobStatus.Verifying, "Resultado recebido; reexecução determinística iniciada.");
             job.DurationMilliseconds = Math.Max(1, stopwatch.ElapsedMilliseconds);
-            job.ResultDigest = resultDigest;
+            job.ResultDigest = execution.Digest;
+            if (execution.OutputPayload is not null)
+            {
+                job.OutputVersion = definition.OutputSchema;
+                job.OutputPayload = execution.OutputPayload;
+                job.OutputSizeBytes = Encoding.UTF8.GetByteCount(execution.OutputPayload);
+                job.OutputDigest = execution.Digest;
+            }
             await db.SaveChangesAsync(cancellationToken);
 
-            var expectedDigest = await Task.Run(
-                () => DeterministicBenchmark.Compute(
+            var expected = await Task.Run(
+                () => FarmDeterministicWorkloads.Execute(
+                    manifest.Workload,
                     manifest.Nonce,
                     manifest.Iterations,
+                    job.InputPayload,
                     timeout.Token),
                 timeout.Token);
-            job.ExpectedDigest = expectedDigest;
+            job.ExpectedDigest = expected.Digest;
             if (!CryptographicOperations.FixedTimeEquals(
-                    Convert.FromHexString(resultDigest),
-                    Convert.FromHexString(expectedDigest)))
-                throw new InvalidOperationException("O resultado do benchmark não passou na verificação.");
+                    Convert.FromHexString(execution.Digest),
+                    Convert.FromHexString(expected.Digest)) ||
+                !string.Equals(execution.OutputPayload, expected.OutputPayload, StringComparison.Ordinal))
+                throw new InvalidOperationException("O resultado do workload não passou na verificação.");
 
             job.Status = FarmJobStatus.Completed.ToString();
-            job.ComputeUnitsMilli = 1_000;
+            job.ComputeUnitsMilli = definition.ProcessingPointsMilli;
             job.FinishedAtUtc = timeProvider.GetUtcNow();
             node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
             node.VerifiedProfileHash = FarmNodeProfileFingerprint.Compute(
@@ -206,7 +392,7 @@ internal sealed class PostgresFarmLabService(
                 node.AgentVersion);
             node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
             node.LastSeenAtUtc = job.FinishedAtUtc.Value;
-            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, "1,000 CP verificado; nenhum AIC emitido.");
+            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, $"{definition.ProcessingPointsMilli / 1_000m:N3} CP verificado; nenhum AIC emitido.");
             await db.SaveChangesAsync(cancellationToken);
             await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
@@ -217,7 +403,7 @@ internal sealed class PostgresFarmLabService(
                 db,
                 job,
                 FarmJobStatus.TimedOut,
-                "O benchmark excedeu o timeout do manifesto.");
+                "O workload excedeu o timeout do manifesto.");
         }
         catch (OperationCanceledException)
         {
@@ -225,7 +411,7 @@ internal sealed class PostgresFarmLabService(
                 db,
                 job,
                 FarmJobStatus.Cancelled,
-                "A execução do benchmark foi cancelada.");
+                "A execução do workload foi cancelada.");
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -236,15 +422,25 @@ internal sealed class PostgresFarmLabService(
         return await LoadJobAsync(db, job.Id, cancellationToken);
     }
 
+    public async Task<FarmJobSnapshot?> GetJobAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (jobId == Guid.Empty) return null;
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var exists = await db.FarmJobs.AsNoTracking().AnyAsync(
+            x => x.Id == jobId && x.AccountId == identity.AccountId,
+            cancellationToken);
+        return exists ? await LoadJobAsync(db, jobId, cancellationToken) : null;
+    }
+
     public async Task<FarmDashboard> CancelJobAsync(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var node = await EnsureNodeAsync(db, identity.AccountId, cancellationToken);
-        if (node.ConnectionKind != FarmNodeConnectionKind.Agent.ToString())
-            throw new InvalidOperationException("Cancelamento remoto está disponível apenas para Jobs do Compute Agent.");
         await FarmJobLifecycle.ExpireAsync(
             db,
             timeProvider.GetUtcNow(),
@@ -256,10 +452,13 @@ internal sealed class PostgresFarmLabService(
                 x => x.Id == jobId && x.AccountId == identity.AccountId,
                 cancellationToken)
             ?? throw new InvalidOperationException("Job não encontrado para esta conta.");
+        var node = await db.FarmNodes.SingleAsync(x => x.Id == job.NodeId, cancellationToken);
+        if (node.ConnectionKind != FarmNodeConnectionKind.Agent.ToString())
+            throw new InvalidOperationException("Cancelamento remoto está disponível apenas para Jobs do Compute Agent.");
         if (job.Status == FarmJobStatus.Cancelled.ToString())
-            return await BuildDashboardAsync(db, node, cancellationToken);
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
         if (job.CancellationRequestedAtUtc is not null)
-            return await BuildDashboardAsync(db, node, cancellationToken);
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
         if (job.Status is not ("Offered" or "Accepted" or "Running"))
             throw new InvalidOperationException("Este Job não pode mais ser cancelado.");
 
@@ -272,7 +471,7 @@ internal sealed class PostgresFarmLabService(
                 "Oferta cancelada pelo usuário antes do aceite do Agent; nenhum CP ou AIC emitido.",
                 now,
                 cancellationToken))
-            return await BuildDashboardAsync(db, node, cancellationToken);
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
 
         var requested = await db.FarmJobs
             .Where(x => x.Id == job.Id &&
@@ -298,7 +497,7 @@ internal sealed class PostgresFarmLabService(
             OccurredAtUtc = now
         });
         await db.SaveChangesAsync(cancellationToken);
-        return await BuildDashboardAsync(db, node, cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
     }
 
     public async Task<FarmJobEvidenceDownload?> DownloadEvidenceAsync(
@@ -311,7 +510,12 @@ internal sealed class PostgresFarmLabService(
             x => x.Id == jobId && x.AccountId == identity.AccountId,
             cancellationToken);
         if (job is null || job.EvidencePayload is null) return null;
-        if (!FarmEvidenceSecurity.TryVerify(job, signingOptions, out var evidence) || evidence is null)
+        var events = await db.FarmJobEvents.AsNoTracking()
+            .Where(x => x.JobId == job.Id)
+            .OrderBy(x => x.Sequence)
+            .ToArrayAsync(cancellationToken);
+        var verification = FarmEvidenceSecurity.Verify(job, events, signingOptions, out var evidence);
+        if (!verification.IsValid || evidence is null)
             throw new InvalidOperationException("A integridade do bundle de evidências não pôde ser validada.");
         var content = FarmEvidenceSecurity.Export(
             evidence,
@@ -323,12 +527,13 @@ internal sealed class PostgresFarmLabService(
             content);
     }
 
-    private async Task<FarmNodeRecord> EnsureNodeAsync(
+    private async Task<FarmNodeRecord> EnsureEmbeddedNodeAsync(
         AIFarmDbContext db,
         Guid accountId,
         CancellationToken cancellationToken)
     {
-        var node = await db.FarmNodes.SingleOrDefaultAsync(x => x.AccountId == accountId, cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.AccountId == accountId && x.ConnectionKind == "Embedded", cancellationToken);
         if (node is not null) return node;
 
         node = new FarmNodeRecord
@@ -350,13 +555,107 @@ internal sealed class PostgresFarmLabService(
         return node;
     }
 
-    private async Task<FarmDashboard> BuildDashboardAsync(
+    private async Task<FarmNodeRecord> GetPrimaryNodeAsync(
         AIFarmDbContext db,
-        FarmNodeRecord node,
+        Guid accountId,
+        CancellationToken cancellationToken) =>
+        await db.FarmNodes
+            .Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.ConnectionKind == "Agent")
+            .ThenBy(x => x.CreatedAtUtc)
+            .FirstAsync(cancellationToken);
+
+    private async Task<FarmNodeRecord> SelectExecutionNodeAsync(
+        AIFarmDbContext db,
+        Guid accountId,
+        FarmWorkloadDefinition definition,
         CancellationToken cancellationToken)
     {
+        var now = timeProvider.GetUtcNow();
+        var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
+            .ToArrayAsync(cancellationToken);
+        var reservations = await db.FarmJobs
+            .Where(x => x.AccountId == accountId && FarmJobLifecycle.ActiveStatuses.Contains(x.Status))
+            .GroupBy(x => x.NodeId)
+            .Select(group => new
+            {
+                NodeId = group.Key,
+                LogicalProcessors = group.Sum(x => x.ReservedLogicalProcessors),
+                MemoryBytes = group.Sum(x => x.ReservedMemoryBytes)
+            })
+            .ToDictionaryAsync(x => x.NodeId, cancellationToken);
+        var lastAssignments = await db.FarmJobs.Where(x => x.AccountId == accountId)
+            .GroupBy(x => x.NodeId)
+            .Select(group => new { NodeId = group.Key, LastAtUtc = group.Max(x => x.CreatedAtUtc) })
+            .ToDictionaryAsync(x => x.NodeId, x => x.LastAtUtc, cancellationToken);
+        var poolHasAgents = nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent.ToString());
+        var evaluated = nodes.Select(node =>
+        {
+            var snapshot = ToSnapshot(node);
+            reservations.TryGetValue(node.Id, out var reserved);
+            var availableProcessors = Math.Max(0,
+                snapshot.AuthorizedLogicalProcessors - (reserved?.LogicalProcessors ?? 0));
+            var availableMemory = Math.Max(0,
+                snapshot.AuthorizedMemoryBytes - (reserved?.MemoryBytes ?? 0));
+            return new
+            {
+                Node = node,
+                Snapshot = snapshot,
+                AvailableProcessors = availableProcessors,
+                AvailableMemory = availableMemory,
+                Blocker = FarmCapacityEvaluator.Evaluate(
+                    snapshot, definition, availableProcessors, availableMemory, poolHasAgents)
+            };
+        }).ToArray();
+        var selected = evaluated
+            .Where(x => x.Blocker == FarmCapacityBlocker.None)
+            .OrderBy(x => x.AvailableProcessors - definition.RequiredLogicalProcessors)
+            .ThenBy(x => x.AvailableMemory - definition.RequiredMemoryBytes)
+            .ThenBy(x => lastAssignments.GetValueOrDefault(x.Node.Id, DateTimeOffset.MinValue))
+            .ThenBy(x => x.Node.Id)
+            .Select(x => x.Node)
+            .FirstOrDefault();
+        if (selected is not null) return selected;
+        var reasons = string.Join(", ", evaluated
+            .Where(x => x.Blocker != FarmCapacityBlocker.EmbeddedSuppressed)
+            .GroupBy(x => x.Blocker)
+            .OrderBy(x => x.Key)
+            .Select(x => $"{CapacityLabel(x.Key)}={x.Count()}"));
+        var versionGuidance = evaluated.Any(x => x.Blocker == FarmCapacityBlocker.AgentVersionMismatch)
+            ? $" Atualize o Compute Agent para {FarmAgentProtocol.CurrentAgentVersion}."
+            : string.Empty;
+        throw new InvalidOperationException(
+            $"Nenhum Node atende {definition.RequiredLogicalProcessors} CPU / " +
+            $"{definition.RequiredMemoryBytes / 1024 / 1024} MiB para {definition.DisplayName}. " +
+            $"Bloqueios: {(string.IsNullOrEmpty(reasons) ? "POOL_VAZIO" : reasons)}." +
+            versionGuidance);
+    }
+
+    private static string CapacityLabel(FarmCapacityBlocker blocker) => blocker switch
+    {
+        FarmCapacityBlocker.Paused => "PAUSADO",
+        FarmCapacityBlocker.Offline => "OFFLINE",
+        FarmCapacityBlocker.StaleHeartbeat => "HEARTBEAT_EXPIRADO",
+        FarmCapacityBlocker.JobsDisabled => "POLÍTICA_LOCAL",
+        FarmCapacityBlocker.AgentVersionMismatch => "VERSÃO_AGENT",
+        FarmCapacityBlocker.InsufficientProcessors => "CPU_INSUFICIENTE",
+        FarmCapacityBlocker.InsufficientMemory => "MEMÓRIA_INSUFICIENTE",
+        FarmCapacityBlocker.Busy => "OCUPADO",
+        _ => blocker.ToString().ToUpperInvariant()
+    };
+
+    private async Task<FarmDashboard> BuildDashboardAsync(
+        AIFarmDbContext db,
+        Guid accountId,
+        CancellationToken cancellationToken)
+    {
+        var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.ConnectionKind == "Agent")
+            .ThenBy(x => x.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+        var node = nodes[0];
         var jobs = await db.FarmJobs
-            .Where(x => x.AccountId == node.AccountId)
+            .Where(x => x.AccountId == accountId)
             .OrderByDescending(x => x.CreatedAtUtc)
             .Take(10)
             .ToArrayAsync(cancellationToken);
@@ -365,8 +664,10 @@ internal sealed class PostgresFarmLabService(
             .Where(x => ids.Contains(x.JobId))
             .OrderBy(x => x.Sequence)
             .ToArrayAsync(cancellationToken);
-        return new FarmDashboard(ToSnapshot(node), jobs.Select(
-            x => ToSnapshot(x, events.Where(e => e.JobId == x.Id))).ToArray());
+        return new FarmDashboard(
+            ToSnapshot(node),
+            jobs.Select(x => ToSnapshot(x, events.Where(e => e.JobId == x.Id))).ToArray(),
+            nodes.Select(ToSnapshot).ToArray());
     }
 
     private async Task<FarmJobSnapshot> LoadJobAsync(
@@ -390,46 +691,44 @@ internal sealed class PostgresFarmLabService(
             throw new InvalidOperationException("O manifesto do Job não possui assinatura válida.");
         if (manifest.ExpiresAtUtc <= now)
             throw new InvalidOperationException("O manifesto do Job expirou antes da execução.");
-        if (manifest.Iterations != BenchmarkIterations ||
-            manifest.TimeoutSeconds != BenchmarkTimeoutSeconds ||
-            manifest.MaxLogicalProcessors != 1 ||
-            manifest.MaxMemoryBytes < 0 ||
-            manifest.MaxMemoryBytes > BenchmarkMemoryLimitBytes ||
-            manifest.NetworkPolicy != NetworkPolicy ||
-            manifest.DataClassification != DataClassification)
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
+        if (definition is null ||
+            manifest.VerificationPolicy != definition.VerificationPolicy ||
+            manifest.Iterations != definition.Iterations ||
+            manifest.TimeoutSeconds != definition.TimeoutSeconds ||
+            manifest.MaxLogicalProcessors != definition.MaxLogicalProcessors ||
+            manifest.MaxMemoryBytes <= 0 ||
+            manifest.MaxMemoryBytes > definition.MaxMemoryBytes ||
+            manifest.NetworkPolicy != definition.NetworkPolicy ||
+            manifest.DataClassification != definition.DataClassification)
             throw new InvalidOperationException("O manifesto do Job viola a allowlist do laboratório.");
+        if (manifest.InputDigest != job.InputDigest || !InputMatchesDefinition(job, definition))
+            throw new InvalidOperationException("A entrada do Job não corresponde ao manifesto.");
         return manifest;
     }
+
+    private static bool InputMatchesDefinition(
+        FarmJobRecord job,
+        FarmWorkloadDefinition definition)
+    {
+        if (definition.InputSchema is null)
+            return job.InputVersion is null && job.InputPayload is null && job.InputDigest is null;
+        if (job.InputVersion != definition.InputSchema || job.InputPayload is null ||
+            job.InputSizeBytes != Encoding.UTF8.GetByteCount(job.InputPayload))
+            return false;
+        try { return job.InputDigest == FarmDeterministicWorkloads.ComputeInputDigest(job.InputPayload); }
+        catch (ArgumentException) { return false; }
+    }
+
+    private static long SchedulingLockKey(Guid accountId) =>
+        BinaryPrimitives.ReadInt64LittleEndian(SHA256.HashData(accountId.ToByteArray()));
 
     private bool TryReadVerifiedManifest(
         FarmJobRecord job,
         out FarmJobManifest? manifest)
     {
-        var verification = job.ManifestVersion is RemoteManifestVersion or LegacyRemoteManifestVersion
-            ? signingOptions.DeriveForAgent(job.NodeId).Signing
-            : signingOptions;
-        if (!FarmManifestSecurity.TryVerify(
-                job.ManifestPayload,
-                job.ManifestDigest,
-                job.ManifestSignature,
-                verification,
-                out manifest) ||
-            manifest is null)
-            return false;
-        return manifest.Version is ManifestVersion or RemoteManifestVersion or LegacyRemoteManifestVersion &&
-            manifest.JobId == job.Id &&
-            manifest.AttemptId == job.AttemptId &&
-            manifest.NodeId == job.NodeId &&
-            manifest.Workload == job.Workload &&
-            manifest.WorkloadVersion == job.WorkloadVersion &&
-            manifest.VerificationPolicy == job.VerificationPolicy &&
-            manifest.Nonce == job.Nonce &&
-            SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
-            SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc);
+        return FarmManifestSecurity.TryVerifyJobBinding(job, signingOptions, out manifest);
     }
-
-    private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
-        right is not null && Math.Abs((left - right.Value).Ticks) < 10;
 
     private async Task MarkTerminalAsync(
         AIFarmDbContext db,
@@ -500,10 +799,11 @@ internal sealed class PostgresFarmLabService(
             node.ProfileVerifiedAtUtc);
     }
 
-    private FarmJobSnapshot ToSnapshot(
+    internal FarmJobSnapshot ToSnapshot(
         FarmJobRecord job,
         IEnumerable<FarmJobEventRecord> events)
     {
+        var eventRecords = events.OrderBy(x => x.Sequence).ToArray();
         FarmJobManifestSnapshot? manifestSnapshot = null;
         var isValid = TryReadVerifiedManifest(job, out var manifest);
         if (manifest is not null &&
@@ -524,7 +824,8 @@ internal sealed class PostgresFarmLabService(
                 manifest.MaxMemoryBytes,
                 manifest.NetworkPolicy,
                 manifest.DataClassification,
-                manifest.NodeProfileHash);
+                manifest.NodeProfileHash,
+                manifest.InputDigest);
         }
 
         return new FarmJobSnapshot(
@@ -545,12 +846,20 @@ internal sealed class PostgresFarmLabService(
             job.WorkerProcessorTimeMilliseconds,
             job.WorkerEnforcement,
             manifestSnapshot,
-            FarmEvidenceSecurity.ToSnapshot(job, signingOptions),
-            events.Select(x => new FarmJobEventSnapshot(
+            FarmEvidenceSecurity.ToSnapshot(job, eventRecords, signingOptions),
+            eventRecords.Select(x => new FarmJobEventSnapshot(
                 x.Sequence,
                 Enum.Parse<FarmJobStatus>(x.Status),
                 x.OccurredAtUtc,
-                x.Detail)).ToArray());
+                x.Detail)).ToArray(),
+            job.InputVersion is null ? null : new FarmUsefulJobSnapshot(
+                job.DemandLabel!,
+                job.InputVersion,
+                job.InputSizeBytes!.Value,
+                job.InputDigest!,
+                job.OutputVersion,
+                job.OutputSizeBytes,
+                job.OutputDigest));
     }
 }
 
@@ -560,15 +869,9 @@ internal static class DeterministicBenchmark
         string nonce,
         int iterations,
         CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(nonce)) throw new ArgumentException("Nonce obrigatório.", nameof(nonce));
-        if (iterations <= 0) throw new ArgumentOutOfRangeException(nameof(iterations));
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(nonce));
-        for (var index = 0; index < iterations; index++)
-        {
-            if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
-            hash = SHA256.HashData(hash);
-        }
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+        => FarmDeterministicWorkloads.Compute(
+            FarmWorkloadCatalog.GetRequired(FarmWorkloadCatalog.DefaultId).Workload,
+            nonce,
+            iterations,
+            cancellationToken);
 }

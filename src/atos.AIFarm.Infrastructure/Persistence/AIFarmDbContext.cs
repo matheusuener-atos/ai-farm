@@ -23,8 +23,16 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
     public DbSet<FarmAgentEnrollmentRecord> FarmAgentEnrollments => Set<FarmAgentEnrollmentRecord>();
     public DbSet<FarmJobRecord> FarmJobs => Set<FarmJobRecord>();
     public DbSet<FarmJobEventRecord> FarmJobEvents => Set<FarmJobEventRecord>();
+    public DbSet<FarmScheduleRecord> FarmSchedules => Set<FarmScheduleRecord>();
+    public DbSet<FarmScheduleTriggerRecord> FarmScheduleTriggers => Set<FarmScheduleTriggerRecord>();
+    public DbSet<FarmDemandRecord> FarmDemands => Set<FarmDemandRecord>();
+    public DbSet<FarmDemandShardRecord> FarmDemandShards => Set<FarmDemandShardRecord>();
     public DbSet<FarmEconomicsScenarioRecord> FarmEconomicsScenarios => Set<FarmEconomicsScenarioRecord>();
     public DbSet<FarmRewardProposalRecord> FarmRewardProposals => Set<FarmRewardProposalRecord>();
+    public DbSet<OperationalIncidentAcknowledgementRecord> OperationalIncidentAcknowledgements => Set<OperationalIncidentAcknowledgementRecord>();
+    public DbSet<AiUsageBudgetPolicyRecord> AiUsageBudgetPolicies => Set<AiUsageBudgetPolicyRecord>();
+    public DbSet<AiUsageBudgetReservationRecord> AiUsageBudgetReservations => Set<AiUsageBudgetReservationRecord>();
+    public DbSet<ApiTokenRecord> ApiTokens => Set<ApiTokenRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -256,7 +264,14 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "(\"VerificationLevel\" = 'Verified' AND \"VerifiedProfileHash\" IS NOT NULL AND length(\"VerifiedProfileHash\") = 64 AND \"ProfileVerifiedAtUtc\" IS NOT NULL)");
             });
             entity.HasKey(x => x.Id);
-            entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.HasIndex(x => x.AccountId);
+            entity.HasIndex(x => new { x.AccountId, x.Name })
+                .IsUnique()
+                .HasFilter("\"ConnectionKind\" = 'Agent'");
+            entity.HasIndex(x => x.AccountId)
+                .HasDatabaseName("UX_farm_nodes_account_embedded")
+                .IsUnique()
+                .HasFilter("\"ConnectionKind\" = 'Embedded'");
             entity.HasIndex(x => x.AgentCredentialHash).IsUnique();
             entity.Property(x => x.Name).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(24);
@@ -287,6 +302,30 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                 table.HasCheckConstraint("CK_farm_jobs_status", "\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying', 'Completed', 'Failed', 'Cancelled', 'TimedOut', 'Rejected')");
                 table.HasCheckConstraint("CK_farm_jobs_cu", "\"ComputeUnitsMilli\" >= 0");
                 table.HasCheckConstraint(
+                    "CK_farm_jobs_api_idempotency_complete",
+                    "(\"ApiTokenId\" IS NULL AND \"ApiIdempotencyKey\" IS NULL) OR " +
+                    "(\"ApiTokenId\" IS NOT NULL AND \"ApiIdempotencyKey\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_schedule_attribution_complete",
+                    "(\"ScheduleId\" IS NULL AND \"ScheduledForUtc\" IS NULL) OR " +
+                    "(\"ScheduleId\" IS NOT NULL AND \"ScheduledForUtc\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_single_automation_origin",
+                    "(\"ApiTokenId\" IS NULL OR (\"ScheduleId\" IS NULL AND \"DemandId\" IS NULL)) AND " +
+                    "(\"ScheduleId\" IS NULL OR \"DemandId\" IS NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_demand_shard_complete",
+                    "(\"DemandId\" IS NULL AND \"DemandShardIndex\" IS NULL AND \"DemandShardCount\" IS NULL) OR " +
+                    "(\"DemandId\" IS NOT NULL AND \"DemandShardIndex\" > 0 AND \"DemandShardCount\" >= \"DemandShardIndex\")");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_useful_input_complete",
+                    "(\"InputVersion\" IS NULL AND \"InputPayload\" IS NULL AND \"InputSizeBytes\" IS NULL AND \"InputDigest\" IS NULL AND \"DemandLabel\" IS NULL) OR " +
+                    "(\"InputVersion\" IS NOT NULL AND \"InputPayload\" IS NOT NULL AND \"InputSizeBytes\" > 0 AND \"InputDigest\" IS NOT NULL AND \"DemandLabel\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_useful_output_complete",
+                    "(\"OutputVersion\" IS NULL AND \"OutputPayload\" IS NULL AND \"OutputSizeBytes\" IS NULL AND \"OutputDigest\" IS NULL) OR " +
+                    "(\"OutputVersion\" IS NOT NULL AND \"OutputPayload\" IS NOT NULL AND \"OutputSizeBytes\" > 0 AND \"OutputDigest\" IS NOT NULL)");
+                table.HasCheckConstraint(
                     "CK_farm_jobs_worker_telemetry",
                     "(\"WorkerPeakMemoryBytes\" IS NULL AND \"WorkerProcessorTimeMilliseconds\" IS NULL AND \"WorkerEnforcement\" IS NULL) OR " +
                     "(\"WorkerPeakMemoryBytes\" > 0 AND \"WorkerProcessorTimeMilliseconds\" > 0 AND \"WorkerEnforcement\" IS NOT NULL)");
@@ -302,16 +341,19 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
                     "CK_farm_jobs_evidence_complete",
                     "(\"EvidenceVersion\" IS NULL AND \"EvidencePayload\" IS NULL AND \"EvidenceDigest\" IS NULL AND \"EvidenceSignature\" IS NULL AND \"EvidenceKeyId\" IS NULL AND \"EvidenceCreatedAtUtc\" IS NULL) OR " +
                     "(\"EvidenceVersion\" IS NOT NULL AND \"EvidencePayload\" IS NOT NULL AND \"EvidenceDigest\" IS NOT NULL AND \"EvidenceSignature\" IS NOT NULL AND \"EvidenceKeyId\" IS NOT NULL AND \"EvidenceCreatedAtUtc\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_farm_jobs_resource_reservation",
+                    "\"ReservedLogicalProcessors\" >= 1 AND \"ReservedMemoryBytes\" >= 1");
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
-            entity.HasIndex(x => x.AccountId)
-                .HasDatabaseName("UX_farm_jobs_account_active")
-                .IsUnique()
-                .HasFilter("\"Status\" IN ('Queued', 'Offered', 'Accepted', 'Running', 'Uploading', 'Verifying')");
-            entity.HasIndex(x => x.NodeId);
+            entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
+            entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
+            entity.HasIndex(x => new { x.DemandId, x.DemandShardIndex }).IsUnique();
+            entity.HasIndex(x => x.NodeId).HasDatabaseName("IX_farm_jobs_node");
             entity.HasIndex(x => x.AttemptId).IsUnique();
             entity.Property(x => x.Workload).HasMaxLength(80);
+            entity.Property(x => x.ApiIdempotencyKey).HasMaxLength(120);
             entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
             entity.Property(x => x.VerificationPolicy).HasMaxLength(120);
             entity.Property(x => x.Nonce).HasMaxLength(64);
@@ -327,8 +369,17 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.EvidenceDigest).HasMaxLength(64);
             entity.Property(x => x.EvidenceSignature).HasMaxLength(64);
             entity.Property(x => x.EvidenceKeyId).HasMaxLength(32);
+            entity.Property(x => x.DemandLabel).HasMaxLength(120);
+            entity.Property(x => x.InputVersion).HasMaxLength(80);
+            entity.Property(x => x.InputPayload).HasColumnType("text");
+            entity.Property(x => x.InputDigest).HasMaxLength(64);
+            entity.Property(x => x.OutputVersion).HasMaxLength(80);
+            entity.Property(x => x.OutputPayload).HasColumnType("text");
+            entity.Property(x => x.OutputDigest).HasMaxLength(64);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmNodeRecord>().WithMany().HasForeignKey(x => x.NodeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmScheduleRecord>().WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmDemandRecord>().WithMany().HasForeignKey(x => x.DemandId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<FarmJobEventRecord>(entity =>
@@ -339,6 +390,84 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.Status).HasMaxLength(24);
             entity.Property(x => x.Detail).HasMaxLength(300);
             entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmScheduleRecord>(entity =>
+        {
+            entity.ToTable("farm_schedules", table =>
+            {
+                table.HasCheckConstraint("CK_farm_schedules_interval", "\"IntervalMinutes\" >= 5 AND \"IntervalMinutes\" <= 10080");
+                table.HasCheckConstraint("CK_farm_schedules_status", "\"Status\" IN ('Active', 'Paused')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.NormalizedName }).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.NextRunAtUtc });
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.NormalizedName).HasMaxLength(80);
+            entity.Property(x => x.WorkloadId).HasMaxLength(80);
+            entity.Property(x => x.Status).HasMaxLength(16);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmScheduleTriggerRecord>(entity =>
+        {
+            entity.ToTable("farm_schedule_triggers", table =>
+                table.HasCheckConstraint("CK_farm_schedule_triggers_status", "\"Status\" IN ('Dispatching', 'Submitted', 'Deferred', 'Failed')"));
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.ScheduleId, x.ScheduledForUtc }).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.Property(x => x.Status).HasMaxLength(16);
+            entity.Property(x => x.Detail).HasMaxLength(500);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmScheduleRecord>().WithMany().HasForeignKey(x => x.ScheduleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmDemandRecord>(entity =>
+        {
+            entity.ToTable("farm_demands", table =>
+            {
+                table.HasCheckConstraint("CK_farm_demands_status", "\"Status\" IN ('Queued', 'Dispatching', 'Processing', 'Submitted', 'Completed', 'Cancelled', 'Expired', 'Failed')");
+                table.HasCheckConstraint("CK_farm_demands_priority", "\"Priority\" >= 0 AND \"Priority\" <= 2");
+                table.HasCheckConstraint("CK_farm_demands_attempts", "\"Attempts\" >= 0");
+                table.HasCheckConstraint("CK_farm_demands_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
+                table.HasCheckConstraint("CK_farm_demands_resources", "\"RequiredLogicalProcessors\" > 0 AND \"RequiredMemoryBytes\" > 0 AND length(\"WorkloadVersion\") > 0");
+                table.HasCheckConstraint("CK_farm_demands_shards", "\"TargetShards\" >= 1 AND \"TargetShards\" <= 8");
+                table.HasCheckConstraint("CK_farm_demands_output", "(\"OutputVersion\" IS NULL AND \"OutputPayload\" IS NULL AND \"OutputSizeBytes\" IS NULL AND \"OutputDigest\" IS NULL) OR (\"OutputVersion\" IS NOT NULL AND \"OutputPayload\" IS NOT NULL AND \"OutputSizeBytes\" > 0 AND \"OutputDigest\" IS NOT NULL)");
+                table.HasCheckConstraint("CK_farm_demands_completed", "\"Status\" <> 'Completed' OR (\"OutputDigest\" IS NOT NULL AND \"FinishedAtUtc\" IS NOT NULL)");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.Status, x.NextAttemptAtUtc, x.Priority });
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.ApiTokenId, x.ApiIdempotencyKey }).IsUnique();
+            entity.Property(x => x.WorkloadId).HasMaxLength(80);
+            entity.Property(x => x.WorkloadVersion).HasMaxLength(120);
+            entity.Property(x => x.Label).HasMaxLength(120);
+            entity.Property(x => x.InputVersion).HasMaxLength(80);
+            entity.Property(x => x.InputPayload).HasColumnType("text");
+            entity.Property(x => x.InputDigest).HasMaxLength(64);
+            entity.Property(x => x.Status).HasMaxLength(24);
+            entity.Property(x => x.Detail).HasMaxLength(500);
+            entity.Property(x => x.OutputVersion).HasMaxLength(80);
+            entity.Property(x => x.OutputPayload).HasColumnType("text");
+            entity.Property(x => x.OutputDigest).HasMaxLength(64);
+            entity.Property(x => x.ApiIdempotencyKey).HasMaxLength(120);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<FarmDemandShardRecord>(entity =>
+        {
+            entity.ToTable("farm_demand_shards", table =>
+            {
+                table.HasCheckConstraint("CK_farm_demand_shards_sequence", "\"Sequence\" > 0");
+                table.HasCheckConstraint("CK_farm_demand_shards_input", "\"InputSizeBytes\" > 0 AND length(\"InputDigest\") = 64");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.DemandId, x.Sequence }).IsUnique();
+            entity.HasIndex(x => x.JobId).IsUnique();
+            entity.Property(x => x.InputPayload).HasColumnType("text");
+            entity.Property(x => x.InputDigest).HasMaxLength(64);
+            entity.HasOne<FarmDemandRecord>().WithMany().HasForeignKey(x => x.DemandId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<FarmEconomicsScenarioRecord>(entity =>
@@ -382,6 +511,62 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmJobRecord>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<FarmEconomicsScenarioRecord>().WithMany().HasForeignKey(x => x.ScenarioId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OperationalIncidentAcknowledgementRecord>(entity =>
+        {
+            entity.ToTable("operational_incident_acknowledgements");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.IncidentKey }).IsUnique();
+            entity.Property(x => x.IncidentKey).HasMaxLength(200);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AiUsageBudgetPolicyRecord>(entity =>
+        {
+            entity.ToTable("ai_usage_budget_policies", table =>
+            {
+                table.HasCheckConstraint("CK_ai_usage_budget_policy_limits",
+                    "\"MaximumPerRequestMinor\" >= 0 AND \"DailyLimitMinor\" >= 0 AND \"MonthlyLimitMinor\" >= 0");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.AccountId).IsUnique();
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AiUsageBudgetReservationRecord>(entity =>
+        {
+            entity.ToTable("ai_usage_budget_reservations", table =>
+            {
+                table.HasCheckConstraint("CK_ai_usage_budget_reservation_amounts",
+                    "\"ReservedMinor\" > 0 AND \"ActualMinor\" >= 0 AND \"ActualMinor\" <= \"ReservedMinor\"");
+                table.HasCheckConstraint("CK_ai_usage_budget_reservation_status",
+                    "\"Status\" IN ('Active', 'Settled', 'Released')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.OperationId }).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.IdempotencyKey }).IsUnique();
+            entity.HasIndex(x => new { x.AccountId, x.Status, x.ExpiresAtUtc });
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(200);
+            entity.Property(x => x.Status).HasMaxLength(16);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ApiTokenRecord>(entity =>
+        {
+            entity.ToTable("api_tokens", table =>
+            {
+                table.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 255");
+                table.HasCheckConstraint("CK_api_tokens_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
+            });
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => new { x.AccountId, x.CreatedAtUtc });
+            entity.HasIndex(x => x.Prefix);
+            entity.HasIndex(x => x.SecretHash).IsUnique();
+            entity.Property(x => x.Name).HasMaxLength(80);
+            entity.Property(x => x.Prefix).HasMaxLength(12);
+            entity.Property(x => x.SecretHash).HasMaxLength(32);
+            entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<MessageFeedbackRecord>(entity =>
@@ -440,6 +625,24 @@ public sealed class FarmJobRecord
     public Guid Id { get; set; }
     public Guid AccountId { get; set; }
     public Guid NodeId { get; set; }
+    public int ReservedLogicalProcessors { get; set; } = 1;
+    public long ReservedMemoryBytes { get; set; } = 64L * 1024 * 1024;
+    public Guid? ApiTokenId { get; set; }
+    public string? ApiIdempotencyKey { get; set; }
+    public Guid? ScheduleId { get; set; }
+    public DateTimeOffset? ScheduledForUtc { get; set; }
+    public Guid? DemandId { get; set; }
+    public int? DemandShardIndex { get; set; }
+    public int? DemandShardCount { get; set; }
+    public string? DemandLabel { get; set; }
+    public string? InputVersion { get; set; }
+    public string? InputPayload { get; set; }
+    public int? InputSizeBytes { get; set; }
+    public string? InputDigest { get; set; }
+    public string? OutputVersion { get; set; }
+    public string? OutputPayload { get; set; }
+    public int? OutputSizeBytes { get; set; }
+    public string? OutputDigest { get; set; }
     public string Workload { get; set; } = string.Empty;
     public string WorkloadVersion { get; set; } = string.Empty;
     public string VerificationPolicy { get; set; } = string.Empty;
@@ -484,6 +687,78 @@ public sealed class FarmJobEventRecord
     public DateTimeOffset OccurredAtUtc { get; set; }
 }
 
+public sealed class FarmScheduleRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string NormalizedName { get; set; } = string.Empty;
+    public string WorkloadId { get; set; } = string.Empty;
+    public int IntervalMinutes { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTimeOffset NextRunAtUtc { get; set; }
+    public DateTimeOffset? LastTriggeredAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class FarmScheduleTriggerRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid ScheduleId { get; set; }
+    public DateTimeOffset ScheduledForUtc { get; set; }
+    public string Status { get; set; } = "Dispatching";
+    public Guid? JobId { get; set; }
+    public string? Detail { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? FinishedAtUtc { get; set; }
+}
+
+public sealed class FarmDemandRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid? ApiTokenId { get; set; }
+    public string? ApiIdempotencyKey { get; set; }
+    public string WorkloadId { get; set; } = string.Empty;
+    public string WorkloadVersion { get; set; } = string.Empty;
+    public int RequiredLogicalProcessors { get; set; }
+    public long RequiredMemoryBytes { get; set; }
+    public int TargetShards { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public string InputVersion { get; set; } = string.Empty;
+    public string InputPayload { get; set; } = string.Empty;
+    public int InputSizeBytes { get; set; }
+    public string InputDigest { get; set; } = string.Empty;
+    public int Priority { get; set; }
+    public string Status { get; set; } = "Queued";
+    public int Attempts { get; set; }
+    public DateTimeOffset NextAttemptAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? ClaimedAtUtc { get; set; }
+    public Guid? JobId { get; set; }
+    public string? Detail { get; set; }
+    public string? OutputVersion { get; set; }
+    public string? OutputPayload { get; set; }
+    public int? OutputSizeBytes { get; set; }
+    public string? OutputDigest { get; set; }
+    public DateTimeOffset? FinishedAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class FarmDemandShardRecord
+{
+    public Guid Id { get; set; }
+    public Guid DemandId { get; set; }
+    public int Sequence { get; set; }
+    public string InputPayload { get; set; } = string.Empty;
+    public int InputSizeBytes { get; set; }
+    public string InputDigest { get; set; } = string.Empty;
+    public Guid? JobId { get; set; }
+}
+
 public sealed class FarmEconomicsScenarioRecord
 {
     public Guid Id { get; set; }
@@ -512,6 +787,53 @@ public sealed class FarmRewardProposalRecord
     public string Status { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
     public string Digest { get; set; } = string.Empty;
+}
+
+public sealed class OperationalIncidentAcknowledgementRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string IncidentKey { get; set; } = string.Empty;
+    public DateTimeOffset AcknowledgedAtUtc { get; set; }
+}
+
+public sealed class AiUsageBudgetPolicyRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public bool IsEnabled { get; set; }
+    public long MaximumPerRequestMinor { get; set; }
+    public long DailyLimitMinor { get; set; }
+    public long MonthlyLimitMinor { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class AiUsageBudgetReservationRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid OperationId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public long ReservedMinor { get; set; }
+    public long ActualMinor { get; set; }
+    public string Status { get; set; } = "Active";
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? SettledAtUtc { get; set; }
+}
+
+public sealed class ApiTokenRecord
+{
+    public Guid Id { get; set; }
+    public Guid AccountId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Prefix { get; set; } = string.Empty;
+    public byte[] SecretHash { get; set; } = [];
+    public int Scopes { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset ExpiresAtUtc { get; set; }
+    public DateTimeOffset? LastUsedAtUtc { get; set; }
+    public DateTimeOffset? RevokedAtUtc { get; set; }
 }
 
 public sealed class AccountRecord

@@ -17,9 +17,6 @@ internal sealed class PostgresFarmAgentService(
     internal static readonly TimeSpan AgentLeaseLifetime = TimeSpan.FromSeconds(10);
     internal static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
     private const string SignatureAlgorithm = "HMAC-SHA256-NODE-V1";
-    private const string Workload = "SHA256_CHAIN";
-    private const string WorkloadVersion = "atos-sha256-chain-v1";
-    private const string VerificationPolicy = "DETERMINISTIC_REEXECUTION_V1";
 
     public async Task<FarmAgentEnrollment> CreateEnrollmentAsync(
         CancellationToken cancellationToken = default)
@@ -76,13 +73,19 @@ internal sealed class PostgresFarmAgentService(
         var enrollment = await db.FarmAgentEnrollments
             .SingleAsync(x => x.TokenHash == tokenHash, cancellationToken);
         var node = await db.FarmNodes
-            .SingleOrDefaultAsync(x => x.AccountId == enrollment.AccountId, cancellationToken);
+            .SingleOrDefaultAsync(
+                x => x.AccountId == enrollment.AccountId &&
+                     x.ConnectionKind == "Agent" &&
+                     x.Name == normalized.Name,
+                cancellationToken);
         if (node is null)
         {
             node = new FarmNodeRecord
             {
                 Id = Guid.NewGuid(),
                 AccountId = enrollment.AccountId,
+                Name = normalized.Name,
+                ConnectionKind = FarmNodeConnectionKind.Agent.ToString(),
                 CreatedAtUtc = now
             };
             db.FarmNodes.Add(node);
@@ -152,31 +155,34 @@ internal sealed class PostgresFarmAgentService(
             node.Status = FarmNodeStatus.Online.ToString();
 
         DateTimeOffset? leaseExpiresAtUtc = null;
-        var cancelActiveJob = false;
-        if (normalized.ActiveJobId is not null)
+        var activeJobIds = NormalizeActiveJobIds(normalized.ActiveJobId, normalized.ActiveJobIds);
+        var cancelJobIds = new List<Guid>();
+        if (activeJobIds.Length > 0)
         {
             await FarmJobLifecycle.ExpireAsync(
                 db,
                 now,
                 cancellationToken,
                 nodeId: node.Id);
-            var activeJob = await db.FarmJobs.SingleOrDefaultAsync(
-                x => x.Id == normalized.ActiveJobId && x.NodeId == node.Id &&
+            var activeJobs = await db.FarmJobs.Where(
+                x => activeJobIds.Contains(x.Id) && x.NodeId == node.Id &&
                      (x.Status == "Running" ||
                       x.Status == "Uploading" ||
-                      x.Status == "Verifying"),
-                cancellationToken);
-            if (activeJob is null)
+                      x.Status == "Verifying"))
+                .ToArrayAsync(cancellationToken);
+            foreach (var jobId in activeJobIds)
             {
-                cancelActiveJob = true;
-            }
-            else
-            {
+                var activeJob = activeJobs.SingleOrDefault(x => x.Id == jobId);
+                if (activeJob is null || activeJob.CancellationRequestedAtUtc is not null)
+                {
+                    cancelJobIds.Add(jobId);
+                    continue;
+                }
                 activeJob.AgentLeaseRenewedAtUtc = now;
                 activeJob.AgentLeaseExpiresAtUtc = now.Add(AgentLeaseLifetime);
-                leaseExpiresAtUtc = activeJob.AgentLeaseExpiresAtUtc;
-                cancelActiveJob = activeJob.CancellationRequestedAtUtc is not null;
             }
+            leaseExpiresAtUtc = activeJobs.Where(x => x.AgentLeaseExpiresAtUtc is not null)
+                .Select(x => x.AgentLeaseExpiresAtUtc).Max();
         }
         await db.SaveChangesAsync(cancellationToken);
 
@@ -188,9 +194,10 @@ internal sealed class PostgresFarmAgentService(
             now,
             HeartbeatIntervalSeconds,
             ActiveHeartbeatIntervalSeconds,
-            normalized.ActiveJobId,
+            activeJobIds.FirstOrDefault() == Guid.Empty ? null : activeJobIds[0],
             leaseExpiresAtUtc,
-            cancelActiveJob);
+            cancelJobIds.Count > 0,
+            cancelJobIds);
     }
 
     public async Task<FarmAgentTrust?> GetTrustAsync(
@@ -206,7 +213,8 @@ internal sealed class PostgresFarmAgentService(
 
     public async Task<FarmRemoteJobOffer?> ClaimJobAsync(
         string credential,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? activeJobIds = null)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
@@ -220,9 +228,11 @@ internal sealed class PostgresFarmAgentService(
             cancellationToken,
             nodeId: node.Id);
 
+        var reportedActiveIds = NormalizeActiveJobIds(null, activeJobIds);
         var jobId = await db.FarmJobs
             .Where(x => x.NodeId == node.Id &&
-                        (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running"))
+                        (x.Status == "Offered" || x.Status == "Accepted" || x.Status == "Running") &&
+                        !reportedActiveIds.Contains(x.Id))
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (Guid?)x.Id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -275,7 +285,14 @@ internal sealed class PostgresFarmAgentService(
             job.ManifestPayload!,
             job.ManifestDigest!,
             job.ManifestSignature!,
-            SignatureAlgorithm);
+            SignatureAlgorithm,
+            job.InputVersion is null ? null : new FarmRemoteJobInput(
+                job.InputVersion,
+                "text/plain; charset=utf-8",
+                manifest.DataClassification,
+                job.InputPayload!,
+                job.InputSizeBytes!.Value,
+                job.InputDigest!));
     }
 
     public async Task<bool> MarkJobStartedAsync(
@@ -401,7 +418,8 @@ internal sealed class PostgresFarmAgentService(
                 existing.DurationMilliseconds != result.DurationMilliseconds ||
                 existing.WorkerPeakMemoryBytes != result.PeakMemoryBytes ||
                 existing.WorkerProcessorTimeMilliseconds != result.ProcessorTimeMilliseconds ||
-                existing.WorkerEnforcement != result.Enforcement)
+                existing.WorkerEnforcement != result.Enforcement ||
+                existing.OutputPayload != result.OutputPayload)
                 throw new InvalidOperationException("O Job já foi concluído com uma evidência diferente.");
             return new FarmRemoteJobAcknowledgement(
                 existing.Id,
@@ -437,6 +455,14 @@ internal sealed class PostgresFarmAgentService(
                 "O manifesto remoto armazenado não é válido.",
                 cancellationToken);
         }
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion)
+            ?? throw new InvalidOperationException("O workload remoto não pertence ao catálogo autorizado.");
+        if (definition.OutputSchema is null && result.OutputPayload is not null)
+            throw new ArgumentException("Este workload não produz saída tipada.", nameof(result));
+        if (definition.OutputSchema is not null &&
+            (string.IsNullOrWhiteSpace(result.OutputPayload) ||
+             Encoding.UTF8.GetByteCount(result.OutputPayload) > 128 * 1024))
+            throw new ArgumentException("A saída tipada é obrigatória e deve possuir até 128 KiB.", nameof(result));
         if (result.DurationMilliseconds > manifest.TimeoutSeconds * 1000L)
         {
             return await TerminateAndAcknowledgeAsync(
@@ -478,6 +504,13 @@ internal sealed class PostgresFarmAgentService(
 
         await db.Entry(existing).ReloadAsync(cancellationToken);
         var job = existing;
+        if (result.OutputPayload is not null)
+        {
+            job.OutputVersion = definition.OutputSchema;
+            job.OutputPayload = result.OutputPayload;
+            job.OutputSizeBytes = Encoding.UTF8.GetByteCount(result.OutputPayload);
+            job.OutputDigest = result.ResultDigest.ToLowerInvariant();
+        }
         await AddJobEventAsync(
             db,
             job,
@@ -496,15 +529,18 @@ internal sealed class PostgresFarmAgentService(
         await db.SaveChangesAsync(cancellationToken);
 
         var expected = await Task.Run(
-            () => DeterministicBenchmark.Compute(
+            () => FarmDeterministicWorkloads.Execute(
+                manifest.Workload,
                 manifest.Nonce,
                 manifest.Iterations,
+                job.InputPayload,
                 cancellationToken),
             cancellationToken);
-        job.ExpectedDigest = expected;
+        job.ExpectedDigest = expected.Digest;
         var verified = CryptographicOperations.FixedTimeEquals(
             suppliedDigest,
-            Convert.FromHexString(expected));
+            Convert.FromHexString(expected.Digest)) &&
+            string.Equals(result.OutputPayload, expected.OutputPayload, StringComparison.Ordinal);
         job.FinishedAtUtc = timeProvider.GetUtcNow();
         if (!verified)
         {
@@ -520,7 +556,7 @@ internal sealed class PostgresFarmAgentService(
         else
         {
             job.Status = FarmJobStatus.Completed.ToString();
-            job.ComputeUnitsMilli = 1_000;
+            job.ComputeUnitsMilli = definition.ProcessingPointsMilli;
             node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
             node.VerifiedProfileHash = manifest.NodeProfileHash;
             node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
@@ -528,7 +564,7 @@ internal sealed class PostgresFarmAgentService(
                 db,
                 job,
                 FarmJobStatus.Completed,
-                "1,000 CP remoto verificado; nenhum AIC emitido.",
+                $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; nenhum AIC emitido.",
                 cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
@@ -591,23 +627,40 @@ internal sealed class PostgresFarmAgentService(
                 key.Signing,
                 out manifest) || manifest is null)
             return false;
-        return manifest.Version == PostgresFarmLabService.RemoteManifestVersion &&
+        var definition = FarmWorkloadCatalog.Find(manifest.Workload, manifest.WorkloadVersion);
+        return definition is not null &&
+            manifest.Version == PostgresFarmLabService.RemoteManifestVersion &&
             manifest.JobId == job.Id &&
             manifest.AttemptId == job.AttemptId &&
             manifest.NodeId == job.NodeId &&
-            manifest.Workload == Workload &&
-            manifest.WorkloadVersion == WorkloadVersion &&
-            manifest.VerificationPolicy == VerificationPolicy &&
+            manifest.Workload == job.Workload &&
+            manifest.WorkloadVersion == job.WorkloadVersion &&
+            manifest.VerificationPolicy == definition.VerificationPolicy &&
             manifest.Nonce == job.Nonce &&
+            manifest.InputDigest == job.InputDigest &&
             SamePostgresTimestamp(manifest.IssuedAtUtc, job.ManifestIssuedAtUtc) &&
             SamePostgresTimestamp(manifest.ExpiresAtUtc, job.ManifestExpiresAtUtc) &&
-            manifest.NetworkPolicy == "DENY_ALL" &&
-            manifest.DataClassification == "STANDARD" &&
-            manifest.Iterations == 100_000 &&
-            manifest.TimeoutSeconds == 30 &&
-            manifest.MaxLogicalProcessors == 1 &&
-            manifest.MaxMemoryBytes is > 0 and <= 256L * 1024 * 1024 &&
-            manifest.NodeProfileHash is { Length: 64 };
+            manifest.NetworkPolicy == definition.NetworkPolicy &&
+            manifest.DataClassification == definition.DataClassification &&
+            manifest.Iterations == definition.Iterations &&
+            manifest.TimeoutSeconds == definition.TimeoutSeconds &&
+            manifest.MaxLogicalProcessors == definition.MaxLogicalProcessors &&
+            manifest.MaxMemoryBytes > 0 && manifest.MaxMemoryBytes <= definition.MaxMemoryBytes &&
+            manifest.NodeProfileHash is { Length: 64 } &&
+            InputMatchesDefinition(job, definition);
+    }
+
+    private static bool InputMatchesDefinition(
+        FarmJobRecord job,
+        FarmWorkloadDefinition definition)
+    {
+        if (definition.InputSchema is null)
+            return job.InputVersion is null && job.InputPayload is null && job.InputDigest is null;
+        if (job.InputVersion != definition.InputSchema || job.InputPayload is null ||
+            job.InputSizeBytes != Encoding.UTF8.GetByteCount(job.InputPayload))
+            return false;
+        try { return job.InputDigest == FarmDeterministicWorkloads.ComputeInputDigest(job.InputPayload); }
+        catch (Exception exception) when (exception is ArgumentException or FormatException) { return false; }
     }
 
     private static bool SamePostgresTimestamp(DateTimeOffset left, DateTimeOffset? right) =>
@@ -669,7 +722,17 @@ internal sealed class PostgresFarmAgentService(
             request.AcceptJobs,
             maxLogicalProcessors,
             maxMemoryBytes,
-            request.ActiveJobId);
+            request.ActiveJobId,
+            NormalizeActiveJobIds(request.ActiveJobId, request.ActiveJobIds));
+    }
+
+    private static Guid[] NormalizeActiveJobIds(Guid? legacyJobId, IReadOnlyList<Guid>? jobIds)
+    {
+        var normalized = (jobIds ?? []).Append(legacyJobId ?? Guid.Empty)
+            .Where(x => x != Guid.Empty).Distinct().ToArray();
+        if (normalized.Length > 64)
+            throw new ArgumentOutOfRangeException(nameof(jobIds), "O Agent pode reportar até 64 Jobs ativos.");
+        return normalized;
     }
 
     private static string Required(string value, string name, int minimum, int maximum)

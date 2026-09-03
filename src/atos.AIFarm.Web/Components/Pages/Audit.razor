@@ -1,0 +1,185 @@
+@page "/audit"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IAuditTrail AuditTrail
+
+<PageTitle>Auditoria // atos AI Farm</PageTitle>
+
+<header class="page-head">
+    <div>
+        <p class="eyebrow">atos:/AUDIT/CENTER</p>
+        <h1>CENTRO DE AUDITORIA</h1>
+        <p>LEDGER // IRIS // FARM // ECONOMIA // REWARDS // SEGURANÇA</p>
+    </div>
+    <a class="audit-export" href="@ExportUrl">[ EXPORTAR JSON ]</a>
+</header>
+
+@if (_error is not null)
+{
+    <div class="error" role="alert">@_error</div>
+}
+
+<section class="panel audit-filter-panel">
+    <header class="panel-head"><h2>CONSULTA</h2><span class="tag">CONTA ISOLADA</span></header>
+    <form class="audit-filters" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
+        <label>BUSCAR<input type="search" maxlength="120" placeholder="ação, status, referência ou digest" @bind="_searchDraft" /></label>
+        <label>CATEGORIA
+            <select @bind="_categoryDraft">
+                <option value="">TODAS</option>
+                @foreach (var category in Enum.GetValues<AuditCategory>())
+                {
+                    <option value="@category">@CategoryLabel(category)</option>
+                }
+            </select>
+        </label>
+        <label>DE (UTC)<input type="datetime-local" @bind="_fromDraft" /></label>
+        <label>ATÉ (UTC)<input type="datetime-local" @bind="_toDraft" /></label>
+        <div class="audit-filter-actions">
+            <button type="submit" disabled="@_loading">[ APLICAR ]</button>
+            <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">[ LIMPAR ]</button>
+        </div>
+    </form>
+</section>
+
+@if (_loading && _page is null)
+{
+    <section class="terminal placeholder"><div class="terminal-title">[ CONSOLIDANDO TRILHAS ]</div></section>
+}
+else if (_page is not null)
+{
+    <section class="kpi-grid cols-5 audit-kpis" aria-live="polite">
+        <article class="kpi kpi-purple"><span>EVENTOS</span><strong>@_page.Totals.Total</strong><small>FILTRO ATUAL</small></article>
+        <article class="kpi"><span>CORE + SEGURANÇA</span><strong>@(_page.Totals.Ledger + _page.Totals.Iris + _page.Totals.Security)</strong><small>@_page.Totals.Ledger LEDGER // @_page.Totals.Iris IRIS // @_page.Totals.Security SECURITY</small></article>
+        <article class="kpi kpi-amber"><span>FARM</span><strong>@_page.Totals.Farm</strong><small>JOBS E EVIDÊNCIAS</small></article>
+        <article class="kpi"><span>ECONOMIA + REWARD</span><strong>@(_page.Totals.Economics + _page.Totals.Reward)</strong><small>@_page.Totals.Economics CENÁRIOS // @_page.Totals.Reward PROPOSTAS</small></article>
+        <article class="kpi @(_page.Totals.IntegrityFailures == 0 ? "kpi-green" : "kpi-red")"><span>INTEGRIDADE</span><strong>@(_page.Totals.IntegrityFailures == 0 ? "OK" : $"{_page.Totals.IntegrityFailures} FALHA(S)")</strong><small>VALIDAÇÃO CRIPTOGRÁFICA E CONTÁBIL</small></article>
+    </section>
+
+    @if (_page.IsScanTruncated)
+    {
+        <div class="audit-warning" role="status">A CONSULTA ATINGIU O LIMITE DE 5.000 EVENTOS. REFINE O PERÍODO PARA UMA EXPORTAÇÃO COMPLETA.</div>
+    }
+
+    <section class="panel audit-timeline">
+        <header class="panel-head">
+            <h2>LINHA DO TEMPO</h2>
+            <span class="tag">PÁGINA @_page.Page / @_page.TotalPages</span>
+        </header>
+        @if (_page.Events.Count == 0)
+        {
+            <div class="audit-empty"><strong>NENHUM EVENTO ENCONTRADO</strong><span>Ajuste os filtros ou amplie o período.</span></div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="audit-table">
+                    <thead><tr><th>UTC</th><th>ORIGEM</th><th>AÇÃO / STATUS</th><th>REFERÊNCIA</th><th>VALOR</th><th>INTEGRIDADE</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in _page.Events)
+                        {
+                            <tr>
+                                <td><time datetime="@item.OccurredAtUtc.ToString("O")">@item.OccurredAtUtc.ToString("dd/MM/yyyy HH:mm:ss")</time></td>
+                                <td><span class="audit-category audit-@item.Category.ToString().ToLowerInvariant()">@CategoryLabel(item.Category)</span></td>
+                                <td><strong>@item.Action</strong><small>@item.Status // @item.Description</small></td>
+                                <td><code>@item.Reference</code>@if (item.Correlation is not null){<small>CORR // @item.Correlation</small>}@if (item.Digest is not null){<small title="@item.Digest">DIGEST // @ShortHash(item.Digest)</small>}</td>
+                                <td>@FormatAmount(item)</td>
+                                <td><span class="audit-integrity @IntegrityClass(item.Integrity)">@IntegrityLabel(item.Integrity)</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <footer class="audit-pagination">
+            <button type="button" @onclick="PreviousAsync" disabled="@(_loading || !_page.HasPreviousPage)">[ ← ANTERIOR ]</button>
+            <span>@_page.Totals.Total EVENTO(S) // @_page.PageSize POR PÁGINA</span>
+            <button type="button" @onclick="NextAsync" disabled="@(_loading || !_page.HasNextPage)">[ PRÓXIMA → ]</button>
+        </footer>
+    </section>
+}
+
+@code {
+    private AuditPage? _page;
+    private string _searchDraft = string.Empty;
+    private string _categoryDraft = string.Empty;
+    private DateTime? _fromDraft;
+    private DateTime? _toDraft;
+    private AuditQuery _query = new();
+    private bool _loading;
+    private string? _error;
+
+    private string ExportUrl
+    {
+        get
+        {
+            var values = new List<string>();
+            if (_query.Search is not null) values.Add($"search={Uri.EscapeDataString(_query.Search)}");
+            if (_query.Category is not null) values.Add($"category={_query.Category}");
+            if (_query.FromUtc is not null) values.Add($"fromUtc={Uri.EscapeDataString(_query.FromUtc.Value.ToString("O"))}");
+            if (_query.ToUtc is not null) values.Add($"toUtc={Uri.EscapeDataString(_query.ToUtc.Value.ToString("O"))}");
+            return values.Count == 0 ? "/api/audit/export" : $"/api/audit/export?{string.Join('&', values)}";
+        }
+    }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task ApplyAsync()
+    {
+        _error = null;
+        try
+        {
+            _query = new AuditQuery(
+                _searchDraft,
+                Enum.TryParse<AuditCategory>(_categoryDraft, out var category) ? category : null,
+                ParseUtc(_fromDraft), ParseUtc(_toDraft), 1, 25).Normalize();
+            await LoadAsync();
+        }
+        catch (ArgumentException exception) { _error = exception.Message; }
+    }
+
+    private async Task ClearAsync()
+    {
+        _searchDraft = _categoryDraft = string.Empty;
+        _fromDraft = _toDraft = null;
+        _query = new AuditQuery();
+        await LoadAsync();
+    }
+
+    private Task PreviousAsync() => ChangePageAsync(_query.Page - 1);
+    private Task NextAsync() => ChangePageAsync(_query.Page + 1);
+    private async Task ChangePageAsync(int page) { _query = _query with { Page = page }; await LoadAsync(); }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try { _page = await AuditTrail.SearchAsync(_query); }
+        catch (Exception) { _error = "Não foi possível consolidar a trilha de auditoria."; }
+        finally { _loading = false; }
+    }
+
+    private static DateTimeOffset? ParseUtc(DateTime? value) => value is null
+        ? null
+        : new DateTimeOffset(DateTime.SpecifyKind(value.Value, DateTimeKind.Utc));
+    private static string CategoryLabel(AuditCategory category) => category switch
+    {
+        AuditCategory.Ledger => "LEDGER", AuditCategory.Iris => "IRIS", AuditCategory.Farm => "FARM",
+        AuditCategory.Economics => "ECONOMIA", AuditCategory.Reward => "REWARD",
+        AuditCategory.Security => "SEGURANÇA", _ => category.ToString().ToUpperInvariant()
+    };
+    private static string IntegrityLabel(AuditIntegrityStatus status) => status switch
+    {
+        AuditIntegrityStatus.Valid => "VÁLIDA", AuditIntegrityStatus.Invalid => "FALHA", _ => "N/A"
+    };
+    private static string IntegrityClass(AuditIntegrityStatus status) => status switch
+    {
+        AuditIntegrityStatus.Valid => "valid", AuditIntegrityStatus.Invalid => "invalid", _ => "neutral"
+    };
+    private static string FormatAmount(AuditEventSnapshot item) => item.AmountMinor is null ? "---" : item.Category switch
+    {
+        AuditCategory.Farm => $"{item.AmountMinor.Value / 1_000m:N3} CP",
+        AuditCategory.Ledger or AuditCategory.Iris => Aic.Format(item.AmountMinor.Value),
+        _ => item.AmountMinor.Value.ToString("N0")
+    };
+    private static string ShortHash(string value) => value.Length <= 16 ? value : $"{value[..10]}...{value[^4..]}";
+}

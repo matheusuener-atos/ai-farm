@@ -40,6 +40,7 @@ public static class DependencyInjection
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageQuery>(provider =>
             provider.GetRequiredService<InMemoryChatStore>());
+        services.AddSingleton<IAiUsageBudgetService, InMemoryAiUsageBudgetService>();
         services.TryAddScoped<IConversationExportService, ConversationExportService>();
         if (openAi is null)
         {
@@ -70,6 +71,7 @@ public static class DependencyInjection
         }
         services.AddSingleton<IAiProvider, ProtectedAiProvider>();
         services.AddScoped<ChatWorkflow>();
+        services.AddScoped<IrisApiService>();
         services.AddHostedService<ReservationExpirationWorker>();
         return services;
     }
@@ -100,21 +102,59 @@ public static class DependencyInjection
         services.RemoveAll<IAIFarmReadinessProbe>();
         services.RemoveAll<IChatAttachmentService>();
         services.RemoveAll<IFarmLabService>();
+        services.RemoveAll<IFarmApiJobService>();
+        services.RemoveAll<IFarmUsefulJobService>();
         services.RemoveAll<IFarmAgentService>();
         services.RemoveAll<IFarmEconomicsScenarioStore>();
         services.RemoveAll<IFarmBalanceQuery>();
         services.RemoveAll<IFarmRewardProposalStore>();
+        services.RemoveAll<IFarmAnalyticsQuery>();
+        services.RemoveAll<IFarmJobHistoryService>();
+        services.RemoveAll<IFarmScheduleService>();
+        services.RemoveAll<IFarmScheduleDispatcher>();
+        services.RemoveAll<IFarmDemandQueueService>();
+        services.RemoveAll<IFarmDemandDispatcher>();
+        services.RemoveAll<IFarmCapacityQuery>();
+        services.RemoveAll<IAuditTrail>();
+        services.RemoveAll<IOperationalIncidentService>();
+        services.RemoveAll<IAiUsageBudgetService>();
+        services.RemoveAll<IApiTokenService>();
+        services.RemoveAll<IApiTokenAuthenticator>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
         services.AddSingleton<IReservationExpirationService,
             PostgresReservationExpirationService>();
         services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();
-        services.AddScoped<IFarmLabService, PostgresFarmLabService>();
+        services.AddScoped<PostgresFarmLabService>();
+        services.AddScoped<IFarmLabService>(provider => provider.GetRequiredService<PostgresFarmLabService>());
+        services.AddScoped<IFarmApiJobService, PostgresFarmApiJobService>();
+        services.AddScoped<IFarmUsefulJobService, PostgresFarmUsefulJobService>();
         services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();
         services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
         services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
         services.AddScoped<IFarmRewardProposalStore, PostgresFarmRewardProposalStore>();
+        services.AddScoped<IFarmAnalyticsQuery, PostgresFarmAnalyticsQuery>();
+        services.AddScoped<IFarmJobHistoryService, PostgresFarmJobHistoryService>();
+        services.AddScoped<PostgresFarmScheduleService>();
+        services.AddScoped<IFarmScheduleService>(provider =>
+            provider.GetRequiredService<PostgresFarmScheduleService>());
+        services.AddScoped<IFarmScheduleDispatcher>(provider =>
+            provider.GetRequiredService<PostgresFarmScheduleService>());
+        services.AddHostedService<FarmScheduleWorker>();
+        services.AddScoped<PostgresFarmDemandQueueService>();
+        services.AddScoped<IFarmDemandQueueService>(provider =>
+            provider.GetRequiredService<PostgresFarmDemandQueueService>());
+        services.AddScoped<IFarmDemandDispatcher>(provider =>
+            provider.GetRequiredService<PostgresFarmDemandQueueService>());
+        services.AddHostedService<FarmDemandWorker>();
+        services.AddScoped<IFarmCapacityQuery, PostgresFarmCapacityQuery>();
+        services.AddScoped<IAuditTrail, PostgresAuditTrail>();
+        services.AddScoped<IOperationalIncidentService, PostgresOperationalIncidentService>();
+        services.AddScoped<IAiUsageBudgetService, PostgresAiUsageBudgetService>();
+        services.AddScoped<PostgresApiTokenService>();
+        services.AddScoped<IApiTokenService>(provider => provider.GetRequiredService<PostgresApiTokenService>());
+        services.AddScoped<IApiTokenAuthenticator>(provider => provider.GetRequiredService<PostgresApiTokenService>());
         if (objectStorage is null)
         {
             services.AddSingleton<IChatAttachmentService, UnavailableChatAttachmentService>();

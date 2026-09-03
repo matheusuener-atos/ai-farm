@@ -538,6 +538,48 @@ public sealed class InMemoryChatStore(InMemoryChatAttachmentService? attachmentS
         }
     }
 
+    public Task<AiUsageAnalytics> GetAnalyticsAsync(
+        int days = 30,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var completed = _results.Values.Select(x => new AiExecutionSummary(
+                x.OperationId,
+                x.ConversationId,
+                _conversations.GetValueOrDefault(x.ConversationId)?.Title,
+                x.Route.Provider,
+                x.Route.Model,
+                x.Route.PriceCatalogVersion,
+                x.InputUnits,
+                x.OutputUnits,
+                x.EstimatedCostMinor,
+                x.ActualCostMinor,
+                "Completed",
+                x.StartedAtUtc ?? DateTimeOffset.MinValue,
+                x.FinishedAtUtc));
+            var failed = _failures.Values.Select(x => new AiExecutionSummary(
+                x.OperationId,
+                x.ConversationId,
+                _conversations.GetValueOrDefault(x.ConversationId)?.Title,
+                x.Route.Provider,
+                x.Route.Model,
+                x.Route.PriceCatalogVersion,
+                0,
+                0,
+                x.EstimatedCostMinor,
+                0,
+                x.FailureCode,
+                x.StartedAtUtc,
+                x.FinishedAtUtc));
+            return Task.FromResult(AiUsageAnalyticsBuilder.Build(
+                completed.Concat(failed).ToArray(),
+                days,
+                DateTimeOffset.UtcNow));
+        }
+    }
+
     private static ConversationSnapshot Snapshot(ConversationState conversation) => new(
         conversation.Id,
         conversation.CreatedAtUtc,

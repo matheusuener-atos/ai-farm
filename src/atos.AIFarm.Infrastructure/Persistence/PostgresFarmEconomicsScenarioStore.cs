@@ -10,7 +10,8 @@ namespace atos.AIFarm.Infrastructure.Persistence;
 public sealed class PostgresFarmEconomicsScenarioStore(
     IDbContextFactory<AIFarmDbContext> dbFactory,
     IAIFarmIdentityAccessor identityAccessor,
-    TimeProvider timeProvider) : IFarmEconomicsScenarioStore
+    TimeProvider timeProvider,
+    FarmManifestSigningOptions signingOptions) : IFarmEconomicsScenarioStore
 {
     public const string CurrentVersion = "atos-farm-economics-v1";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -52,6 +53,17 @@ public sealed class PostgresFarmEconomicsScenarioStore(
                 cancellationToken);
             if (source is null)
                 throw new InvalidOperationException("O benchmark de origem não pertence à conta ou não foi concluído.");
+            var sourceEvents = await db.FarmJobEvents.AsNoTracking()
+                .Where(x => x.JobId == source.Id)
+                .OrderBy(x => x.Sequence)
+                .ToArrayAsync(cancellationToken);
+            if (!FarmEvidenceSecurity.Verify(
+                    source,
+                    sourceEvents,
+                    signingOptions,
+                    out _).IsValid)
+                throw new InvalidOperationException(
+                    "O benchmark de origem não possui evidência íntegra.");
             sourceEvidenceDigest = source.EvidenceDigest;
         }
 

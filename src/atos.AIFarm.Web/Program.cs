@@ -8,6 +8,7 @@ using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
 using atos.AIFarm.Web.Components.Account;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -41,7 +42,20 @@ builder.Services.AddAuthentication(options =>
         options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
     })
     .AddIdentityCookies();
-builder.Services.AddAuthorization();
+builder.Services.AddAuthentication()
+    .AddScheme<AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(
+        AIFarmApiTokenDefaults.Scheme, _ => { });
+builder.Services.AddAuthorization(options =>
+{
+    AddApiPolicy(options, AIFarmApiTokenDefaults.ProfileReadPolicy, ApiTokenScope.ProfileRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.UsageReadPolicy, ApiTokenScope.UsageRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.IncidentsReadPolicy, ApiTokenScope.IncidentsRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.AuditReadPolicy, ApiTokenScope.AuditRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.ConversationsReadPolicy, ApiTokenScope.ConversationsRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.IrisExecutePolicy, ApiTokenScope.IrisExecute);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.FarmReadPolicy, ApiTokenScope.FarmRead);
+    AddApiPolicy(options, AIFarmApiTokenDefaults.FarmExecutePolicy, ApiTokenScope.FarmExecute);
+});
 builder.Services.AddHttpContextAccessor();
 if (builder.Configuration.GetValue<bool>("RENDER"))
 {
@@ -64,6 +78,39 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("personal-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("iris-execute", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+    options.AddPolicy("farm-execute", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value ??
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst
@@ -328,6 +375,70 @@ app.MapGet("/api/farm/jobs/{jobId:guid}/evidence", async (
     }
 }).RequireAuthorization();
 
+app.MapGet("/api/farm/jobs/{jobId:guid}/output", async (
+    Guid jobId,
+    HttpResponse response,
+    IFarmUsefulJobService usefulJobs,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var output = await usefulJobs.DownloadOutputAsync(jobId, cancellationToken);
+        return output is null
+            ? Results.NotFound()
+            : Results.File(output.Content, output.ContentType, output.FileName);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
+app.MapGet("/api/farm/demands/{demandId:guid}/output", async (
+    Guid demandId,
+    HttpResponse response,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var output = await demands.DownloadOutputAsync(demandId, cancellationToken);
+        return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+    }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).RequireAuthorization();
+
+app.MapGet("/api/farm/jobs/export", async (
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    HttpResponse response,
+    IFarmJobHistoryService history,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var export = await history.ExportAsync(BuildFarmJobHistoryQuery(
+            search, workloadId, status, origin, integrityFailuresOnly,
+            fromUtc, toUtc, 1, 100), cancellationToken);
+        return Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
 app.MapGet("/api/farm/economics/{scenarioId:guid}/report", async (
     Guid scenarioId,
     HttpResponse response,
@@ -348,6 +459,522 @@ app.MapGet("/api/farm/economics/{scenarioId:guid}/report", async (
         return Results.Conflict(new { error = exception.Message });
     }
 }).RequireAuthorization();
+
+app.MapGet("/api/audit/export", async (
+    string? search,
+    string? category,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    HttpResponse response,
+    IAuditTrail audit,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    if (!string.IsNullOrWhiteSpace(category) &&
+        !Enum.TryParse<AuditCategory>(category, true, out _))
+        return Results.BadRequest(new { error = "Categoria de auditoria inválida." });
+    try
+    {
+        var parsedCategory = Enum.TryParse<AuditCategory>(category, true, out var value) ? value : (AuditCategory?)null;
+        var export = await audit.ExportAsync(
+            new AuditQuery(search, parsedCategory, fromUtc, toUtc), cancellationToken);
+        return Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization();
+
+var personalApi = app.MapGroup("/api/v1")
+    .RequireRateLimiting("personal-api");
+personalApi.MapGet("/me", async (
+    IAIFarmIdentityAccessor identityAccessor,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+    return Results.Ok(new
+    {
+        identity.AccountId,
+        identity.DisplayName,
+        authenticatedWith = "iris_personal_token"
+    });
+}).RequireAuthorization(AIFarmApiTokenDefaults.ProfileReadPolicy);
+
+personalApi.MapGet("/usage", async (
+    IAiUsageQuery usage,
+    IAiUsageBudgetService budget,
+    CancellationToken cancellationToken) => Results.Ok(new
+    {
+        usage = await usage.GetDashboardAsync(20, cancellationToken),
+        budget = await budget.GetSnapshotAsync(cancellationToken)
+    })).RequireAuthorization(AIFarmApiTokenDefaults.UsageReadPolicy);
+
+personalApi.MapGet("/usage/analytics", async (
+    int? days,
+    IAiUsageQuery usage,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await usage.GetAnalyticsAsync(days ?? 30, cancellationToken));
+    }
+    catch (ArgumentOutOfRangeException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.UsageReadPolicy);
+
+personalApi.MapGet("/farm/analytics", async (
+    int? days,
+    IFarmAnalyticsQuery analytics,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await analytics.GetAsync(days ?? 30, cancellationToken));
+    }
+    catch (ArgumentOutOfRangeException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/workloads", () => Results.Ok(new
+{
+    catalogVersion = FarmWorkloadCatalog.Version,
+    workloads = FarmWorkloadCatalog.Definitions
+})).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/nodes", async (
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+    Results.Ok((await farm.GetDashboardAsync(cancellationToken)).Nodes))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/capacity", async (
+    IFarmCapacityQuery capacity,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await capacity.GetAsync(cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/pause", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeStatusAsync(nodeId, FarmNodeStatus.Paused, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/resume", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeStatusAsync(nodeId, FarmNodeStatus.Online, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+    .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/demands", async (
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await demands.GetDashboardAsync(cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/demands", async (
+    FarmDemandRequest submission,
+    HttpRequest request,
+    HttpResponse response,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        return Results.Accepted(value: await demands.SubmitAsync(
+            submission, tokenId, request.Headers["X-Idempotency-Key"].ToString(), cancellationToken));
+    }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(48 * 1024));
+
+personalApi.MapPost("/farm/demands/{demandId:guid}/cancel", async (
+    Guid demandId,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await demands.CancelAsync(demandId, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/demands/{demandId:guid}/output", async (
+    Guid demandId,
+    HttpResponse response,
+    IFarmDemandQueueService demands,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var output = await demands.DownloadOutputAsync(demandId, cancellationToken);
+        return output is null ? Results.NotFound() : Results.File(output.Content, output.ContentType, output.FileName);
+    }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/schedules", async (
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await schedules.GetDashboardAsync(cancellationToken)))
+    .RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/schedules", async (
+    FarmScheduleRequest request,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.CreateAsync(request, cancellationToken)); }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(4 * 1024));
+
+personalApi.MapPost("/farm/schedules/{scheduleId:guid}/pause", async (
+    Guid scheduleId,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.SetStatusAsync(
+        scheduleId, FarmScheduleStatus.Paused, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/schedules/{scheduleId:guid}/resume", async (
+    Guid scheduleId,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.SetStatusAsync(
+        scheduleId, FarmScheduleStatus.Active, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/schedules/{scheduleId:guid}/trigger", async (
+    Guid scheduleId,
+    IFarmScheduleService schedules,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await schedules.TriggerNowAsync(scheduleId, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/jobs", async (
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    int? page,
+    int? pageSize,
+    IFarmJobHistoryService history,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await history.SearchAsync(BuildFarmJobHistoryQuery(
+            search, workloadId, status, origin, integrityFailuresOnly,
+            fromUtc, toUtc, page ?? 1, pageSize ?? 20), cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/jobs/export", async (
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    HttpResponse response,
+    IFarmJobHistoryService history,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var export = await history.ExportAsync(BuildFarmJobHistoryQuery(
+            search, workloadId, status, origin, integrityFailuresOnly,
+            fromUtc, toUtc, 1, 100), cancellationToken);
+        return Results.File(export.Content, export.ContentType, export.FileName);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/jobs", async (
+    FarmApiJobRequest submission,
+    HttpRequest request,
+    HttpResponse response,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        return Results.Ok(await jobs.SubmitAsync(
+            submission,
+            tokenId,
+            request.Headers["X-Idempotency-Key"].ToString(),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(4 * 1024));
+
+personalApi.MapPost("/farm/useful-jobs", async (
+    FarmUsefulJobRequest submission,
+    HttpRequest request,
+    HttpResponse response,
+    IFarmUsefulJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        return Results.Ok(await jobs.SubmitAsync(
+            submission,
+            tokenId,
+            request.Headers["X-Idempotency-Key"].ToString(),
+            cancellationToken));
+    }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(48 * 1024));
+
+personalApi.MapGet("/farm/useful-jobs/{jobId:guid}/output", async (
+    Guid jobId,
+    HttpResponse response,
+    IFarmUsefulJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var output = await jobs.DownloadOutputAsync(jobId, cancellationToken);
+        return output is null ? Results.NotFound() :
+            Results.File(output.Content, output.ContentType, output.FileName);
+    }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/farm/jobs/{jobId:guid}", async (
+    Guid jobId,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    var job = await jobs.GetAsync(jobId, cancellationToken);
+    return job is null ? Results.NotFound() : Results.Ok(job);
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapPost("/farm/jobs/{jobId:guid}/cancel", async (
+    Guid jobId,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await jobs.CancelAsync(jobId, cancellationToken));
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapGet("/farm/jobs/{jobId:guid}/evidence", async (
+    Guid jobId,
+    HttpResponse response,
+    IFarmApiJobService jobs,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    response.Headers.XContentTypeOptions = "nosniff";
+    try
+    {
+        var evidence = await jobs.DownloadEvidenceAsync(jobId, cancellationToken);
+        return evidence is null
+            ? Results.NotFound()
+            : Results.File(evidence.Content, "application/json; charset=utf-8", evidence.FileName);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.FarmReadPolicy);
+
+personalApi.MapGet("/incidents", async (
+    string? search,
+    string? severity,
+    bool? openOnly,
+    IOperationalIncidentService incidents,
+    CancellationToken cancellationToken) =>
+{
+    if (!string.IsNullOrWhiteSpace(severity) &&
+        !Enum.TryParse<IncidentSeverity>(severity, true, out _))
+        return Results.BadRequest(new { error = "Severidade inválida." });
+    var parsed = Enum.TryParse<IncidentSeverity>(severity, true, out var value)
+        ? value : (IncidentSeverity?)null;
+    return Results.Ok(await incidents.SearchAsync(
+        new IncidentQuery(search, parsed, openOnly ?? true), cancellationToken));
+}).RequireAuthorization(AIFarmApiTokenDefaults.IncidentsReadPolicy);
+
+personalApi.MapGet("/audit", async (
+    string? search,
+    string? category,
+    int? page,
+    int? pageSize,
+    IAuditTrail audit,
+    CancellationToken cancellationToken) =>
+{
+    if (!string.IsNullOrWhiteSpace(category) &&
+        !Enum.TryParse<AuditCategory>(category, true, out _))
+        return Results.BadRequest(new { error = "Categoria inválida." });
+    var parsed = Enum.TryParse<AuditCategory>(category, true, out var value)
+        ? value : (AuditCategory?)null;
+    try
+    {
+        return Results.Ok(await audit.SearchAsync(
+            new AuditQuery(search, parsed, Page: page ?? 1, PageSize: pageSize ?? 25),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.AuditReadPolicy);
+
+personalApi.MapGet("/conversations", async (
+    string? search,
+    int? page,
+    int? pageSize,
+    bool? archived,
+    IChatStore chat,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        return Results.Ok(await chat.SearchConversationsAsync(
+            new ConversationQuery(search, page ?? 1, pageSize ?? 25, archived ?? false),
+            cancellationToken));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization(AIFarmApiTokenDefaults.ConversationsReadPolicy);
+
+personalApi.MapGet("/conversations/{conversationId:guid}", async (
+    Guid conversationId,
+    IChatStore chat,
+    CancellationToken cancellationToken) =>
+{
+    var conversation = await chat.GetConversationAsync(conversationId, cancellationToken);
+    return conversation is null ? Results.NotFound() : Results.Ok(conversation);
+}).RequireAuthorization(AIFarmApiTokenDefaults.ConversationsReadPolicy);
+
+personalApi.MapPost("/iris/responses", async (
+    IrisApiExecutionRequest execution,
+    HttpRequest request,
+    HttpResponse response,
+    IrisApiService iris,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "private, no-store";
+    try
+    {
+        if (!Guid.TryParse(
+                request.HttpContext.User.FindFirst(AIFarmApiTokenDefaults.TokenIdClaim)?.Value,
+                out var tokenId))
+            return Results.Unauthorized();
+        var result = await iris.ExecuteAsync(
+            execution,
+            tokenId,
+            request.Headers["X-Idempotency-Key"].ToString(),
+            cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (AiUsageBudgetExceededException exception)
+    {
+        return Results.Conflict(new { error = exception.Message, code = "usage_budget_exceeded" });
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Conflict(new { error = exception.Message });
+    }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.IrisExecutePolicy)
+  .RequireRateLimiting("iris-execute")
+  .WithMetadata(new RequestSizeLimitAttribute(32 * 1024));
 
 app.MapPost("/api/farm/agents/enroll", async (
     HttpRequest request,
@@ -414,11 +1041,13 @@ app.MapGet("/api/farm/agents/trust", async (
 app.MapPost("/api/farm/agents/jobs/claim", async (
     HttpRequest request,
     HttpResponse response,
+    FarmAgentClaimRequest claim,
     IFarmAgentService farmAgents,
     CancellationToken cancellationToken) =>
 {
     response.Headers.CacheControl = "no-store";
-    var offer = await farmAgents.ClaimJobAsync(ReadBearer(request), cancellationToken);
+    var offer = await farmAgents.ClaimJobAsync(
+        ReadBearer(request), cancellationToken, claim.ActiveJobIds);
     return offer is null ? Results.NoContent() : Results.Ok(offer);
 }).DisableAntiforgery()
   .RequireRateLimiting("farm-agent")
@@ -485,7 +1114,7 @@ app.MapPost("/api/farm/agents/jobs/{jobId:guid}/result", async (
     }
 }).DisableAntiforgery()
   .RequireRateLimiting("farm-agent")
-  .WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
+  .WithMetadata(new RequestSizeLimitAttribute(160 * 1024));
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -538,6 +1167,60 @@ static string ReadBearer(HttpRequest request)
     return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
         ? authorization["Bearer ".Length..].Trim()
         : string.Empty;
+}
+
+static void AddApiPolicy(
+    Microsoft.AspNetCore.Authorization.AuthorizationOptions options,
+    string name,
+    ApiTokenScope scope)
+{
+    options.AddPolicy(name, policy =>
+    {
+        policy.AddAuthenticationSchemes(AIFarmApiTokenDefaults.Scheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireClaim(AIFarmApiTokenDefaults.ScopeClaim, scope.ToString());
+    });
+}
+
+static FarmJobHistoryQuery BuildFarmJobHistoryQuery(
+    string? search,
+    string? workloadId,
+    string? status,
+    string? origin,
+    bool? integrityFailuresOnly,
+    DateTimeOffset? fromUtc,
+    DateTimeOffset? toUtc,
+    int page,
+    int pageSize)
+{
+    FarmJobStatus? parsedStatus = null;
+    if (!string.IsNullOrWhiteSpace(status))
+    {
+        if (!Enum.TryParse<FarmJobStatus>(status, true, out var value) ||
+            !Enum.IsDefined(value))
+            throw new ArgumentException("Status de Job inválido.", nameof(status));
+        parsedStatus = value;
+    }
+
+    FarmJobOrigin? parsedOrigin = null;
+    if (!string.IsNullOrWhiteSpace(origin))
+    {
+        if (!Enum.TryParse<FarmJobOrigin>(origin, true, out var value) ||
+            !Enum.IsDefined(value))
+            throw new ArgumentException("Origem de Job inválida.", nameof(origin));
+        parsedOrigin = value;
+    }
+
+    return new FarmJobHistoryQuery(
+        search,
+        workloadId,
+        parsedStatus,
+        parsedOrigin,
+        integrityFailuresOnly ?? false,
+        fromUtc,
+        toUtc,
+        page,
+        pageSize).Normalize();
 }
 
 static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string contentRootPath)

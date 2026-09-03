@@ -1,0 +1,130 @@
+@page "/farm/analytics"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmAnalyticsQuery Analytics
+
+<PageTitle>Análise da Farm // atos AI Farm</PageTitle>
+
+<div class="page-head analytics-head">
+    <div>
+        <p class="eyebrow amber">atos:/FARM/ANALYTICS</p>
+        <h1>FARM ANALYTICS</h1>
+        <p>PROCESSAMENTO MEDIDO // EVIDÊNCIA PRESERVADA // SEM EMISSÃO DE AIC</p>
+    </div>
+    <label class="analytics-period">PERÍODO UTC
+        <select value="@_days" @onchange="ChangePeriodAsync" disabled="@_loading">
+            <option value="7">7 DIAS</option>
+            <option value="30">30 DIAS</option>
+            <option value="90">90 DIAS</option>
+        </select>
+    </label>
+</div>
+
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+else if (_analytics is null)
+{
+    <p>CALCULANDO TELEMETRIA DA FARM...</p>
+}
+else
+{
+    <div class="analytics-kpis farm-analytics-kpis">
+        <section class="kpi kpi-amber"><span>JOBS</span><strong>@_analytics.JobCount</strong><small>@_analytics.ActiveJobCount ATIVO(S)</small></section>
+        <section class="kpi kpi-green"><span>CONCLUSÃO</span><strong>@_analytics.SuccessRatePercent.ToString("0.0")%</strong><small>@_analytics.CompletedJobCount OK // @_analytics.FailedJobCount FALHA</small></section>
+        <section class="kpi @(_analytics.IntegrityFailureCount == 0 ? "kpi-green" : "kpi-amber")"><span>INTEGRIDADE</span><strong>@_analytics.IntegrityFailureCount</strong><small>BUNDLES DIVERGENTES</small></section>
+        <section class="kpi kpi-amber"><span>CP VERIFICADO</span><strong>@FormatCp(_analytics.VerifiedProcessingPointsMilli)</strong><small>SOMENTE JOBS CONCLUÍDOS</small></section>
+        <section class="kpi"><span>VAZÃO</span><strong>@_analytics.ProcessingPointsPerHour.ToString("N3") CP/H</strong><small>POR TEMPO DE EXECUÇÃO</small></section>
+        <section class="kpi"><span>DURAÇÃO MÉDIA</span><strong>@FormatDuration(_analytics.AverageDurationMilliseconds)</strong><small>PICO MEM. @FormatBytes(_analytics.PeakMemoryBytes)</small></section>
+        <section class="kpi @TrendClass"><span>VARIAÇÃO DE CP</span><strong>@FormatChange(_analytics.ProcessingPointsChangePercent)</strong><small>ANTERIOR @FormatCp(_analytics.PreviousPeriodProcessingPointsMilli)</small></section>
+    </div>
+
+    <section class="panel farm-analytics-node">
+        <div class="panel-head"><h2>NODE E AGENT</h2><button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "[ ATUALIZANDO... ]" : "[ ATUALIZAR ]")</button></div>
+        @if (_analytics.Node is null)
+        {
+            <p class="analytics-empty muted">NODE AINDA NÃO INICIALIZADO NESTA CONTA.</p>
+        }
+        else
+        {
+            <div class="farm-analytics-node-grid">
+                <div><span>NODE</span><strong>@_analytics.Node.Name</strong><small>@_analytics.Node.ConnectionKind</small></div>
+                <div><span>STATUS</span><strong class="@NodeStatusClass">@_analytics.Node.Status</strong><small>@(_analytics.Node.HeartbeatFresh ? "HEARTBEAT VÁLIDO" : "HEARTBEAT EXPIRADO")</small></div>
+                <div><span>VERIFICAÇÃO</span><strong>@_analytics.Node.VerificationLevel</strong><small>@(_analytics.Node.AcceptJobs ? "ACEITANDO JOBS" : "NÃO ACEITA JOBS")</small></div>
+                <div><span>CAPACIDADE</span><strong>@_analytics.Node.LogicalProcessors CPU</strong><small>@FormatBytes(_analytics.Node.MemoryBytes)</small></div>
+                <div><span>ÚLTIMO SINAL</span><strong>@_analytics.Node.LastSeenAtUtc.ToString("dd/MM HH:mm:ss")</strong><small>@(_analytics.Node.AgentVersion ?? "EMBEDDED")</small></div>
+            </div>
+        }
+    </section>
+
+    <section class="panel analytics-timeline farm-analytics-timeline">
+        <div class="panel-head section-heading"><div><h2>CP VERIFICADO POR DIA</h2><p class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</p></div></div>
+        <div class="analytics-bars" role="img" aria-label="Processamento verificado diariamente na Farm">
+            @foreach (var day in _analytics.Daily)
+            {
+                <div class="analytics-bar-row">
+                    <time datetime="@day.DateUtc.ToString("yyyy-MM-dd")">@day.DateUtc.ToString("dd/MM")</time>
+                    <div class="analytics-bar-track"><span class="farm-analytics-bar" style="width: @BarWidth(day.VerifiedProcessingPointsMilli)"></span></div>
+                    <strong>@FormatCp(day.VerifiedProcessingPointsMilli)</strong>
+                    <small>@day.JobCount JOB // @day.FailedCount FALHA(S)</small>
+                </div>
+            }
+        </div>
+    </section>
+
+    <div class="analytics-detail-grid">
+        <section class="panel">
+            <div class="panel-head"><h2>WORKLOADS</h2></div>
+            @if (_analytics.Workloads.Count == 0)
+            {
+                <p class="analytics-empty muted">SEM JOBS NO PERÍODO.</p>
+            }
+            else
+            {
+                <div class="table-wrap"><table><thead><tr><th>WORKLOAD</th><th>JOBS</th><th>SUCESSO</th><th>CP</th><th>DURAÇÃO</th></tr></thead><tbody>
+                    @foreach (var workload in _analytics.Workloads)
+                    {
+                        <tr><td><span class="amber">@workload.Workload</span><br /><small>@workload.Version</small></td><td>@workload.JobCount<br /><small>@workload.FailedCount FALHA</small></td><td>@workload.SuccessRatePercent.ToString("0.0")%</td><td>@FormatCp(workload.VerifiedProcessingPointsMilli)</td><td>@FormatDuration(workload.AverageDurationMilliseconds)</td></tr>
+                    }
+                </tbody></table></div>
+            }
+        </section>
+        <section class="panel analytics-statuses">
+            <div class="panel-head"><h2>PIPELINE</h2></div>
+            @foreach (var status in _analytics.Statuses)
+            {
+                <div><span class="@StatusClass(status.Status)">@status.Status.ToString().ToUpperInvariant()</span><strong>@status.JobCount</strong><small>@status.Percentage.ToString("0.0")%</small></div>
+            }
+        </section>
+    </div>
+
+    <section class="panel farm-economics-summary">
+        <div class="panel-head"><h2>PIPELINE ECONÔMICO // NÃO LIQUIDADO</h2></div>
+        <div class="farm-analytics-node-grid">
+            <div><span>CENÁRIOS</span><strong>@_analytics.Economics.ScenarioCount</strong><small>FOTOGRAFIAS ECONÔMICAS</small></div>
+            <div><span>PROPOSTAS</span><strong>@_analytics.Economics.RewardProposalCount</strong><small>AGUARDANDO POLÍTICA E FUNDING</small></div>
+            <div><span>CP PROPOSTO</span><strong>@FormatCp(_analytics.Economics.ProposedProcessingPointsMilli)</strong><small>SEM CONVERSÃO CP → AIC</small></div>
+            <div><span>RECOMENDADO</span><strong>R$ @_analytics.Economics.RecommendedRewardBrl.ToString("N2")</strong><small>NENHUM PAGAMENTO EXECUTADO</small></div>
+        </div>
+    </section>
+}
+
+@code {
+    private atos.AIFarm.Core.Application.FarmAnalytics? _analytics;
+    private int _days = 30;
+    private bool _loading;
+    private string? _error;
+    private long MaximumDailyPoints => Math.Max(1, _analytics?.Daily.Max(x => x.VerifiedProcessingPointsMilli) ?? 0);
+    private string TrendClass => _analytics?.ProcessingPointsChangePercent switch { >= 0 => "kpi-green", < 0 => "kpi-amber", _ => string.Empty };
+    private string NodeStatusClass => _analytics?.Node?.Status == FarmNodeStatus.Online ? "green" : "amber";
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private async Task ChangePeriodAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var days)) _days = days; await LoadAsync(); }
+    private async Task LoadAsync() { _loading = true; _error = null; try { _analytics = await Analytics.GetAsync(_days); } catch (Exception) { _error = "Não foi possível calcular a telemetria da Farm."; } finally { _loading = false; } }
+    private string BarWidth(long value) => $"{value * 100m / MaximumDailyPoints:0.##}%";
+    private static string FormatCp(long milli) => $"{milli / 1_000m:N3} CP";
+    private static string FormatChange(decimal? value) => value is null ? "SEM BASE" : $"{value:+0.0;-0.0;0.0}%";
+    private static string FormatDuration(decimal? milliseconds) => milliseconds switch { null => "---", < 1_000 => $"{milliseconds:0} ms", _ => $"{milliseconds / 1_000:0.00} s" };
+    private static string FormatBytes(long bytes) => bytes <= 0 ? "---" : bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):N1} GB" : $"{bytes / (double)(1L << 20):N1} MB";
+    private static string StatusClass(FarmJobStatus status) => status == FarmJobStatus.Completed ? "green" : status is FarmJobStatus.Failed or FarmJobStatus.Cancelled or FarmJobStatus.TimedOut or FarmJobStatus.Rejected ? "amber" : "purple";
+}
