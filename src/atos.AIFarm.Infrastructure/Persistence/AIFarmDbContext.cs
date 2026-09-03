@@ -595,7 +595,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
         {
             entity.ToTable("api_tokens", table =>
             {
-                table.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 255");
+                table.HasCheckConstraint("CK_api_tokens_scopes", "\"Scopes\" > 0 AND \"Scopes\" <= 511");
                 table.HasCheckConstraint("CK_api_tokens_expiration", "\"ExpiresAtUtc\" > \"CreatedAtUtc\"");
             });
             entity.HasKey(x => x.Id);

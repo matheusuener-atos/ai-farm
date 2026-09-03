@@ -1,5 +1,11 @@
 namespace atos.AIFarm.Core.Wallet;
 
+public static class WalletLimits
+{
+    /// <summary>Teto por requisição do crédito administrativo: 1.000 AIC.</summary>
+    public const long MaximumAdministrativeCreditMinor = 1_000_000;
+}
+
 public static class Aic
 {
     public const int MinorUnitsPerAic = 1_000;

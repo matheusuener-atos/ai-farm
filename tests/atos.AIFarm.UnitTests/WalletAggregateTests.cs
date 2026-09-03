@@ -42,6 +42,47 @@ public sealed class WalletAggregateTests
     }
 
     [Fact]
+    public void AdministrativeCreditFillsPurchasedBucketAndIsIdempotentByCorrelation()
+    {
+        var wallet = NewWallet();
+        var correlationId = Guid.NewGuid();
+
+        var (first, firstReplayed) = wallet.GrantPurchased(Aic.FromAic(50), correlationId, Now);
+        var (second, secondReplayed) = wallet.GrantPurchased(Aic.FromAic(50), correlationId, Now);
+
+        Assert.False(firstReplayed);
+        Assert.True(secondReplayed);
+        Assert.Equal(first.Id, second.Id);
+        Assert.Single(wallet.Transactions);
+        Assert.Equal(Aic.FromAic(50), wallet.GetBalance().AvailableByBucket[CreditBucket.Purchased]);
+        Assert.Equal(0, wallet.GetBalance().AvailableByBucket[CreditBucket.Promotional]);
+        Assert.All(wallet.Transactions, AssertBalanced);
+    }
+
+    [Fact]
+    public void AdministrativeCreditRespectsPerRequestCap()
+    {
+        var wallet = NewWallet();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            wallet.GrantPurchased(WalletLimits.MaximumAdministrativeCreditMinor + 1, Guid.NewGuid(), Now));
+        Assert.Empty(wallet.Transactions);
+    }
+
+    [Fact]
+    public void PurchasedBalanceIsNotConsumableByPromotionalReservation()
+    {
+        var wallet = NewWallet();
+        wallet.GrantPurchased(Aic.FromAic(100), Guid.NewGuid(), Now);
+
+        var error = Assert.Throws<InsufficientBalanceException>(() =>
+            wallet.ReservePromotional(Aic.FromAic(1), Guid.NewGuid(), "reserve-purchased", Now, Now.AddMinutes(5)));
+
+        Assert.Equal(0, error.AvailableMinor);
+        Assert.Equal(Aic.FromAic(100), wallet.GetBalance().AvailableByBucket[CreditBucket.Purchased]);
+    }
+
+    [Fact]
     public void CaptureBelowReservationReleasesRemainder()
     {
         var wallet = FundedWallet();
