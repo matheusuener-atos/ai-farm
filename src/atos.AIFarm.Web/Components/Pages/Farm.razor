@@ -69,6 +69,13 @@ else
                             @onclick="() => ToggleNodeAsync(poolNode)" disabled="@_working">
                         @(poolNode.Status == FarmNodeStatus.Paused ? "RETOMAR" : "PAUSAR")
                     </button>
+                    @if (poolNode.ConnectionKind == FarmNodeConnectionKind.Agent)
+                    {
+                        <button type="button" class="button-secondary"
+                                @onclick="() => ToggleSharingAsync(poolNode)" disabled="@_working">
+                            @(poolNode.SharePlatformWork ? "SAIR DO POOL DA PLATAFORMA" : "COMPARTILHAR COM A PLATAFORMA")
+                        </button>
+                    }
                 </article>
             }
         </div>
@@ -372,6 +379,20 @@ else
             var status = node.Status == FarmNodeStatus.Paused
                 ? FarmNodeStatus.Online : FarmNodeStatus.Paused;
             _dashboard = await FarmLab.SetNodeStatusAsync(node.Id, status);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        { _error = exception.Message; }
+        finally { _working = false; }
+    }
+
+    private async Task ToggleSharingAsync(FarmNodeSnapshot node)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            _dashboard = await FarmLab.SetNodeSharingAsync(node.Id, !node.SharePlatformWork);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         { _error = exception.Message; }

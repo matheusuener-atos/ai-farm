@@ -63,6 +63,25 @@
                     ainda não viram créditos — quando isso for ativado, você verá tudo
                     registrado.
                 </p>
+                @foreach (var node in _farm.Nodes.Where(x => x.ConnectionKind == FarmNodeConnectionKind.Agent))
+                {
+                    <div class="home-node-head">
+                        <span class="dot @(node.SharePlatformWork ? "orange" : "hollow")" aria-hidden="true"></span>
+                        <b>@node.Name</b>
+                        <span class="muted">· @(node.SharePlatformWork ? "ajudando a plataforma quando ocioso" : "trabalhando só para você")</span>
+                        <button class="btn" type="button" @onclick="() => ToggleShareAsync(node)" disabled="@_working">
+                            @(node.SharePlatformWork ? "Parar de ajudar" : "Ajudar a plataforma")
+                        </button>
+                    </div>
+                }
+                @if (_farm.Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent))
+                {
+                    <p class="muted">
+                        Ao ajudar a plataforma, seu computador também faz tarefas dela —
+                        sempre do mesmo tipo seguro — e os pontos de trabalho continuam
+                        sendo seus.
+                    </p>
+                }
             }
         </div>
     </section>
@@ -139,6 +158,25 @@
         catch (Exception)
         {
             _error = "A tarefa não pôde ser feita agora. Tente de novo em instantes.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task ToggleShareAsync(FarmNodeSnapshot node)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            _farm = await FarmLab.SetNodeSharingAsync(node.Id, !node.SharePlatformWork);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
         }
         finally
         {

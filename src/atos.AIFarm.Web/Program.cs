@@ -286,12 +286,15 @@ var rewardPolicy = new FarmRewardPolicy(
         "AIFarm:Farm:Rewards:MonthlyBudgetMinor", 0),
     builder.Configuration.GetValue<long>(
         "AIFarm:Farm:Rewards:MaximumPerSettlementMinor", 0)).Validate();
+var platformPool = new FarmPlatformPoolOptions(
+    builder.Configuration.GetValue<Guid?>("AIFarm:Farm:PlatformAccountId"));
 builder.Services.AddAIFarmPostgres(
     postgresConnection,
     objectStorage: objectStorage,
     farmManifestSigning: farmManifestSigning,
     nodeReliabilityPolicy: nodeReliabilityPolicy,
-    rewardPolicy: rewardPolicy);
+    rewardPolicy: rewardPolicy,
+    platformPool: platformPool);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
@@ -625,6 +628,28 @@ personalApi.MapPost("/farm/nodes/{nodeId:guid}/resume", async (
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
     .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/share", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeSharingAsync(nodeId, true, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/unshare", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeSharingAsync(nodeId, false, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
 
 personalApi.MapGet("/farm/demands", async (
     IFarmDemandQueueService demands,

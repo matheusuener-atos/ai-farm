@@ -54,7 +54,8 @@ public sealed record FarmNodeSnapshot(
     int AuthorizedLogicalProcessors,
     long AuthorizedMemoryBytes,
     string? VerifiedProfileHash,
-    DateTimeOffset? ProfileVerifiedAtUtc);
+    DateTimeOffset? ProfileVerifiedAtUtc,
+    bool SharePlatformWork = false);
 
 public sealed record FarmAgentEnrollment(
     Guid Id,
@@ -224,6 +225,10 @@ public interface IFarmLabService
     Task<FarmDashboard> SetNodeStatusAsync(
         Guid nodeId,
         FarmNodeStatus status,
+        CancellationToken cancellationToken = default);
+    Task<FarmDashboard> SetNodeSharingAsync(
+        Guid nodeId,
+        bool sharePlatformWork,
         CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunWorkloadAsync(
