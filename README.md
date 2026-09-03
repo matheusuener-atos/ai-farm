@@ -844,6 +844,19 @@ Centro de Auditoria. Não há integração com gateway de pagamento. Enquanto o
 ADR 0026 não for aprovado, o saldo `Purchased` é visível em `/wallet` mas não
 é consumível — reservas continuam sacando somente de `Promotional`.
 
+### Pool de computação da plataforma
+
+Com `AIFarm__Farm__PlatformAccountId` configurado, as demandas úteis dessa
+única conta podem ser despachadas para Compute Agents de outras contas cujo
+dono fez opt-in explícito por node ("Compartilhar com a plataforma" em
+`/farm`, "Ajudar a plataforma" em `/meu-computador`, ou
+`POST /api/v1/farm/nodes/{id}/share`). O Job resultante pertence ao dono do
+node: CP verificado, evidência e settlement seguem os fluxos normais do
+trabalhador, enquanto a plataforma consolida e baixa a saída da demanda.
+Somente workloads do catálogo fechado participam, o conteúdo da demanda é
+visível a quem a executa (submeta apenas conteúdo não sensível) e, sem a
+variável configurada, nenhum trabalho cruza fronteira de conta (ADR 0031).
+
 ## Marco 2 — Provider OpenAI
 
 A primeira integração real usa a Responses API server-side, com o snapshot

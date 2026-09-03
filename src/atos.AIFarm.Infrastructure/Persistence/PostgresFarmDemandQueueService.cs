@@ -10,10 +10,12 @@ internal sealed class PostgresFarmDemandQueueService(
     IAIFarmIdentityAccessor identityAccessor,
     PostgresFarmLabService farmLab,
     FarmManifestSigningOptions signingOptions,
+    FarmPlatformPoolOptions platformPool,
     TimeProvider timeProvider) : IFarmDemandQueueService, IFarmDemandDispatcher
 {
     private const int RecentLimit = 50;
     private const int BatchSize = 20;
+    private static readonly TimeSpan PlatformHeartbeatTolerance = TimeSpan.FromSeconds(90);
     private static readonly string[] DispatchableStatuses =
     [
         FarmDemandStatus.Queued.ToString(), FarmDemandStatus.Processing.ToString(),
@@ -274,9 +276,23 @@ internal sealed class PostgresFarmDemandQueueService(
                 var submission = new FarmUsefulJobSubmission(
                     definition, ShardLabel(demand.Label, shard.Sequence, demand.TargetShards),
                     demand.InputVersion, shard.InputPayload, shard.InputSizeBytes, shard.InputDigest);
+                // Pool da plataforma (ADR 0031): a demanda da conta-plataforma
+                // é despachada para um Agent compartilhado de outra conta, e o
+                // Job pertence ao DONO do node — CP, evidência e settlement do
+                // trabalhador seguem os fluxos normais.
+                var platformDispatch =
+                    platformPool.IsEnabled && platformPool.IsPlatformAccount(demand.AccountId);
+                var ownerAccountId = demand.AccountId;
+                if (platformDispatch)
+                {
+                    ownerAccountId = await SelectPlatformOwnerAsync(
+                        definition, previous?.NodeId, cancellationToken)
+                        ?? throw new InvalidOperationException(
+                            "Nenhum computador compartilhado disponível no pool da plataforma.");
+                }
                 var job = await farmLab.RunQueuedDemandAsync(
-                    demand.AccountId, demand.Id, shard.Sequence, demand.TargetShards,
-                    attempt, previous?.NodeId, submission, cancellationToken);
+                    ownerAccountId, demand.Id, shard.Sequence, demand.TargetShards,
+                    attempt, previous?.NodeId, submission, platformDispatch, cancellationToken);
                 await LinkShardAsync(demand.Id, shard.Id, job.Id, cancellationToken);
                 shard.JobId = job.Id;
             }
@@ -291,6 +307,33 @@ internal sealed class PostgresFarmDemandQueueService(
         {
             await FinishFailureAsync(demand.Id, Limit(exception.Message), CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// Fase A do despacho da plataforma: escolhe a CONTA dona de um Agent
+    /// compartilhado apto; a fase B (scheduler) escolhe o node exato sob o
+    /// advisory lock desse dono, restrito aos nodes compartilhados.
+    /// </summary>
+    private async Task<Guid?> SelectPlatformOwnerAsync(
+        FarmWorkloadDefinition definition,
+        Guid? excludedNodeId,
+        CancellationToken cancellationToken)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var freshAfter = timeProvider.GetUtcNow() - PlatformHeartbeatTolerance;
+        return await db.FarmNodes.AsNoTracking()
+            .Where(x => x.SharePlatformWork &&
+                x.ConnectionKind == "Agent" &&
+                x.Status == "Online" &&
+                x.AgentAcceptJobs &&
+                x.AgentVersion == FarmAgentProtocol.CurrentAgentVersion &&
+                x.LastSeenAtUtc >= freshAfter &&
+                (x.AgentMaxLogicalProcessors ?? 0) >= definition.RequiredLogicalProcessors &&
+                (x.AgentMaxMemoryBytes ?? 0) >= definition.RequiredMemoryBytes &&
+                (excludedNodeId == null || x.Id != excludedNodeId))
+            .OrderByDescending(x => x.LastSeenAtUtc)
+            .Select(x => (Guid?)x.AccountId)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private async Task ReconcileAsync(

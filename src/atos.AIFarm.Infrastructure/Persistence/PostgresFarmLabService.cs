@@ -64,6 +64,24 @@ internal sealed class PostgresFarmLabService(
         return await SetNodeStatusCoreAsync(db, identity.AccountId, node, status, cancellationToken);
     }
 
+    public async Task<FarmDashboard> SetNodeSharingAsync(
+        Guid nodeId,
+        bool sharePlatformWork,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.Id == nodeId && x.AccountId == identity.AccountId, cancellationToken)
+            ?? throw new InvalidOperationException("Node não encontrado para esta conta.");
+        if (node.ConnectionKind != FarmNodeConnectionKind.Agent.ToString())
+            throw new InvalidOperationException(
+                "O compartilhamento com a plataforma está disponível apenas para Compute Agents.");
+        node.SharePlatformWork = sharePlatformWork;
+        await db.SaveChangesAsync(cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
+    }
+
     private async Task<FarmDashboard> SetNodeStatusCoreAsync(
         AIFarmDbContext db,
         Guid accountId,
@@ -84,14 +102,14 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, null, false, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, null, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, null, false, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
         FarmUsefulJobSubmission submission,
@@ -100,7 +118,7 @@ internal sealed class PostgresFarmLabService(
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, null, tokenId, idempotencyKey,
-            null, null, null, null, null, null, null, submission, cancellationToken);
+            null, null, null, null, null, null, null, false, submission, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
         Guid accountId,
@@ -120,6 +138,7 @@ internal sealed class PostgresFarmLabService(
             null,
             null,
             null,
+            false,
             null,
             cancellationToken);
 
@@ -131,11 +150,12 @@ internal sealed class PostgresFarmLabService(
         int shardAttempt,
         Guid? excludedNodeId,
         FarmUsefulJobSubmission submission,
+        bool platformPool = false,
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, accountId, null, null, null, null,
             demandId, shardIndex, shardCount, shardAttempt, excludedNodeId,
-            submission, cancellationToken);
+            platformPool, submission, cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
         string workloadId,
@@ -149,6 +169,7 @@ internal sealed class PostgresFarmLabService(
         int? demandShardCount,
         int? demandShardAttempt,
         Guid? excludedNodeId,
+        bool platformPool,
         FarmUsefulJobSubmission? useful,
         CancellationToken cancellationToken)
     {
@@ -197,8 +218,11 @@ internal sealed class PostgresFarmLabService(
         }
         if (demandId is Guid queuedDemandId)
         {
+            // O replay do shard é global por (demanda, shard, tentativa): no
+            // pool da plataforma a tentativa anterior pode pertencer a outro
+            // dono de node (ADR 0031), e o índice único garante a unicidade.
             var replay = await db.FarmJobs.AsNoTracking().SingleOrDefaultAsync(
-                x => x.AccountId == accountId && x.DemandId == queuedDemandId &&
+                x => x.DemandId == queuedDemandId &&
                      x.DemandShardIndex == demandShardIndex &&
                      x.DemandShardAttempt == demandShardAttempt,
                 cancellationToken);
@@ -212,7 +236,7 @@ internal sealed class PostgresFarmLabService(
             cancellationToken,
             accountId: accountId);
         var node = await SelectExecutionNodeAsync(
-            db, accountId, definition, excludedNodeId, cancellationToken);
+            db, accountId, definition, excludedNodeId, platformPool, cancellationToken);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
 
         var now = timeProvider.GetUtcNow();
@@ -584,10 +608,16 @@ internal sealed class PostgresFarmLabService(
         Guid accountId,
         FarmWorkloadDefinition definition,
         Guid? excludedNodeId,
+        bool platformPool,
         CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
+        // No pool da plataforma só concorrem Agents que o dono compartilhou
+        // explicitamente; embedded nunca executa trabalho da plataforma.
+        var nodes = await db.FarmNodes
+            .Where(x => x.AccountId == accountId &&
+                (!platformPool ||
+                 (x.ConnectionKind == "Agent" && x.SharePlatformWork)))
             .ToArrayAsync(cancellationToken);
         var reservations = await db.FarmJobs
             .Where(x => x.AccountId == accountId && FarmJobLifecycle.ActiveStatuses.Contains(x.Status))
@@ -819,7 +849,8 @@ internal sealed class PostgresFarmLabService(
             node.AgentMaxLogicalProcessors ?? node.LogicalProcessors,
             node.AgentMaxMemoryBytes ?? node.MemoryBytes,
             node.VerifiedProfileHash,
-            node.ProfileVerifiedAtUtc);
+            node.ProfileVerifiedAtUtc,
+            node.SharePlatformWork);
     }
 
     internal FarmJobSnapshot ToSnapshot(

@@ -286,12 +286,15 @@ var rewardPolicy = new FarmRewardPolicy(
         "AIFarm:Farm:Rewards:MonthlyBudgetMinor", 0),
     builder.Configuration.GetValue<long>(
         "AIFarm:Farm:Rewards:MaximumPerSettlementMinor", 0)).Validate();
+var platformPool = new FarmPlatformPoolOptions(
+    builder.Configuration.GetValue<Guid?>("AIFarm:Farm:PlatformAccountId"));
 builder.Services.AddAIFarmPostgres(
     postgresConnection,
     objectStorage: objectStorage,
     farmManifestSigning: farmManifestSigning,
     nodeReliabilityPolicy: nodeReliabilityPolicy,
-    rewardPolicy: rewardPolicy);
+    rewardPolicy: rewardPolicy,
+    platformPool: platformPool);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
@@ -625,6 +628,28 @@ personalApi.MapPost("/farm/nodes/{nodeId:guid}/resume", async (
 }).DisableAntiforgery()
   .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
     .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/share", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeSharingAsync(nodeId, true, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
+
+personalApi.MapPost("/farm/nodes/{nodeId:guid}/unshare", async (
+    Guid nodeId,
+    IFarmLabService farm,
+    CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await farm.SetNodeSharingAsync(nodeId, false, cancellationToken)); }
+    catch (InvalidOperationException exception) { return Results.NotFound(new { error = exception.Message }); }
+}).DisableAntiforgery()
+  .RequireAuthorization(AIFarmApiTokenDefaults.FarmExecutePolicy)
+  .RequireRateLimiting("farm-execute");
 
 personalApi.MapGet("/farm/demands", async (
     IFarmDemandQueueService demands,
@@ -1369,13 +1394,16 @@ static void LoadLocalNeonEnvironment(ConfigurationManager configuration, string 
         var path = Path.Combine(directory.FullName, ".env.local");
         if (File.Exists(path))
         {
+            // "__" vira ":" como nas variáveis de ambiente reais; sem isso,
+            // chaves hierárquicas do .env.local (AIFarm__AI__Provider,
+            // AIFarm__Farm__ManifestSigningKey) eram ignoradas em silêncio.
             var values = File.ReadLines(path)
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0 && !line.StartsWith('#'))
                 .Select(line => line.Split('=', 2))
                 .Where(parts => parts.Length == 2)
                 .ToDictionary(
-                    parts => parts[0].Trim(),
+                    parts => parts[0].Trim().Replace("__", ":"),
                     parts => parts[1].Trim().Trim('"', '\''),
                     StringComparer.OrdinalIgnoreCase);
             configuration.AddInMemoryCollection(values!);
