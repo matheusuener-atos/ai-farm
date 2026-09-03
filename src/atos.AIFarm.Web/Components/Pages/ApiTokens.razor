@@ -62,7 +62,8 @@
         <legend>ESCOPOS DE EXECUÇÃO</legend>
         <label><input type="checkbox" @bind="_irisExecute" /> EXECUTAR IRIS <small>POST /api/v1/iris/responses</small></label>
         <label><input type="checkbox" @bind="_farmExecute" /> EXECUTAR FARM <small>SUBMETER E CANCELAR JOBS</small></label>
-        <p class="muted">ATENÇÃO // EXECUTAR IRIS PODE CONSUMIR AIC. EXECUTAR FARM CONSOME PROCESSAMENTO, SEM CONVERSÃO AUTOMÁTICA DE CP EM AIC.</p>
+        <label><input type="checkbox" @bind="_walletCredit" /> CREDITAR WALLET <small>POST /api/v1/wallet/credits // ADMINISTRATIVO</small></label>
+        <p class="muted">ATENÇÃO // EXECUTAR IRIS PODE CONSUMIR AIC. EXECUTAR FARM CONSOME PROCESSAMENTO; CP SÓ VIRA AIC PELO SETTLEMENT DA POLÍTICA FINANCIADA (ADR 0022, DESLIGADA POR PADRÃO). CREDITAR WALLET EMITE AIC NO BUCKET PURCHASED.</p>
     </fieldset>
     <button type="button" @onclick="CreateAsync" disabled="@_working">
         @(_working ? "Emitindo..." : "Emitir token")
@@ -118,6 +119,7 @@
     private bool _farmRead;
     private bool _farmExecute;
     private bool _irisExecute;
+    private bool _walletCredit;
     private bool _loading = true;
     private bool _working;
     private string? _createdSecret;
@@ -168,7 +170,8 @@
         (_conversationsRead ? ApiTokenScope.ConversationsRead : 0) |
         (_farmRead ? ApiTokenScope.FarmRead : 0) |
         (_farmExecute ? ApiTokenScope.FarmExecute : 0) |
-        (_irisExecute ? ApiTokenScope.IrisExecute : 0);
+        (_irisExecute ? ApiTokenScope.IrisExecute : 0) |
+        (_walletCredit ? ApiTokenScope.WalletCredit : 0);
 
     private async Task CopySecretAsync()
     {
