@@ -3,6 +3,7 @@ using atos.AIFarm.Infrastructure;
 using atos.AIFarm.Infrastructure.Development;
 using atos.AIFarm.Infrastructure.Attachments;
 using atos.AIFarm.Infrastructure.Persistence;
+using atos.AIFarm.Infrastructure.Providers.Compatible;
 using atos.AIFarm.Infrastructure.Providers.OpenAI;
 using atos.AIFarm.Web;
 using atos.AIFarm.Web.Components;
@@ -195,13 +196,41 @@ if (configuredProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
             512),
         OpenAiProviderOptions.DefaultEndpoint);
 }
-else if (!configuredProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
+OpenAiCompatibleOptions? compatibleProvider = null;
+if (configuredProvider.Equals("OpenAICompatible", StringComparison.OrdinalIgnoreCase))
+{
+    var endpoint = builder.Configuration["AIFarm:AI:Compatible:Endpoint"];
+    var compatibleModel = builder.Configuration["AIFarm:AI:Compatible:Model"];
+    if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(compatibleModel))
+    {
+        throw new InvalidOperationException(
+            "AIFarm:AI:Compatible:Endpoint and AIFarm:AI:Compatible:Model are required when AIFarm:AI:Provider is OpenAICompatible.");
+    }
+
+    compatibleProvider = new OpenAiCompatibleOptions(
+        builder.Configuration["AIFarm:AI:Compatible:ProviderLabel"] ?? "OpenRouter",
+        compatibleModel,
+        builder.Configuration["AIFarm:AI:Compatible:PriceCatalogVersion"] ??
+            $"compatible-{compatibleModel.Replace('/', '-').Replace(':', '-')}-aic-v1",
+        builder.Configuration.GetValue<long>(
+            "AIFarm:AI:Compatible:InputCostPerMillionMinor", 1_000),
+        builder.Configuration.GetValue<long>(
+            "AIFarm:AI:Compatible:OutputCostPerMillionMinor", 1_000),
+        builder.Configuration.GetValue<int>(
+            "AIFarm:AI:Compatible:MaximumOutputTokens", 1_024),
+        builder.Configuration.GetValue<int>(
+            "AIFarm:AI:Compatible:ContextWindowTokens", 128_000),
+        new Uri(endpoint, UriKind.Absolute),
+        builder.Configuration["COMPATIBLE_API_KEY"]);
+}
+else if (!configuredProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase) &&
+    !configuredProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
 {
     throw new InvalidOperationException(
         $"AIFarm:AI:Provider '{configuredProvider}' is not supported.");
 }
 var safetyCap = new AiUsageSafetyCapPolicy(
-    openAi is not null,
+    openAi is not null || compatibleProvider is not null,
     builder.Configuration.GetValue<long>(
         "AIFarm:AI:DailySafetyCapMinor",
         50_000)).Validate();
@@ -210,7 +239,8 @@ builder.Services.AddAIFarmDevelopment(
     providerProtection,
     openAi,
     contextLimits,
-    safetyCap);
+    safetyCap,
+    compatibleProvider);
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();

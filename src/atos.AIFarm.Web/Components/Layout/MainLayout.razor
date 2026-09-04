@@ -142,7 +142,9 @@
 
     private string ProviderName =>
         Configuration["AIFarm:AI:Provider"] is { Length: > 0 } provider
-            ? char.ToUpperInvariant(provider[0]) + provider[1..].ToLowerInvariant()
+            ? provider.Equals("OpenAICompatible", StringComparison.OrdinalIgnoreCase)
+                ? Configuration["AIFarm:AI:Compatible:ProviderLabel"] ?? "OpenRouter"
+                : char.ToUpperInvariant(provider[0]) + provider[1..].ToLowerInvariant()
             : "Fake";
 
     private string CurrentPath =>

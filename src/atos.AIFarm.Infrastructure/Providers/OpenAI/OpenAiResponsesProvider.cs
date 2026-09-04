@@ -55,6 +55,12 @@ public sealed class OpenAiPriceCatalog :
             options.MaximumOutputTokens);
     }
 
+    /// <summary>Catálogo de rota única para providers compatíveis (ADR 0032).</summary>
+    public OpenAiPriceCatalog(AiPriceCatalogEntry entry)
+    {
+        _entry = entry;
+    }
+
     public Task<AiRoute> SelectAsync(
         string prompt,
         CancellationToken cancellationToken) =>

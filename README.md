@@ -857,6 +857,29 @@ Somente workloads do catálogo fechado participam, o conteúdo da demanda é
 visível a quem a executa (submeta apenas conteúdo não sensível) e, sem a
 variável configurada, nenhum trabalho cruza fronteira de conta (ADR 0031).
 
+## Provider compatível — modelos open source e gratuitos
+
+Além do OpenAI, `AIFarm__AI__Provider=OpenAICompatible` aceita qualquer
+endpoint que fale o chat-completions da OpenAI: OpenRouter, Groq, DeepSeek,
+Zhipu/GLM, MiniMax ou um Ollama local (ADR 0032). Receita gratuita com modelo
+chinês via OpenRouter (crie a chave em openrouter.ai — sem cartão; modelos
+`:free` têm ~20 req/min e 50 req/dia):
+
+```dotenv
+AIFarm__AI__Provider=OpenAICompatible
+AIFarm__AI__Compatible__Endpoint=https://openrouter.ai/api/v1/chat/completions
+AIFarm__AI__Compatible__Model=z-ai/glm-5.2:free
+AIFarm__AI__Compatible__ProviderLabel=OpenRouter
+COMPATIBLE_API_KEY=sk-or-...
+```
+
+O preço interno é uma tarifa simbólica configurável (padrão 1.000 mAIC por
+milhão de tokens em cada direção) para manter o ciclo
+reserva → captura → liberação; anexos não são aceitos nesta rota, `PRIVADO`
+nunca sai para provider externo e a lista atual de modelos gratuitos está em
+`openrouter.ai/collections/free-models`. Para um Ollama local, aponte o
+endpoint para `http://localhost:11434/v1/chat/completions` e omita a chave.
+
 ## Marco 2 — Provider OpenAI
 
 A primeira integração real usa a Responses API server-side, com o snapshot
