@@ -14,6 +14,7 @@ internal static class AgentUiPage
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Compute Agent — AI Farm</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23FF4F1F' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 16c0-7 4-11 12-12-1 8-5 12-12 12z'/%3E%3Cpath d='M4 16l7-7'/%3E%3C/svg%3E">
 <style>
 :root {
   --desk:#E3E1DA; --desk-dot:#B8B6AF; --surface:#FFFFFF; --surface-2:#F5F4F0;
@@ -35,6 +36,8 @@ body {
   border-bottom:1.5px solid var(--ink); font-weight:700; font-size:12px;
 }
 .menubar .right { margin-left:auto; display:flex; align-items:center; gap:8px; font-weight:400; }
+.brand { display:flex; align-items:center; gap:8px; }
+.brand svg { width:15px; height:15px; flex-shrink:0; }
 .dot { width:9px; height:9px; border:1.5px solid var(--ink); border-radius:50%; background:var(--muted); }
 .dot.on { background:var(--orange); }
 .dot.ok { background:var(--green); }
@@ -60,7 +63,9 @@ button {
 }
 button:active { transform:translate(2px,2px); box-shadow:none; }
 button:disabled { opacity:.45; cursor:default; }
-button.primary { background:var(--orange); color:#FFFFFF; font-size:16px; padding:14px 34px; letter-spacing:.02em; }
+button.big { font-size:16px; padding:14px 34px; letter-spacing:.02em; }
+button.primary { background:var(--orange); color:#FFFFFF; }
+button.primary-quiet { background:var(--orange-soft); color:var(--orange); }
 button.danger { background:var(--surface); color:var(--red); }
 .phase { font-weight:700; }
 .phase small { display:block; font-weight:400; color:var(--muted); }
@@ -107,7 +112,7 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
 </head>
 <body>
 <header class="menubar">
-  <span>AI Farm — Compute Agent</span>
+  <span class="brand"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16c0-7 4-11 12-12-1 8-5 12-12 12z"/><path d="M4 16l7-7"/></svg>AI Farm — Compute Agent</span>
   <span class="right"><span id="phase-dot" class="dot"></span><span id="phase-short">carregando…</span></span>
 </header>
 <main>
@@ -116,7 +121,7 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
     <div class="win-body">
       <div id="error-banner" class="banner err" hidden></div>
       <div class="farm-row">
-        <button id="farm-toggle" class="primary" disabled>FARMAR</button>
+        <button id="farm-toggle" class="big primary" disabled>FARMAR</button>
         <div class="phase"><span id="phase-text">Conectando ao painel…</span><small id="phase-detail"></small></div>
       </div>
       <p class="note">Farmar deixa este computador à disposição da rede: ele executa trabalhos verificados,
@@ -185,7 +190,7 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
           <strong>Meu computador</strong> do site e cole aqui.</p>
           <label>URL da AI Farm<input id="enroll-url" placeholder="https://ai-farm-z5yp.onrender.com" required></label>
           <label>Código de vínculo<input id="enroll-code" autocomplete="off" required></label>
-          <button type="submit">Vincular este computador</button>
+          <button type="submit" class="primary">Vincular este computador</button>
         </form>
       </div>
     </section>
@@ -296,7 +301,7 @@ function render(s) {
   const toggle = $('farm-toggle');
   toggle.disabled = !bound;
   toggle.textContent = farming ? 'PAUSAR' : 'FARMAR';
-  toggle.className = farming ? '' : 'primary';
+  toggle.className = farming ? 'big primary-quiet' : 'big primary';
 
   $('kpi-active').textContent = s.activeJobs.length;
   $('kpi-cp').textContent = fmtCp(s.verifiedCpMilli);
