@@ -61,6 +61,7 @@ public sealed class ChatWorkflow(
             [],
             AiDataClassification.Standard,
             false,
+            false,
             cancellationToken);
     }
 
@@ -72,7 +73,8 @@ public sealed class ChatWorkflow(
         IReadOnlyCollection<Guid>? attachmentIds = null,
         AiDataClassification dataClassification = AiDataClassification.Standard,
         CancellationToken cancellationToken = default,
-        bool useFarmKnowledge = false)
+        bool useFarmKnowledge = false,
+        bool authorizeFarmKnowledgeExternally = false)
     {
         var conversation = await chat.GetConversationAsync(
             conversationId,
@@ -113,6 +115,7 @@ public sealed class ChatWorkflow(
             attachments,
             dataClassification,
             useFarmKnowledge,
+            authorizeFarmKnowledgeExternally,
             cancellationToken);
     }
 
@@ -124,6 +127,7 @@ public sealed class ChatWorkflow(
         IReadOnlyList<AiAttachmentInput> attachments,
         AiDataClassification dataClassification,
         bool useFarmKnowledge,
+        bool authorizeFarmKnowledgeExternally,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -169,11 +173,15 @@ public sealed class ChatWorkflow(
             throw new InvalidOperationException(
                 "Dados classificados como PRIVADO não podem sair deste ambiente. Use CONFIÁVEL somente se o envio ao provedor indicado no preflight estiver autorizado.");
         }
+        // Índices da Farm derivam dos dados da conta: só saem do ambiente
+        // local com consentimento explícito por execução (ADR 0035). PRIVADO
+        // continua bloqueando qualquer rota externa pelo gate acima.
         if (useFarmKnowledge &&
-            !string.Equals(route.Provider, "atos Fake Provider", StringComparison.Ordinal))
+            !string.Equals(route.Provider, "atos Fake Provider", StringComparison.Ordinal) &&
+            !authorizeFarmKnowledgeExternally)
         {
             throw new InvalidOperationException(
-                "A Memória da Farm está restrita ao provider local. O envio de índices a um provider externo exige autorização explícita do destino.");
+                "A Memória da Farm só sai do ambiente local com a sua autorização. Marque a autorização de envio dos índices ao provider externo da rota, ou desmarque a Memória da Farm.");
         }
         FarmKnowledgeSearchResult? knowledge = null;
         if (useFarmKnowledge && farmKnowledge is not null)

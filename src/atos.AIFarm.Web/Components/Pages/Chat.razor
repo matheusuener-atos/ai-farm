@@ -468,8 +468,17 @@
                     <input type="checkbox" @bind="_useFarmKnowledge"
                            disabled="@(_working || _pendingPlan is not null)" />
                     MEMÓRIA DA FARM
-                    <small>Usar índices computados · somente provider local</small>
+                    <small>Usar índices computados · local, ou externo com a sua autorização</small>
                 </label>
+                @if (_useFarmKnowledge)
+                {
+                    <label class="farm-knowledge-toggle farm-knowledge-consent">
+                        <input type="checkbox" @bind="_authorizeFarmExternal"
+                               disabled="@(_working || _pendingPlan is not null)" />
+                        AUTORIZAR ENVIO DOS ÍNDICES AO PROVIDER EXTERNO
+                        <small>Vale para esta execução · o destino aparece no preflight (ADR 0035)</small>
+                    </label>
+                }
             }
         </div>
         @if (_editingBranch || _regenerating)
@@ -754,6 +763,7 @@
     private ConversationAiSettings _savedAiSettings = ConversationAiSettings.Default;
     private AiDataClassification _dataClassification = AiDataClassification.Standard;
     private bool _useFarmKnowledge;
+    private bool _authorizeFarmExternal;
 
     private IReadOnlyList<AiModelOption> ModelOptions => ModelCatalog.GetOptions();
     private int SelectedModelMaximumOutputTokens =>
@@ -1001,7 +1011,8 @@
                 _branchMessageId,
                 _attachments.Select(x => x.Id).ToArray(),
                 _dataClassification,
-                useFarmKnowledge: _useFarmKnowledge);
+                useFarmKnowledge: _useFarmKnowledge,
+                authorizeFarmKnowledgeExternally: _useFarmKnowledge && _authorizeFarmExternal);
             _prompt = _pendingPlan.Prompt;
             _attemptIdempotencyKey = Guid.NewGuid().ToString("N");
             _lastFailure = null;
