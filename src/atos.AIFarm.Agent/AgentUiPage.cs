@@ -94,6 +94,11 @@ input[type=range] { -webkit-appearance:none; appearance:none; height:14px; paddi
 input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:16px; height:24px; background:var(--orange); border:1.5px solid var(--ink); box-shadow:1px 1px 0 var(--ink); }
 input[type=range]::-moz-range-thumb { width:16px; height:24px; background:var(--orange); border:1.5px solid var(--ink); border-radius:0; box-shadow:1px 1px 0 var(--ink); }
 label b { color:var(--ink); font-variant-numeric:tabular-nums; }
+.perf-head { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+.perf-head strong { font-size:15px; letter-spacing:.01em; }
+.perf-head strong.on { color:var(--orange); }
+.perf-util { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+#perf-chart { display:block; width:100%; height:150px; margin-top:10px; border:1.5px solid var(--ink); background:var(--surface-2); }
 .bars { display:grid; gap:10px; }
 .bar-row { display:grid; grid-template-columns:150px 1fr 150px; gap:12px; align-items:center; }
 @media (max-width:560px){ .bar-row { grid-template-columns:110px 1fr 110px; } }
@@ -134,6 +139,18 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
   </section>
 
   <section class="win">
+    <div class="win-title"><span>DESEMPENHO</span></div>
+    <div class="win-body">
+      <div class="perf-head">
+        <strong id="perf-status">—</strong>
+        <span id="perf-util" class="perf-util">0% da capacidade autorizada</span>
+      </div>
+      <canvas id="perf-chart" width="1000" height="150" aria-label="Utilização da capacidade autorizada nos últimos 3 minutos"></canvas>
+      <p class="note">Últimos 3 minutos · área laranja = poder computacional sendo entregue à rede.</p>
+    </div>
+  </section>
+
+  <section class="win">
     <div class="win-title"><span>PODER COMPUTACIONAL</span></div>
     <div class="win-body">
       <div class="bars">
@@ -164,6 +181,8 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
         <div class="kpi"><small>CPU dos trabalhos</small><strong id="kpi-cpu">0%</strong><span id="kpi-cpu-total"></span></div>
         <div class="kpi"><small>Memória dos trabalhos</small><strong id="kpi-mem">0 MB</strong><span id="kpi-mem-peak"></span></div>
         <div class="kpi"><small>Concluídos / falhas</small><strong id="kpi-done">0 / 0</strong></div>
+        <div class="kpi"><small>Ganhos da sessão</small><strong id="kpi-earn">—</strong><span id="kpi-earn-note"></span></div>
+        <div class="kpi"><small>CP total deste computador</small><strong id="kpi-lifetime">—</strong><span> resgate em Farm → Recompensas</span></div>
       </div>
       <div id="jobs-wrap">
         <table id="jobs" hidden>
@@ -300,6 +319,40 @@ function syncLimitLabels() {
   syncLimitLabels();
 }));
 
+function drawChart(samples, capacityPct) {
+  const canvas = $('perf-chart');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  // Grade horizontal a cada 25% da capacidade autorizada.
+  ctx.strokeStyle = '#D8D6CF';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const y = h - (h * i / 4);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  if (!samples.length) return;
+  const span = 180; // segundos visíveis
+  const nowSec = Math.floor(Date.now() / 1000);
+  const x = t => w - ((nowSec - t) / span) * w;
+  const y = pct => h - Math.min(100, pct / capacityPct * 100) / 100 * h;
+  ctx.beginPath();
+  ctx.moveTo(x(samples[0].unixSeconds), h);
+  for (const sample of samples) ctx.lineTo(x(sample.unixSeconds), y(sample.workerCpuPercent));
+  ctx.lineTo(x(samples[samples.length - 1].unixSeconds), h);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255, 79, 31, .35)';
+  ctx.fill();
+  ctx.beginPath();
+  for (let i = 0; i < samples.length; i++) {
+    const px = x(samples[i].unixSeconds), py = y(samples[i].workerCpuPercent);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.strokeStyle = '#FF4F1F';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
 function render(s) {
   const phase = PHASES[s.phase] || PHASES.PARADO;
   $('phase-dot').className = 'dot ' + phase.dot;
@@ -323,6 +376,30 @@ function render(s) {
   $('kpi-mem').textContent = fmtMb(s.liveWorkerMemoryBytes);
   $('kpi-mem-peak').textContent = s.peakWorkerMemoryBytes ? ' pico ' + fmtMb(s.peakWorkerMemoryBytes) : '';
   $('kpi-done').textContent = s.jobsCompleted + ' / ' + s.jobsFailed;
+
+  const capacityPct = Math.max(1, s.maxLogicalProcessors * 100);
+  const utilNow = Math.min(100, s.liveWorkerCpuPercent / capacityPct * 100);
+  const delivering = s.activeJobs.length > 0 || utilNow >= 2;
+  const perfStatus = $('perf-status');
+  perfStatus.textContent = !bound
+    ? 'SEM VÍNCULO'
+    : delivering ? 'ENTREGANDO PODER COMPUTACIONAL' : (farming ? 'OCIOSA — AGUARDANDO TRABALHOS' : 'OCIOSA — FARM PAUSADO');
+  perfStatus.className = delivering ? 'on' : '';
+  $('perf-util').textContent = utilNow.toLocaleString('pt-BR', {maximumFractionDigits: 0}) + '% da capacidade autorizada';
+  drawChart(s.utilization || [], capacityPct);
+
+  const rewardRate = s.identity ? s.identity.rewardRatePerThousandCpMinor : 0;
+  if (s.identity && s.identity.rewardPolicyEnabled && rewardRate > 0) {
+    const sessionMinor = Math.floor(s.verifiedCpMilli * rewardRate / 1000000);
+    $('kpi-earn').textContent = '≈ ' + (sessionMinor / 1000).toLocaleString('pt-BR', {minimumFractionDigits: 3, maximumFractionDigits: 3}) + ' AIC';
+    $('kpi-earn-note').textContent = ' pela política atual (' + (rewardRate / 1000).toLocaleString('pt-BR') + ' AIC / 1.000 CP)';
+  } else {
+    $('kpi-earn').textContent = '—';
+    $('kpi-earn-note').textContent = s.identity ? ' política de rewards desativada' : '';
+  }
+  $('kpi-lifetime').textContent = s.identity
+    ? fmtCp(s.identity.lifetimeComputeUnitsMilli) + ' CP'
+    : '—';
 
   const tbody = $('jobs').querySelector('tbody');
   tbody.innerHTML = '';

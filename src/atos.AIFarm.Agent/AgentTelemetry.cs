@@ -15,6 +15,12 @@ internal sealed record AgentTelemetryActiveJob(
     int LogicalProcessors,
     long MemoryBytes);
 
+internal sealed record AgentUtilizationSample(
+    long UnixSeconds,
+    double WorkerCpuPercent,
+    long WorkerMemoryBytes,
+    int ActiveJobs);
+
 internal sealed record AgentTelemetrySnapshot(
     string Phase,
     string? PhaseDetail,
@@ -38,7 +44,8 @@ internal sealed record AgentTelemetrySnapshot(
     double LiveWorkerCpuPercent,
     FarmAgentIdentity? Identity,
     IReadOnlyList<AgentTelemetryActiveJob> ActiveJobs,
-    IReadOnlyList<AgentTelemetryLogEntry> Log);
+    IReadOnlyList<AgentTelemetryLogEntry> Log,
+    IReadOnlyList<AgentUtilizationSample> Utilization);
 
 /// <summary>
 /// Estado observável da sessão do Agent, compartilhado entre o loop de
@@ -50,6 +57,9 @@ internal sealed class AgentTelemetry
     public static AgentTelemetry Instance { get; } = new();
 
     private const int LogCapacity = 150;
+    // 3 minutos de série a 1 amostra/s — o suficiente para a aba Desempenho.
+    private const int UtilizationCapacity = 180;
+    private readonly Queue<AgentUtilizationSample> _utilization = new();
     private readonly Lock _gate = new();
     private readonly Queue<AgentTelemetryLogEntry> _log = new();
     private readonly Dictionary<Guid, AgentTelemetryActiveJob> _activeJobs = [];
@@ -185,25 +195,50 @@ internal sealed class AgentTelemetry
         lock (_gate) _workers.Remove(processId);
     }
 
+    private (double CpuPercent, long MemoryBytes) LiveWorkerLoad(DateTimeOffset now)
+    {
+        long liveMemory = 0;
+        double liveCpuPercent = 0;
+        foreach (var worker in _workers.Values.ToArray())
+        {
+            // Amostras paradas há mais de 5s pertencem a workers já encerrados.
+            if (now - worker.AtUtc > TimeSpan.FromSeconds(5)) continue;
+            liveMemory += worker.WorkingSetBytes;
+            var elapsed = (worker.AtUtc - worker.PreviousAtUtc).TotalMilliseconds;
+            if (elapsed > 0)
+                liveCpuPercent += Math.Clamp(
+                    (worker.CpuMilliseconds - worker.PreviousCpuMilliseconds) / elapsed * 100d,
+                    0,
+                    100d * Environment.ProcessorCount);
+        }
+        return (liveCpuPercent, liveMemory);
+    }
+
+    /// <summary>
+    /// Uma batida por segundo do host alimenta a série da aba Desempenho —
+    /// inclusive com zeros, para o gráfico mostrar a ociosidade de verdade.
+    /// </summary>
+    public void RecordUtilizationSample()
+    {
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var (cpu, memory) = LiveWorkerLoad(now);
+            _utilization.Enqueue(new AgentUtilizationSample(
+                now.ToUnixTimeSeconds(),
+                Math.Round(cpu, 1),
+                memory,
+                _activeJobs.Count));
+            while (_utilization.Count > UtilizationCapacity) _utilization.Dequeue();
+        }
+    }
+
     public AgentTelemetrySnapshot Snapshot()
     {
         lock (_gate)
         {
             var now = DateTimeOffset.UtcNow;
-            long liveMemory = 0;
-            double liveCpuPercent = 0;
-            foreach (var worker in _workers.Values.ToArray())
-            {
-                // Amostras paradas há mais de 5s pertencem a workers já encerrados.
-                if (now - worker.AtUtc > TimeSpan.FromSeconds(5)) continue;
-                liveMemory += worker.WorkingSetBytes;
-                var elapsed = (worker.AtUtc - worker.PreviousAtUtc).TotalMilliseconds;
-                if (elapsed > 0)
-                    liveCpuPercent += Math.Clamp(
-                        (worker.CpuMilliseconds - worker.PreviousCpuMilliseconds) / elapsed * 100d,
-                        0,
-                        100d * Environment.ProcessorCount);
-            }
+            var (liveCpuPercent, liveMemory) = LiveWorkerLoad(now);
 
             return new AgentTelemetrySnapshot(
                 _phase,
@@ -228,7 +263,8 @@ internal sealed class AgentTelemetry
                 Math.Round(liveCpuPercent, 1),
                 _identity,
                 [.. _activeJobs.Values.OrderBy(x => x.StartedAtUtc)],
-                [.. _log]);
+                [.. _log],
+                [.. _utilization]);
         }
     }
 
@@ -239,6 +275,7 @@ internal sealed class AgentTelemetry
             _log.Clear();
             _activeJobs.Clear();
             _workers.Clear();
+            _utilization.Clear();
             _phase = "SEM_VINCULO";
             _phaseDetail = null;
             _nodeId = null;
