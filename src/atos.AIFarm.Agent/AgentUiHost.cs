@@ -29,6 +29,7 @@ internal sealed class AgentUiHost(
     private readonly TaskCompletionSource _exitRequested =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _loop;
+    private CancellationTokenSource? _loopCancellation;
 
     public static async Task<int> RunAsync(
         AgentClient client,
@@ -86,7 +87,10 @@ internal sealed class AgentUiHost(
                 return;
             }
             _credentials.Current = credential;
-            _loop = Task.Run(RunLoopAsync);
+            _loopCancellation?.Dispose();
+            _loopCancellation = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+            var loopToken = _loopCancellation.Token;
+            _loop = Task.Run(() => RunLoopAsync(loopToken));
             _ = RefreshIdentityAsync();
         }
         finally
@@ -95,7 +99,7 @@ internal sealed class AgentUiHost(
         }
     }
 
-    private async Task RunLoopAsync()
+    private async Task RunLoopAsync(CancellationToken loopToken)
     {
         try
         {
@@ -104,7 +108,7 @@ internal sealed class AgentUiHost(
                 configurationStore,
                 credentialStore,
                 _credentials,
-                _shutdown.Token);
+                loopToken);
             AgentTelemetry.Instance.SetPhase("PARADO");
         }
         catch (OperationCanceledException)
@@ -198,6 +202,16 @@ internal sealed class AgentUiHost(
             AgentApplication.Write(
                 "OK",
                 $"Node {enrollment.NodeId} vinculado. A credencial está no Windows Credential Manager.");
+            // O loop antigo — mesmo preso em retry num servidor morto — precisa
+            // morrer aqui, senão o vínculo novo nunca assume a sessão.
+            _loopCancellation?.Cancel();
+            if (_loop is { } previous)
+            {
+                try { await previous; }
+                catch (OperationCanceledException) { }
+                catch (AgentAuthenticationException) { }
+            }
+            _loop = null;
         }
         finally
         {
