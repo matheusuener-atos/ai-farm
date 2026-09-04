@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.8.0";
+    public const string CurrentAgentVersion = "atos-agent/0.9.0";
 }
 
 public static class FarmWorkerEnforcement
@@ -112,7 +112,10 @@ public sealed record FarmAgentIdentity(
     string Status,
     string VerificationLevel,
     DateTimeOffset EnrolledAtUtc,
-    DateTimeOffset? CredentialIssuedAtUtc);
+    DateTimeOffset? CredentialIssuedAtUtc,
+    bool RewardPolicyEnabled = false,
+    long RewardRatePerThousandCpMinor = 0,
+    long LifetimeComputeUnitsMilli = 0);
 
 public sealed record FarmAgentCredentialRotation(
     Guid NodeId,

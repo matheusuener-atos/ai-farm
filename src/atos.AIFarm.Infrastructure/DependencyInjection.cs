@@ -48,6 +48,7 @@ public static class DependencyInjection
             provider.GetRequiredService<InMemoryChatStore>());
         services.AddSingleton<IAiUsageBudgetService, InMemoryAiUsageBudgetService>();
         services.AddSingleton<IInterfaceModeService, InMemoryInterfaceModeService>();
+        services.AddSingleton<IContinuousFarmModeService, InMemoryContinuousFarmModeService>();
         services.TryAddScoped<IConversationExportService, ConversationExportService>();
         if (openAi is null && compatible is not null)
         {
@@ -112,7 +113,8 @@ public static class DependencyInjection
         FarmManifestSigningOptions? farmManifestSigning = null,
         FarmNodeReliabilityPolicy? nodeReliabilityPolicy = null,
         FarmRewardPolicy? rewardPolicy = null,
-        FarmPlatformPoolOptions? platformPool = null)
+        FarmPlatformPoolOptions? platformPool = null,
+        FarmContinuousOptions? continuousOptions = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
@@ -124,6 +126,8 @@ public static class DependencyInjection
         services.TryAddSingleton(
             (rewardPolicy ?? FarmRewardPolicy.Disabled).Validate());
         services.TryAddSingleton(platformPool ?? FarmPlatformPoolOptions.Disabled);
+        services.TryAddSingleton(
+            (continuousOptions ?? FarmContinuousOptions.Default).Validate());
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)
@@ -161,6 +165,8 @@ public static class DependencyInjection
         services.RemoveAll<IApiTokenAuthenticator>();
         services.RemoveAll<IInterfaceModeService>();
         services.AddScoped<IInterfaceModeService, PostgresInterfaceModeService>();
+        services.RemoveAll<IContinuousFarmModeService>();
+        services.AddScoped<IContinuousFarmModeService, PostgresContinuousFarmModeService>();
         services.AddScoped<IWalletService, PostgresWalletService>();
         services.AddScoped<IChatStore, PostgresChatStore>();
         services.AddScoped<IAiUsageQuery, PostgresAiUsageQuery>();
@@ -169,6 +175,7 @@ public static class DependencyInjection
         services.AddSingleton<IAIFarmReadinessProbe, PostgresReadinessProbe>();
         services.AddScoped<PostgresFarmLabService>();
         services.AddScoped<IFarmLabService>(provider => provider.GetRequiredService<PostgresFarmLabService>());
+        services.AddScoped<IFarmContinuousDispatcher>(provider => provider.GetRequiredService<PostgresFarmLabService>());
         services.AddScoped<IFarmApiJobService, PostgresFarmApiJobService>();
         services.AddScoped<IFarmUsefulJobService, PostgresFarmUsefulJobService>();
         services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();

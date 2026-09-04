@@ -872,6 +872,24 @@ Somente workloads do catálogo fechado participam, o conteúdo da demanda é
 visível a quem a executa (submeta apenas conteúdo não sensível) e, sem a
 variável configurada, nenhum trabalho cruza fronteira de conta (ADR 0031).
 
+### Farm contínua — consumo do poder autorizado
+
+Com o toggle "Farm contínua" ativo em `/meu-computador` (por conta,
+desligado por padrão), um Compute Agent ocioso que pede trabalho e não
+encontra fila recebe na hora um job `SHA-256 MARATHON` (2M iterações ≈ 0,6s,
+20 CP) pinado no próprio node (ADR 0036). O ritmo é limitado por node porque
+a verificação reexecuta 1:1 no servidor:
+
+```dotenv
+AIFarm__Farm__Continuous__CooldownSeconds=20
+AIFarm__Farm__Continuous__MaxJobsPerWindow=1
+```
+
+O top-up exige o binário atual do Agent (`atos-agent/0.9.0`); agendamentos,
+demandas e pool têm prioridade natural — o consumo só acontece com a fila
+vazia. O painel do Agent mostra a entrega na janela DESEMPENHO e os ganhos
+estimados da sessão pela política de rewards (ADR 0037).
+
 ## Provider compatível — modelos open source e gratuitos
 
 Além do OpenAI, `AIFarm__AI__Provider=OpenAICompatible` aceita qualquer

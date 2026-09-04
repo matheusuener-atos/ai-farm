@@ -318,13 +318,21 @@ var rewardPolicy = new FarmRewardPolicy(
         "AIFarm:Farm:Rewards:MaximumPerSettlementMinor", 0)).Validate();
 var platformPool = new FarmPlatformPoolOptions(
     builder.Configuration.GetValue<Guid?>("AIFarm:Farm:PlatformAccountId"));
+var continuousOptions = new FarmContinuousOptions(
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Continuous:CooldownSeconds",
+        FarmContinuousOptions.Default.CooldownSeconds),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Continuous:MaxJobsPerWindow",
+        FarmContinuousOptions.Default.MaxJobsPerWindow)).Validate();
 builder.Services.AddAIFarmPostgres(
     postgresConnection,
     objectStorage: objectStorage,
     farmManifestSigning: farmManifestSigning,
     nodeReliabilityPolicy: nodeReliabilityPolicy,
     rewardPolicy: rewardPolicy,
-    platformPool: platformPool);
+    platformPool: platformPool,
+    continuousOptions: continuousOptions);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
@@ -1346,6 +1354,17 @@ app.MapPost("/account/interface-mode", async (
         await interfaceMode.SetAsync(parsed);
     }
     return Results.LocalRedirect("~/");
+}).RequireAuthorization();
+
+app.MapPost("/farm/continuous-mode", async (
+    IContinuousFarmModeService continuousFarm,
+    [FromForm] string? enabled) =>
+{
+    if (bool.TryParse(enabled, out var parsed))
+    {
+        await continuousFarm.SetAsync(parsed);
+    }
+    return Results.LocalRedirect("~/meu-computador");
 }).RequireAuthorization();
 
 app.MapPost("/account/logout", async (

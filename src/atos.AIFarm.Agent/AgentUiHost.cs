@@ -38,6 +38,20 @@ internal sealed class AgentUiHost(
     {
         var host = new AgentUiHost(client, configurationStore, credentialStore);
         await host.StartLoopIfBoundAsync();
+        // Batida de 1s da aba Desempenho: registra utilização mesmo ociosa,
+        // para o gráfico mostrar os vales de verdade.
+        _ = Task.Run(async () =>
+        {
+            var ticks = 0;
+            while (!host._shutdown.IsCancellationRequested)
+            {
+                AgentTelemetry.Instance.RecordUtilizationSample();
+                // CP total e política vêm do servidor: renova a cada 5 min.
+                if (++ticks % 300 == 0) _ = host.RefreshIdentityAsync();
+                try { await Task.Delay(TimeSpan.FromSeconds(1), host._shutdown.Token); }
+                catch (OperationCanceledException) { break; }
+            }
+        });
         using var server = new AgentUiServer(host);
         var url = server.Start();
         AgentApplication.Write("PAINEL", $"Painel local em {url}");

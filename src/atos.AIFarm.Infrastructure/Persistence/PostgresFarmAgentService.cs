@@ -10,7 +10,10 @@ internal sealed class PostgresFarmAgentService(
     IDbContextFactory<AIFarmDbContext> factory,
     IAIFarmIdentityAccessor identityAccessor,
     TimeProvider timeProvider,
-    FarmManifestSigningOptions signingOptions) : IFarmAgentService
+    FarmManifestSigningOptions signingOptions,
+    FarmRewardPolicy rewardPolicy,
+    IFarmContinuousDispatcher continuousDispatcher,
+    FarmContinuousOptions continuousOptions) : IFarmAgentService
 {
     internal const int HeartbeatIntervalSeconds = 30;
     internal const int ActiveHeartbeatIntervalSeconds = 2;
@@ -221,6 +224,9 @@ internal sealed class PostgresFarmAgentService(
         var account = await db.Accounts
             .AsNoTracking()
             .SingleAsync(x => x.Id == node.AccountId, cancellationToken);
+        var lifetimeComputeUnitsMilli = await db.FarmJobs
+            .Where(x => x.NodeId == node.Id && x.Status == "Completed")
+            .SumAsync(x => (long?)x.ComputeUnitsMilli, cancellationToken) ?? 0;
         return new FarmAgentIdentity(
             node.Id,
             node.Name,
@@ -229,7 +235,10 @@ internal sealed class PostgresFarmAgentService(
             node.Status,
             node.VerificationLevel,
             node.CreatedAtUtc,
-            node.AgentCredentialIssuedAtUtc);
+            node.AgentCredentialIssuedAtUtc,
+            rewardPolicy.IsEnabled,
+            rewardPolicy.IsEnabled ? rewardPolicy.AicMinorPerThousandCp : 0,
+            lifetimeComputeUnitsMilli);
     }
 
     public async Task<FarmAgentCredentialRotation?> RotateCredentialAsync(
@@ -273,6 +282,7 @@ internal sealed class PostgresFarmAgentService(
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (Guid?)x.Id)
             .FirstOrDefaultAsync(cancellationToken);
+        jobId ??= await TryTopUpContinuousJobAsync(db, node, cancellationToken);
         if (jobId is null) return null;
 
         var accepted = await db.FarmJobs
@@ -658,6 +668,53 @@ internal sealed class PostgresFarmAgentService(
             status,
             status == FarmJobStatus.Completed,
             current.ComputeUnitsMilli);
+    }
+
+    /// <summary>
+    /// Farm contínua (ADR 0036): sem fila para o node, a conta autorizou o
+    /// consumo e o binário está atual — nasce um job marathon pinado nele.
+    /// O cooldown por node limita o custo da reexecução inline no servidor.
+    /// </summary>
+    private async Task<Guid?> TryTopUpContinuousJobAsync(
+        AIFarmDbContext db,
+        FarmNodeRecord node,
+        CancellationToken cancellationToken)
+    {
+        // Binário antigo não conhece o workload marathon e rejeitaria o
+        // próprio job, sujando a confiabilidade do node.
+        if (!string.Equals(
+                node.AgentVersion,
+                FarmAgentProtocol.CurrentAgentVersion,
+                StringComparison.Ordinal))
+            return null;
+        var enabled = await db.Accounts.AsNoTracking()
+            .Where(x => x.Id == node.AccountId)
+            .Select(x => x.ContinuousFarmEnabled)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!enabled) return null;
+
+        var windowStartUtc = timeProvider.GetUtcNow()
+            .AddSeconds(-continuousOptions.CooldownSeconds);
+        var recentContinuousJobs = await db.FarmJobs.AsNoTracking()
+            .CountAsync(
+                x => x.NodeId == node.Id &&
+                     x.WorkloadVersion == FarmWorkloadCatalog.ContinuousVersion &&
+                     x.CreatedAtUtc > windowStartUtc,
+                cancellationToken);
+        if (recentContinuousJobs >= continuousOptions.MaxJobsPerWindow) return null;
+
+        try
+        {
+            var snapshot = await continuousDispatcher.RunContinuousWorkloadAsync(
+                node.AccountId, node.Id, cancellationToken);
+            return snapshot.Id;
+        }
+        catch (InvalidOperationException)
+        {
+            // Sem capacidade residual, quarentena ou outro bloqueio do
+            // seletor: o node simplesmente fica ocioso nesta rodada.
+            return null;
+        }
     }
 
     private async Task<FarmNodeRecord?> AuthenticateNodeAsync(
