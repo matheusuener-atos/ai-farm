@@ -930,6 +930,60 @@ public sealed class ChatWorkflowTests
     }
 
     [Fact]
+    public async Task FarmKnowledgeFlowsToExternalProviderWithExplicitConsent()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var provider = new CapturingProvider();
+        var knowledge = new StubFarmKnowledgeSearch();
+        var workflow = new ChatWorkflow(
+            await FundedWalletAsync(),
+            new FixedPriceEstimator(),
+            new ExternalRouteSelector(),
+            provider,
+            chat,
+            farmKnowledge: knowledge);
+
+        var plan = await workflow.PrepareAsync(
+            conversation.Id,
+            "como nasce o crédito?",
+            useFarmKnowledge: true,
+            authorizeFarmKnowledgeExternally: true);
+        var result = await workflow.SendAsync(conversation.Id, plan, "rag-externo-consentido");
+
+        var hit = Assert.Single(plan.Knowledge!.Hits);
+        Assert.Equal(1, knowledge.CallCount);
+        Assert.Contains(hit.Reference, provider.LastRequest!.SystemInstruction);
+        Assert.Contains("Fontes da Farm", result.Response);
+    }
+
+    [Fact]
+    public async Task PrivateClassificationStillBlocksExternalRouteEvenWithFarmConsent()
+    {
+        var chat = new InMemoryChatStore();
+        var conversation = await chat.CreateConversationAsync();
+        var knowledge = new StubFarmKnowledgeSearch();
+        var workflow = new ChatWorkflow(
+            await FundedWalletAsync(),
+            new FixedPriceEstimator(),
+            new ExternalRouteSelector(),
+            new CountingProvider(),
+            chat,
+            farmKnowledge: knowledge);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            workflow.PrepareAsync(
+                conversation.Id,
+                "segredo da conta",
+                dataClassification: AiDataClassification.Private,
+                useFarmKnowledge: true,
+                authorizeFarmKnowledgeExternally: true));
+
+        Assert.Contains("PRIVADO", exception.Message);
+        Assert.Equal(0, knowledge.CallCount);
+    }
+
+    [Fact]
     public async Task FeedbackIsUpdatedAggregatedAndIncludedInExports()
     {
         var chat = new InMemoryChatStore();
