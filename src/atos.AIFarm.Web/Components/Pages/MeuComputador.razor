@@ -3,6 +3,7 @@
 @attribute [Authorize]
 @inject IFarmLabService FarmLab
 @inject IFarmAgentService FarmAgent
+@inject IContinuousFarmModeService ContinuousFarm
 @inject NavigationManager Navigation
 
 <PageTitle>Meu computador // atos AI Farm</PageTitle>
@@ -60,8 +61,22 @@
                 <p class="muted">
                     Cada tarefa roda isolada, sem acessar seus arquivos nem a internet,
                     e o resultado é conferido antes de valer ponto. Pontos de trabalho
-                    ainda não viram créditos — quando isso for ativado, você verá tudo
-                    registrado.
+                    viram créditos pela política de recompensas — o resgate fica em
+                    Recompensas, no modo completo.
+                </p>
+                <div class="home-node-head continuous-toggle">
+                    <span class="dot @(_continuousEnabled ? "orange" : "hollow")" aria-hidden="true"></span>
+                    <b>Farm contínua</b>
+                    <span class="muted">· @(_continuousEnabled ? "consumindo o poder autorizado sempre que houver máquina ociosa" : "só trabalha quando alguém pede")</span>
+                    <button class="btn @(_continuousEnabled ? null : "primary")" type="button" @onclick="ToggleContinuousAsync" disabled="@_working">
+                        @(_continuousEnabled ? "Desativar" : "Ativar consumo contínuo")
+                    </button>
+                </div>
+                <p class="muted">
+                    Com a farm contínua, um computador ocioso recebe na hora uma tarefa
+                    de consumo (SHA-256 Marathon, 20 pontos) — no ritmo definido pela
+                    plataforma — e o gráfico de desempenho da janela do programa mostra
+                    o poder sendo entregue.
                 </p>
                 @foreach (var node in _farm.Nodes.Where(x => x.ConnectionKind == FarmNodeConnectionKind.Agent))
                 {
@@ -118,6 +133,7 @@
     private FarmDashboard? _farm;
     private FarmAgentEnrollment? _enrollment;
     private bool _working;
+    private bool _continuousEnabled;
     private string? _error;
     private string? _notice;
 
@@ -130,11 +146,32 @@
         try
         {
             _farm = await FarmLab.GetDashboardAsync();
+            _continuousEnabled = await ContinuousFarm.GetAsync();
             _error = null;
         }
         catch (Exception)
         {
             _error = "Não foi possível verificar seu computador agora. Tente de novo em instantes.";
+        }
+    }
+
+    private async Task ToggleContinuousAsync()
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            await ContinuousFarm.SetAsync(!_continuousEnabled);
+            _continuousEnabled = !_continuousEnabled;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível mudar a farm contínua agora. Tente de novo em instantes.";
+        }
+        finally
+        {
+            _working = false;
         }
     }
 

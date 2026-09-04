@@ -41,6 +41,12 @@ public static class FarmWorkloadCatalog
     public const string Version = "atos-workload-catalog-v1";
     public const string DefaultId = "sha256-chain-v1";
 
+    // Workload da farm contínua (ADR 0036): pesado o suficiente para aparecer
+    // no gráfico de desempenho, curto o suficiente para a reexecução inline e
+    // o deadline de 30s do lifecycle.
+    public const string ContinuousId = "sha256-chain-marathon-v1";
+    public const string ContinuousVersion = "atos-sha256-chain-marathon-v1";
+
     public static IReadOnlyList<FarmWorkloadDefinition> Definitions { get; } =
     [
         new(
@@ -73,6 +79,21 @@ public static class FarmWorkloadCatalog
             "DENY_ALL",
             "STANDARD",
             RequiredMemoryBytes: 128L * 1024 * 1024),
+        new(
+            ContinuousId,
+            "SHA256_CHAIN",
+            ContinuousVersion,
+            "SHA-256 MARATHON",
+            "Cadeia longa para consumo contínuo do poder autorizado; ~20x o benchmark padrão.",
+            "DETERMINISTIC_REEXECUTION_V1",
+            2_000_000,
+            30,
+            1,
+            256L * 1024 * 1024,
+            20_000,
+            "DENY_ALL",
+            "STANDARD",
+            RequiredMemoryBytes: 64L * 1024 * 1024),
         new(
             "iris-text-index-v1",
             "IRIS_TEXT_INDEX",
