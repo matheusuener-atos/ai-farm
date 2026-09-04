@@ -304,6 +304,35 @@ public sealed class OpenAiResponsesProviderTests
         Assert.DoesNotContain(options.ApiKey, error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ExhaustedCreditsSurfaceAsQuotaFailureInsteadOfRetryableRateLimit()
+    {
+        var options = Options();
+        var catalog = new OpenAiPriceCatalog(options);
+        var handler = new RecordingHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent(
+                    """{"error":{"code":"credit_balance_exhausted","type":"insufficient_quota","message":"You have no credits remaining."}}""")
+            };
+            response.Headers.Add("x-request-id", "req_quota_1");
+            return response;
+        });
+        using var provider = new OpenAiResponsesProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("teste", CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<OpenAiStreamException>(() =>
+            provider.ExecuteAsync(
+                new AiProviderRequest("sem créditos", route),
+                CancellationToken.None));
+
+        Assert.Equal("QuotaExhausted", error.FailureCode);
+        Assert.False(error.IsRetryable);
+        Assert.Contains("sem créditos", error.UserMessage);
+        Assert.Equal("req_quota_1", error.DiagnosticId);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest, "InvalidRequest", false)]
     [InlineData(HttpStatusCode.Unauthorized, "AuthenticationFailed", false)]
