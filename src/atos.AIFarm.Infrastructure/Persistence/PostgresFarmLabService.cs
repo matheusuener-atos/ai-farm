@@ -8,12 +8,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace atos.AIFarm.Infrastructure.Persistence;
 
+/// <summary>
+/// Ponte da farm contínua: o serviço do Agent pede um job de consumo para um
+/// node específico sem depender da identidade de usuário do IFarmLabService.
+/// </summary>
+internal interface IFarmContinuousDispatcher
+{
+    Task<FarmJobSnapshot> RunContinuousWorkloadAsync(
+        Guid accountId,
+        Guid nodeId,
+        CancellationToken cancellationToken = default);
+}
+
 internal sealed class PostgresFarmLabService(
     IDbContextFactory<AIFarmDbContext> factory,
     IAIFarmIdentityAccessor identityAccessor,
     TimeProvider timeProvider,
     FarmManifestSigningOptions signingOptions,
-    FarmNodeReliabilityPolicy nodeReliabilityPolicy) : IFarmLabService
+    FarmNodeReliabilityPolicy nodeReliabilityPolicy) : IFarmLabService, IFarmContinuousDispatcher
 {
     private const string ManifestVersion = FarmManifestSecurity.EmbeddedVersion;
     internal const string RemoteManifestVersion = FarmManifestSecurity.AgentProfileVersion;
@@ -102,14 +114,14 @@ internal sealed class PostgresFarmLabService(
     public Task<FarmJobSnapshot> RunWorkloadAsync(
         string workloadId,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, null, false, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, null, null, null, null, null, null, null, null, null, null, false, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunApiWorkloadAsync(
         string workloadId,
         Guid tokenId,
         string idempotencyKey,
         CancellationToken cancellationToken = default) =>
-        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, null, false, null, cancellationToken);
+        RunWorkloadCoreAsync(workloadId, null, tokenId, idempotencyKey, null, null, null, null, null, null, null, null, false, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunUsefulWorkloadAsync(
         FarmUsefulJobSubmission submission,
@@ -118,7 +130,7 @@ internal sealed class PostgresFarmLabService(
         CancellationToken cancellationToken = default) =>
         RunWorkloadCoreAsync(
             submission.Definition.Id, null, tokenId, idempotencyKey,
-            null, null, null, null, null, null, null, false, submission, cancellationToken);
+            null, null, null, null, null, null, null, null, false, submission, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunScheduledWorkloadAsync(
         Guid accountId,
@@ -138,9 +150,22 @@ internal sealed class PostgresFarmLabService(
             null,
             null,
             null,
+            null,
             false,
             null,
             cancellationToken);
+
+    /// <summary>
+    /// Farm contínua (ADR 0036): um Agent ocioso pediu trabalho e a conta
+    /// autorizou consumo — cria um job marathon pinado no próprio node.
+    /// </summary>
+    public Task<FarmJobSnapshot> RunContinuousWorkloadAsync(
+        Guid accountId,
+        Guid nodeId,
+        CancellationToken cancellationToken = default) =>
+        RunWorkloadCoreAsync(
+            FarmWorkloadCatalog.ContinuousId, accountId, null, null, null, null,
+            null, null, null, null, null, nodeId, false, null, cancellationToken);
 
     internal Task<FarmJobSnapshot> RunQueuedDemandAsync(
         Guid accountId,
@@ -155,7 +180,7 @@ internal sealed class PostgresFarmLabService(
         RunWorkloadCoreAsync(
             submission.Definition.Id, accountId, null, null, null, null,
             demandId, shardIndex, shardCount, shardAttempt, excludedNodeId,
-            platformPool, submission, cancellationToken);
+            null, platformPool, submission, cancellationToken);
 
     private async Task<FarmJobSnapshot> RunWorkloadCoreAsync(
         string workloadId,
@@ -169,6 +194,7 @@ internal sealed class PostgresFarmLabService(
         int? demandShardCount,
         int? demandShardAttempt,
         Guid? excludedNodeId,
+        Guid? targetNodeId,
         bool platformPool,
         FarmUsefulJobSubmission? useful,
         CancellationToken cancellationToken)
@@ -236,7 +262,7 @@ internal sealed class PostgresFarmLabService(
             cancellationToken,
             accountId: accountId);
         var node = await SelectExecutionNodeAsync(
-            db, accountId, definition, excludedNodeId, platformPool, cancellationToken);
+            db, accountId, definition, excludedNodeId, targetNodeId, platformPool, cancellationToken);
         var isAgent = node.ConnectionKind == FarmNodeConnectionKind.Agent.ToString();
 
         var now = timeProvider.GetUtcNow();
@@ -608,14 +634,18 @@ internal sealed class PostgresFarmLabService(
         Guid accountId,
         FarmWorkloadDefinition definition,
         Guid? excludedNodeId,
+        Guid? targetNodeId,
         bool platformPool,
         CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
         // No pool da plataforma só concorrem Agents que o dono compartilhou
-        // explicitamente; embedded nunca executa trabalho da plataforma.
+        // explicitamente; embedded nunca executa trabalho da plataforma. Um
+        // node-alvo (farm contínua) restringe a disputa a ele mesmo — as
+        // checagens de capacidade e confiabilidade continuam valendo.
         var nodes = await db.FarmNodes
             .Where(x => x.AccountId == accountId &&
+                (targetNodeId == null || x.Id == targetNodeId) &&
                 (!platformPool ||
                  (x.ConnectionKind == "Agent" && x.SharePlatformWork)))
             .ToArrayAsync(cancellationToken);

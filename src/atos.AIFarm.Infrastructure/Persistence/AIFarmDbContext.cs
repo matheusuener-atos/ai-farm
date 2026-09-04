@@ -59,6 +59,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.DisplayName).HasMaxLength(160);
             entity.Property(x => x.Status).HasMaxLength(32);
             entity.Property(x => x.InterfaceMode).HasMaxLength(8).HasDefaultValue("Lite");
+            entity.Property(x => x.ContinuousFarmEnabled).HasDefaultValue(false);
         });
 
         modelBuilder.Entity<WalletRecord>(entity =>
@@ -923,6 +924,9 @@ public sealed class AccountRecord
     // Contas novas nascem no Farmer Lite; as existentes foram preservadas em
     // Pro pelo backfill da migration (ADR 0030).
     public string InterfaceMode { get; set; } = "Lite";
+    // Farm contínua (ADR 0036): Agents ociosos da conta recebem jobs de
+    // consumo no claim quando não há fila.
+    public bool ContinuousFarmEnabled { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
 

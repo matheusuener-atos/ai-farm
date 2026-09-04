@@ -99,7 +99,7 @@ public sealed class AgentClientTests
         Assert.Equal(FarmNodeStatus.Online, result.Status);
         Assert.Equal("Bearer", captured!.Headers.Authorization!.Scheme);
         Assert.Equal("secret-value", captured.Headers.Authorization.Parameter);
-        Assert.Contains("\"agentVersion\":\"atos-agent/0.8.0\"", body);
+        Assert.Contains($"\"agentVersion\":\"{FarmAgentProtocol.CurrentAgentVersion}\"", body);
         Assert.Contains("\"acceptJobs\":true", body);
         Assert.Contains("\"maxLogicalProcessors\":1", body);
         Assert.Contains("\"maxMemoryBytes\":268435456", body);
