@@ -291,7 +291,18 @@ O usuário autenticado pode gerar um código de vínculo de uso único, válido 
 Agent recebe uma credencial de heartbeat que só é armazenada como SHA-256 no
 PostgreSQL; a credencial em texto puro é retornada uma única vez.
 
-O executável dedicado está no projeto `atos.AIFarm.Agent`. Na primeira
+O executável dedicado está no projeto `atos.AIFarm.Agent`. Aberto sem
+argumentos (duplo clique), ele entra no modo `ui` (ADR 0034): um painel local
+com a identidade Macintosh servido por Kestrel em
+`http://127.0.0.1:{porta aleatória}/{token de sessão}/` — somente loopback —
+e aberto como janela de app pelo Edge. O painel cobre o ciclo completo:
+vincular com o código, Farmar/Pausar, limites de CPU e memória, medições em
+tempo real (jobs ativos, CP da sessão, CPU e memória vivas dos workers),
+identidade da conta vinculada e rotação de credencial
+(`POST /api/farm/agents/credential/rotate` mantém o mesmo node e invalida o
+hash anterior atomicamente).
+
+A linha de comando continua disponível para automação. Na primeira
 instalação, gere o código em `/farm` e execute:
 
 ```powershell

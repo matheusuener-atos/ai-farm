@@ -145,6 +145,7 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
         };
         if (!process.Start())
             throw new InvalidOperationException("Não foi possível iniciar o processo worker.");
+        var workerProcessId = process.Id;
         using var resources = AgentWorkerResourceGuard.Attach(
             process,
             manifest.MaxLogicalProcessors,
@@ -170,6 +171,7 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 resources.Sample();
+                AgentTelemetry.Instance.SampleWorker(process);
                 await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
             }
             await process.WaitForExitAsync(CancellationToken.None);
@@ -187,6 +189,10 @@ internal sealed class AgentWorkerProcessRunner(AgentWorkerLaunch launch)
             Kill(process);
             await process.WaitForExitAsync(CancellationToken.None);
             throw;
+        }
+        finally
+        {
+            AgentTelemetry.Instance.RemoveWorker(workerProcessId);
         }
 
         var output = await standardOutput;

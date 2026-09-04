@@ -28,6 +28,9 @@ internal sealed class AgentClient(HttpClient httpClient)
         using var response = await httpClient.SendAsync(message, cancellationToken);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             throw new AgentAuthenticationException("Código de vínculo inválido, expirado ou já utilizado.");
+        if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Conflict)
+            throw new InvalidOperationException(await ReadServerErrorAsync(
+                response, "O servidor recusou o vínculo.", cancellationToken));
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<FarmAgentEnrollmentResult>(JsonOptions, cancellationToken)
             ?? throw new InvalidOperationException("O servidor retornou uma inscrição vazia.");
@@ -70,6 +73,39 @@ internal sealed class AgentClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<FarmAgentTrust>(JsonOptions, cancellationToken)
             ?? throw new InvalidOperationException("O servidor retornou trust vazio.");
+    }
+
+    public async Task<FarmAgentIdentity> GetIdentityAsync(
+        AgentConfiguration configuration,
+        string credential,
+        CancellationToken cancellationToken)
+    {
+        using var message = Authorized(
+            HttpMethod.Get,
+            $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/identity",
+            credential);
+        using var response = await httpClient.SendAsync(message, cancellationToken);
+        EnsureAuthorized(response);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<FarmAgentIdentity>(JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("O servidor retornou identidade vazia.");
+    }
+
+    public async Task<FarmAgentCredentialRotation> RotateCredentialAsync(
+        AgentConfiguration configuration,
+        string credential,
+        CancellationToken cancellationToken)
+    {
+        using var message = Authorized(
+            HttpMethod.Post,
+            $"{AgentEndpoint.Normalize(configuration.BaseUrl)}/api/farm/agents/credential/rotate",
+            credential);
+        message.Content = JsonContent.Create(new { }, options: JsonOptions);
+        using var response = await httpClient.SendAsync(message, cancellationToken);
+        EnsureAuthorized(response);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<FarmAgentCredentialRotation>(JsonOptions, cancellationToken)
+            ?? throw new InvalidOperationException("O servidor retornou rotação vazia.");
     }
 
     public async Task<FarmRemoteJobOffer?> ClaimJobAsync(
@@ -161,5 +197,25 @@ internal sealed class AgentClient(HttpClient httpClient)
     {
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             throw new AgentAuthenticationException("A credencial do Agent foi recusada pelo servidor.");
+    }
+
+    private static async Task<string> ReadServerErrorAsync(
+        HttpResponseMessage response,
+        string fallback,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: cancellationToken);
+            if (body.ValueKind == JsonValueKind.Object &&
+                body.TryGetProperty("error", out var error) &&
+                error.GetString() is { Length: > 0 } message)
+                return message;
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+        }
+        return fallback;
     }
 }

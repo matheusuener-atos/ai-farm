@@ -17,6 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Kestrel serve o painel local (modo ui) em 127.0.0.1 com porta
+         aleatória; HttpListener exigiria ACL de URL do Windows. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="atos.AIFarm.UnitTests" />
   </ItemGroup>
 
