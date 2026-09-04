@@ -20,9 +20,30 @@ services:
       - key: NEON_BRANCH
         value: production
       - key: AIFarm__AI__Provider
-        value: OpenAI
+        value: OpenAICompatible
+      - key: AIFarm__AI__Compatible__Endpoint
+        value: https://openrouter.ai/api/v1/chat/completions
+      - key: AIFarm__AI__Compatible__Model
+        value: minimax/minimax-m3:free
+      - key: AIFarm__AI__Compatible__ProviderLabel
+        value: OpenRouter
+      - key: COMPATIBLE_API_KEY
+        sync: false
+      # OPENAI_API_KEY fica dormente enquanto o provider é OpenAICompatible;
+      # voltar ao pago é trocar AIFarm__AI__Provider para OpenAI.
       - key: OPENAI_API_KEY
         sync: false
+      # Política inaugural do settlement CP -> AIC (ADRs 0022 e 0033).
+      - key: AIFarm__Farm__Rewards__Enabled
+        value: "true"
+      - key: AIFarm__Farm__Rewards__PolicyVersion
+        value: reward-policy-2026-09-v1
+      - key: AIFarm__Farm__Rewards__AicMinorPerThousandCp
+        value: "2000"
+      - key: AIFarm__Farm__Rewards__MonthlyBudgetMinor
+        value: "10000"
+      - key: AIFarm__Farm__Rewards__MaximumPerSettlementMinor
+        value: "100"
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_UNPOOLED
