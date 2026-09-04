@@ -104,6 +104,21 @@ public sealed record FarmAgentTrust(
     string VerificationKey,
     string KeyId);
 
+public sealed record FarmAgentIdentity(
+    Guid NodeId,
+    string NodeName,
+    string AccountDisplayName,
+    bool SharePlatformWork,
+    string Status,
+    string VerificationLevel,
+    DateTimeOffset EnrolledAtUtc,
+    DateTimeOffset? CredentialIssuedAtUtc);
+
+public sealed record FarmAgentCredentialRotation(
+    Guid NodeId,
+    string Credential,
+    DateTimeOffset IssuedAtUtc);
+
 public sealed record FarmRemoteJobOffer(
     Guid JobId,
     Guid AttemptId,
@@ -255,6 +270,12 @@ public interface IFarmAgentService
         FarmAgentHeartbeatRequest request,
         CancellationToken cancellationToken = default);
     Task<FarmAgentTrust?> GetTrustAsync(
+        string credential,
+        CancellationToken cancellationToken = default);
+    Task<FarmAgentIdentity?> GetIdentityAsync(
+        string credential,
+        CancellationToken cancellationToken = default);
+    Task<FarmAgentCredentialRotation?> RotateCredentialAsync(
         string credential,
         CancellationToken cancellationToken = default);
     Task<FarmRemoteJobOffer?> ClaimJobAsync(
