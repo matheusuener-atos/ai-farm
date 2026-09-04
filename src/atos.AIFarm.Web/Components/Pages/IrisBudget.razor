@@ -68,18 +68,18 @@ else
 
         <div class="budget-form">
             <label>
-                MÁXIMO POR TAREFA (AIC)
-                <input type="number" min="1" step="1" @bind="_perRequestAic" disabled="@_saving" />
+                MÁXIMO POR TAREFA // @_perRequestAic AIC
+                <input type="range" min="1" max="200" step="1" @bind="_perRequestAic" @bind:event="oninput" disabled="@_saving" />
                 <small>Bloqueia a execução antes de qualquer chamada externa.</small>
             </label>
             <label>
-                LIMITE DIÁRIO (AIC)
-                <input type="number" min="1" step="1" @bind="_dailyAic" disabled="@_saving" />
+                LIMITE DIÁRIO // @_dailyAic AIC
+                <input type="range" min="1" max="1000" step="1" @bind="_dailyAic" @bind:event="oninput" disabled="@_saving" />
                 <small>Consumo liquidado + retenções ativas no dia UTC.</small>
             </label>
             <label>
-                LIMITE MENSAL (AIC)
-                <input type="number" min="1" step="1" @bind="_monthlyAic" disabled="@_saving" />
+                LIMITE MENSAL // @_monthlyAic AIC
+                <input type="range" min="1" max="10000" step="10" @bind="_monthlyAic" @bind:event="oninput" disabled="@_saving" />
                 <small>Consumo liquidado + retenções ativas no mês UTC.</small>
             </label>
         </div>
