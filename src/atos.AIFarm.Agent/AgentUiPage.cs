@@ -85,6 +85,14 @@ input {
   padding:8px 10px; width:100%;
 }
 input:focus, button:focus-visible { outline:2px solid var(--orange); outline-offset:2px; }
+.bars { display:grid; gap:10px; }
+.bar-row { display:grid; grid-template-columns:150px 1fr 150px; gap:12px; align-items:center; }
+@media (max-width:560px){ .bar-row { grid-template-columns:110px 1fr 110px; } }
+.bar-label { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+.bar-track { height:14px; border:1.5px solid var(--ink); background:var(--surface-2); overflow:hidden; }
+.bar-fill { height:100%; width:0%; background:var(--orange); transition:width .6s ease; }
+.bar-fill.auth { background:var(--ink); }
+.bar-value { font-size:12px; font-variant-numeric:tabular-nums; text-align:right; }
 .log {
   background:var(--surface-2); border-top:1px solid var(--line);
   font-family:ui-monospace,Consolas,monospace; font-size:11px; line-height:1.6;
@@ -113,6 +121,27 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
       </div>
       <p class="note">Farmar deixa este computador à disposição da rede: ele executa trabalhos verificados,
       acumula CP e a rede nunca acessa seus arquivos — só os workloads do catálogo autorizado.</p>
+    </div>
+  </section>
+
+  <section class="win">
+    <div class="win-title"><span>PODER COMPUTACIONAL</span></div>
+    <div class="win-body">
+      <div class="bars">
+        <div class="bar-row"><span class="bar-label">CPU autorizada</span>
+          <div class="bar-track"><div id="bar-cpu-auth" class="bar-fill auth"></div></div>
+          <span id="bar-cpu-auth-text" class="bar-value">—</span></div>
+        <div class="bar-row"><span class="bar-label">CPU em uso agora</span>
+          <div class="bar-track"><div id="bar-cpu-live" class="bar-fill"></div></div>
+          <span id="bar-cpu-live-text" class="bar-value">—</span></div>
+        <div class="bar-row"><span class="bar-label">Memória autorizada</span>
+          <div class="bar-track"><div id="bar-mem-auth" class="bar-fill auth"></div></div>
+          <span id="bar-mem-auth-text" class="bar-value">—</span></div>
+        <div class="bar-row"><span class="bar-label">Memória em uso agora</span>
+          <div class="bar-track"><div id="bar-mem-live" class="bar-fill"></div></div>
+          <span id="bar-mem-live-text" class="bar-value">—</span></div>
+      </div>
+      <p id="potential" class="note">—</p>
     </div>
   </section>
 
@@ -152,7 +181,7 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
           <p class="note">Para mudar “Ajudar a plataforma”, use a página Meu computador no site.</p>
         </div>
         <form id="enroll-form" class="stack" hidden>
-          <p>Este computador ainda não está vinculado. Gere um código na página
+          <p id="enroll-hint">Este computador ainda não está vinculado. Gere um código na página
           <strong>Meu computador</strong> do site e cole aqui.</p>
           <label>URL da AI Farm<input id="enroll-url" placeholder="https://ai-farm-z5yp.onrender.com" required></label>
           <label>Código de vínculo<input id="enroll-code" autocomplete="off" required></label>
@@ -301,8 +330,37 @@ function render(s) {
   $('jobs').hidden = s.activeJobs.length === 0;
   $('jobs-empty').hidden = s.activeJobs.length !== 0;
 
-  $('identity-block').hidden = !bound;
-  $('enroll-form').hidden = bound;
+  const cpuAuthPct = Math.min(100, s.maxLogicalProcessors / s.hardwareLogicalProcessors * 100);
+  const cpuLivePct = Math.min(100, s.liveWorkerCpuPercent / (s.maxLogicalProcessors * 100) * 100);
+  const memAuthPct = Math.min(100, s.maxMemoryBytes / s.hardwareMemoryBytes * 100);
+  const memLivePct = s.maxMemoryBytes > 0
+    ? Math.min(100, s.liveWorkerMemoryBytes / s.maxMemoryBytes * 100) : 0;
+  $('bar-cpu-auth').style.width = cpuAuthPct + '%';
+  $('bar-cpu-auth-text').textContent = s.maxLogicalProcessors + ' de ' + s.hardwareLogicalProcessors + ' núcleos';
+  $('bar-cpu-live').style.width = cpuLivePct + '%';
+  $('bar-cpu-live-text').textContent = s.liveWorkerCpuPercent.toLocaleString('pt-BR', {maximumFractionDigits: 0}) + '% de ' + (s.maxLogicalProcessors * 100) + '%';
+  $('bar-mem-auth').style.width = memAuthPct + '%';
+  $('bar-mem-auth-text').textContent = fmtMb(s.maxMemoryBytes) + ' de ' + fmtMb(s.hardwareMemoryBytes);
+  $('bar-mem-live').style.width = memLivePct + '%';
+  $('bar-mem-live-text').textContent = fmtMb(s.liveWorkerMemoryBytes);
+
+  const cph = s.verifiedCpMilli > 0 ? s.verifiedCpMilli / 1000 / hours : null;
+  $('potential').textContent = !bound
+    ? 'Vincule este computador para medir o que ele pode gerar.'
+    : farming
+      ? (cph
+          ? 'Ritmo medido: ' + cph.toLocaleString('pt-BR', {maximumFractionDigits: 1}) + ' CP/hora com os limites atuais.'
+          : 'Farmando — o ritmo aparece aqui depois do primeiro trabalho concluído.')
+      : (cph
+          ? 'Prévia: se estivesse farmando, este computador manteria ~' + cph.toLocaleString('pt-BR', {maximumFractionDigits: 1}) + ' CP/hora (ritmo medido nesta sessão).'
+          : 'Prévia indisponível: aperte FARMAR e conclua o primeiro trabalho para calibrar o ritmo desta máquina.');
+
+  const rebindNeeded = bound && (s.phase === 'CREDENCIAL_RECUSADA' || s.phase === 'ERRO');
+  $('identity-block').hidden = !bound || rebindNeeded;
+  $('enroll-form').hidden = bound && !rebindNeeded;
+  $('enroll-hint').textContent = rebindNeeded
+    ? 'O vínculo atual não está funcionando (' + (s.baseUrl || 'servidor desconhecido') + '). Gere um código novo no site e refaça o vínculo aqui — o anterior será substituído.'
+    : 'Este computador ainda não está vinculado. Gere um código na página Meu computador do site e cole aqui.';
   if (s.identity) {
     $('id-account').textContent = s.identity.accountDisplayName;
     $('id-node').textContent = s.identity.nodeName;
