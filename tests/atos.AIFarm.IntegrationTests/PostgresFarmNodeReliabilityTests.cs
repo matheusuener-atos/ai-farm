@@ -103,6 +103,7 @@ public sealed class PostgresFarmNodeReliabilityTests
         AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
         AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
         AgentCredentialIssuedAtUtc = now,
+        ConfirmedAtUtc = now,
         AgentAcceptJobs = true,
         AgentMaxLogicalProcessors = 1,
         AgentMaxMemoryBytes = 256L * 1024 * 1024,

@@ -69,6 +69,9 @@ internal static class AgentApplication
     {
         var baseUrl = args.ElementAtOrDefault(1) ?? Prompt("URL da AI Farm", "http://localhost:5159");
         baseUrl = AgentEndpoint.Normalize(baseUrl);
+        var accountEmail = Environment.GetEnvironmentVariable("AIFARM_AGENT_ACCOUNT_EMAIL");
+        if (string.IsNullOrWhiteSpace(accountEmail))
+            accountEmail = Prompt("E-mail da conta", string.Empty);
         var token = Environment.GetEnvironmentVariable("AIFARM_AGENT_ENROLLMENT_TOKEN");
         if (string.IsNullOrWhiteSpace(token))
             token = ReadSecret("Código de vínculo");
@@ -76,7 +79,12 @@ internal static class AgentApplication
             throw new ArgumentException("Código de vínculo obrigatório.");
 
         using var cancellation = CreateCancellation();
-        var enrollment = await client.EnrollAsync(baseUrl, token, cancellation.Source.Token);
+        var enrollment = await client.EnrollAsync(
+            baseUrl, token, accountEmail.Trim(), cancellation.Source.Token);
+        if (enrollment.ConfirmationCode is { Length: > 0 } confirmationCode)
+            Write(
+                "CONFIRMAÇÃO",
+                $"CHAVE {confirmationCode} // digite no card deste computador no site para liberar o trabalho. Ela não será exibida de novo.");
         var target = CredentialTarget(enrollment.NodeId);
         credentialStore.Save(target, enrollment.NodeId.ToString(), enrollment.Credential);
         await configurationStore.SaveAsync(new AgentConfiguration(
@@ -205,9 +213,11 @@ internal static class AgentApplication
                     failures = 0;
                     telemetry.SetHeartbeat(heartbeat.Status.ToString().ToUpperInvariant());
                     telemetry.SetPhase(
-                        !configuration.EffectivePolicy.AcceptJobs
-                            ? "PAUSADO"
-                            : heartbeat.AcceptJobs ? "FARMANDO" : "EM_ESPERA");
+                        heartbeat.PendingConfirmation
+                            ? "AGUARDANDO_CONFIRMACAO"
+                            : !configuration.EffectivePolicy.AcceptJobs
+                                ? "PAUSADO"
+                                : heartbeat.AcceptJobs ? "FARMANDO" : "EM_ESPERA");
                     interval = activeJobs.Count == 0
                         ? Math.Clamp(heartbeat.HeartbeatIntervalSeconds, 10, 300)
                         : Math.Clamp(heartbeat.ActiveHeartbeatIntervalSeconds, 1, 10);

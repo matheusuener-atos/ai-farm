@@ -342,11 +342,13 @@ public sealed class PostgresFarmLabTests
             async Task<FarmAgentEnrollmentResult> EnrollAsync(string name)
             {
                 var enrollment = await agents.CreateEnrollmentAsync();
-                return Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
+                var linked = Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
                     enrollment.Token,
                     new FarmAgentEnrollmentRequest(
                         name, ".NET 10 // WINDOWS", 8, 16L * 1024 * 1024 * 1024,
-                        FarmAgentProtocol.CurrentAgentVersion)));
+                        FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
+                await lab.ConfirmNodeAsync(linked.NodeId, linked.ConfirmationCode!);
+                return linked;
             }
 
             var first = await EnrollAsync("POOL-NODE-A");
@@ -411,8 +413,10 @@ public sealed class PostgresFarmLabTests
                 ".NET 10 // WINDOWS",
                 8,
                 16L * 1024 * 1024 * 1024,
-                FarmAgentProtocol.CurrentAgentVersion);
+                FarmAgentProtocol.CurrentAgentVersion,
+                "teste@atos.local");
             var linked = await agents.EnrollAsync(enrollment.Token, request);
+            await lab.ConfirmNodeAsync(linked!.NodeId, linked.ConfirmationCode!);
 
             Assert.NotNull(linked);
             Assert.Null(await agents.EnrollAsync(enrollment.Token, request));
@@ -742,8 +746,10 @@ public sealed class PostgresFarmLabTests
                 ".NET 10 // WINDOWS",
                 8,
                 16L * 1024 * 1024 * 1024,
-                FarmAgentProtocol.CurrentAgentVersion);
+                FarmAgentProtocol.CurrentAgentVersion,
+                "teste@atos.local");
             var linked = await agents.EnrollAsync(enrollment.Token, request);
+            await lab.ConfirmNodeAsync(linked!.NodeId, linked.ConfirmationCode!);
             Assert.NotNull(linked);
             Assert.NotNull(await agents.HeartbeatAsync(
                 linked.Credential,

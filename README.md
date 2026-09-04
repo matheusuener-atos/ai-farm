@@ -287,9 +287,14 @@ vinculado.
 ### Vínculo experimental do Compute Agent
 
 O painel `/farm` diferencia o laboratório `EMBEDDED` de um `AGENT` externo.
-O usuário autenticado pode gerar um código de vínculo de uso único, válido por
-10 minutos. Gerar outro código invalida os anteriores. Depois do vínculo, o
-Agent recebe uma credencial de heartbeat que só é armazenada como SHA-256 no
+O vínculo é um handshake de mão dupla (ADR 0038): o código de uso único
+(10 minutos, gerado no card-assento da pool em `/meu-computador`) entra na
+máquina junto com o e-mail da conta; o servidor valida o par e devolve uma
+chave de confirmação (`XXXX-XXXX`) exibida uma única vez na janela do Agent —
+o dono digita essa chave de volta no card do site para o node começar a
+receber trabalho. Nenhuma chave é reexibida: perdeu, exclui a máquina da
+rede (descomissionamento revoga a credencial e libera o assento) e adiciona
+de novo. A credencial de heartbeat só é armazenada como SHA-256 no
 PostgreSQL; a credencial em texto puro é retornada uma única vez.
 
 O executável dedicado está no projeto `atos.AIFarm.Agent`. Aberto sem

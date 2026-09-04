@@ -99,6 +99,9 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
 .perf-head strong.on { color:var(--orange); }
 .perf-util { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
 #perf-chart { display:block; width:100%; height:150px; margin-top:10px; border:1.5px solid var(--ink); background:var(--surface-2); }
+.confirm-key { margin-top:12px; padding:12px 14px; border:1.5px solid var(--ink); background:var(--amber-deep); font-size:13px; }
+.confirm-key b { font-size:22px; letter-spacing:.08em; font-variant-numeric:tabular-nums; display:inline-block; margin:0 6px; }
+.confirm-key small { display:block; color:var(--muted); margin-top:4px; }
 .bars { display:grid; gap:10px; }
 .bar-row { display:grid; grid-template-columns:150px 1fr 150px; gap:12px; align-items:center; }
 @media (max-width:560px){ .bar-row { grid-template-columns:110px 1fr 110px; } }
@@ -132,6 +135,10 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
       <div class="farm-row">
         <button id="farm-toggle" class="big primary" disabled>FARMAR</button>
         <div class="phase"><span id="phase-text">Conectando ao painel…</span><small id="phase-detail"></small></div>
+      </div>
+      <div id="confirm-key" class="confirm-key" hidden>
+        CHAVE DE CONFIRMAÇÃO: <b id="confirm-key-value">—</b>
+        <small>Digite no card deste computador no site. Ela não será exibida de novo — para refazer, exclua a máquina da rede e adicione novamente.</small>
       </div>
       <p class="note">Farmar deixa este computador à disposição da rede: ele executa trabalhos verificados,
       acumula CP e a rede nunca acessa seus arquivos — só os workloads do catálogo autorizado.</p>
@@ -212,6 +219,7 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
           <p id="enroll-hint">Este computador ainda não está vinculado. Gere um código na página
           <strong>Meu computador</strong> do site e cole aqui.</p>
           <label>URL da AI Farm<input id="enroll-url" placeholder="https://ai-farm-z5yp.onrender.com" required></label>
+          <label>E-mail da conta<input id="enroll-email" type="email" autocomplete="off" required></label>
           <label>Código de vínculo<input id="enroll-code" autocomplete="off" required></label>
           <button type="submit" class="primary">Vincular este computador</button>
         </form>
@@ -273,6 +281,7 @@ const PHASES = {
   CONECTANDO:          {dot:'on',  text:'Conectando ao servidor…'},
   RECONECTANDO:        {dot:'on',  text:'Reconectando ao servidor…'},
   SEM_VINCULO:         {dot:'',    text:'Sem vínculo — vincule este computador para começar.'},
+  AGUARDANDO_CONFIRMACAO: {dot:'on', text:'Vinculado — aguardando você digitar a chave de confirmação no site.'},
   CREDENCIAL_RECUSADA: {dot:'err', text:'Credencial recusada — rotacione ou refaça o vínculo.'},
   ERRO:                {dot:'err', text:'Erro na sessão — veja o diário.'},
   PARADO:              {dot:'',    text:'Parado.'}
@@ -448,6 +457,10 @@ function render(s) {
           ? 'Prévia: se estivesse farmando, este computador manteria ~' + cph.toLocaleString('pt-BR', {maximumFractionDigits: 1}) + ' CP/hora (ritmo medido nesta sessão).'
           : 'Prévia indisponível: aperte FARMAR e conclua o primeiro trabalho para calibrar o ritmo desta máquina.');
 
+  const keyBox = $('confirm-key');
+  keyBox.hidden = !(s.phase === 'AGUARDANDO_CONFIRMACAO' && s.pendingConfirmationKey);
+  if (!keyBox.hidden) $('confirm-key-value').textContent = s.pendingConfirmationKey;
+
   const rebindNeeded = bound &&
     ['CREDENCIAL_RECUSADA', 'ERRO', 'RECONECTANDO'].includes(s.phase);
   $('identity-block').hidden = !bound || rebindNeeded;
@@ -518,7 +531,11 @@ $('limits-form').addEventListener('submit', event => {
 });
 $('enroll-form').addEventListener('submit', event => {
   event.preventDefault();
-  post('enroll', {url: $('enroll-url').value.trim(), code: $('enroll-code').value.trim()});
+  post('enroll', {
+    url: $('enroll-url').value.trim(),
+    email: $('enroll-email').value.trim(),
+    code: $('enroll-code').value.trim()
+  });
 });
 $('rotate').addEventListener('click', () => {
   if (confirm('Rotacionar a credencial? A anterior deixa de funcionar na hora, inclusive em outros atalhos desta máquina.'))
