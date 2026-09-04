@@ -360,7 +360,8 @@ function render(s) {
           ? 'Prévia: se estivesse farmando, este computador manteria ~' + cph.toLocaleString('pt-BR', {maximumFractionDigits: 1}) + ' CP/hora (ritmo medido nesta sessão).'
           : 'Prévia indisponível: aperte FARMAR e conclua o primeiro trabalho para calibrar o ritmo desta máquina.');
 
-  const rebindNeeded = bound && (s.phase === 'CREDENCIAL_RECUSADA' || s.phase === 'ERRO');
+  const rebindNeeded = bound &&
+    ['CREDENCIAL_RECUSADA', 'ERRO', 'RECONECTANDO'].includes(s.phase);
   $('identity-block').hidden = !bound || rebindNeeded;
   $('enroll-form').hidden = bound && !rebindNeeded;
   $('enroll-hint').textContent = rebindNeeded
