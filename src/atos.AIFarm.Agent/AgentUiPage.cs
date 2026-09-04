@@ -90,6 +90,10 @@ input {
   padding:8px 10px; width:100%;
 }
 input:focus, button:focus-visible { outline:2px solid var(--orange); outline-offset:2px; }
+input[type=range] { -webkit-appearance:none; appearance:none; height:14px; padding:0; background:var(--surface-2); cursor:pointer; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:16px; height:24px; background:var(--orange); border:1.5px solid var(--ink); box-shadow:1px 1px 0 var(--ink); }
+input[type=range]::-moz-range-thumb { width:16px; height:24px; background:var(--orange); border:1.5px solid var(--ink); border-radius:0; box-shadow:1px 1px 0 var(--ink); }
+label b { color:var(--ink); font-variant-numeric:tabular-nums; }
 .bars { display:grid; gap:10px; }
 .bar-row { display:grid; grid-template-columns:150px 1fr 150px; gap:12px; align-items:center; }
 @media (max-width:560px){ .bar-row { grid-template-columns:110px 1fr 110px; } }
@@ -214,10 +218,10 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
     <div class="win-title"><span>LIMITES DO MEU COMPUTADOR</span></div>
     <div class="win-body">
       <form id="limits-form" class="stack">
-        <label><span>Processadores lógicos para a rede (máx. <span id="cpu-max">?</span>)</span>
-          <input id="limit-cpu" type="number" min="1" step="1" required></label>
-        <label><span>Memória para a rede, em MB (máx. <span id="mem-max">?</span>)</span>
-          <input id="limit-mem" type="number" min="64" step="64" required></label>
+        <label><span>Processadores lógicos para a rede: <b id="limit-cpu-value">?</b> de <span id="cpu-max">?</span></span>
+          <input id="limit-cpu" type="range" min="1" step="1" required></label>
+        <label><span>Memória para a rede: <b id="limit-mem-value">?</b> MB de <span id="mem-max">?</span> MB</span>
+          <input id="limit-mem" type="range" min="64" step="64" required></label>
         <button type="submit">Aplicar limites</button>
       </form>
       <p class="note">Os limites valem a partir do próximo trabalho aceito.</p>
@@ -287,7 +291,14 @@ function showError(message) {
 }
 
 let limitsDirty = false;
-['limit-cpu', 'limit-mem'].forEach(id => $(id).addEventListener('input', () => { limitsDirty = true; }));
+function syncLimitLabels() {
+  $('limit-cpu-value').textContent = $('limit-cpu').value;
+  $('limit-mem-value').textContent = parseInt($('limit-mem').value, 10).toLocaleString('pt-BR');
+}
+['limit-cpu', 'limit-mem'].forEach(id => $(id).addEventListener('input', () => {
+  limitsDirty = true;
+  syncLimitLabels();
+}));
 
 function render(s) {
   const phase = PHASES[s.phase] || PHASES.PARADO;
@@ -384,10 +395,11 @@ function render(s) {
   $('cpu-max').textContent = s.hardwareLogicalProcessors;
   $('mem-max').textContent = Math.floor(s.hardwareMemoryBytes / 1048576).toLocaleString('pt-BR');
   if (!limitsDirty) {
-    $('limit-cpu').value = s.maxLogicalProcessors;
     $('limit-cpu').max = s.hardwareLogicalProcessors;
-    $('limit-mem').value = Math.floor(s.maxMemoryBytes / 1048576);
+    $('limit-cpu').value = s.maxLogicalProcessors;
     $('limit-mem').max = Math.floor(s.hardwareMemoryBytes / 1048576);
+    $('limit-mem').value = Math.floor(s.maxMemoryBytes / 1048576);
+    syncLimitLabels();
   }
 
   $('log').textContent = s.log.length

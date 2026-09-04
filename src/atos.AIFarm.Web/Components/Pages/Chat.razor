@@ -159,41 +159,46 @@
             <span class="@(_streaming ? "status streaming-status" : "status")">
                 ● @(_streaming ? _executionStatus : "ONLINE")
             </span>
-            @if (!_renaming)
-            {
-                <button type="button"
-                        class="rename-button"
-                        @onclick="StartRename"
-                        disabled="@(_working || _conversationId == Guid.Empty)">
-                    Renomear
-                </button>
-            }
-            <button type="button"
-                    class="configuration-button"
-                    @onclick="ToggleConfiguration"
-                    disabled="@(_working || _conversationId == Guid.Empty)">
-                @(_showConfiguration ? "Fechar config" : "Configurar")
-            </button>
-            <button type="button"
-                    class="archive-button"
-                    @onclick="ArchiveCurrentConversationAsync"
-                    disabled="@(_working || _conversationId == Guid.Empty)">
-                Arquivar
-            </button>
-            <button type="button"
-                    class="danger-button"
-                    @onclick="() => RequestDeleteConversation(_conversationId)"
-                    disabled="@(_working || _conversationId == Guid.Empty)">
-                Excluir
-            </button>
-            @if (_conversationId != Guid.Empty)
-            {
-                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">Exportar MD</a>
-                @if (!IsLite)
-                {
-                    <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
-                }
-            }
+            <details class="title-actions-menu">
+                <summary>Ações ▾</summary>
+                <div>
+                    @if (!_renaming)
+                    {
+                        <button type="button"
+                                class="rename-button"
+                                @onclick="StartRename"
+                                disabled="@(_working || _conversationId == Guid.Empty)">
+                            Renomear
+                        </button>
+                    }
+                    <button type="button"
+                            class="configuration-button"
+                            @onclick="ToggleConfiguration"
+                            disabled="@(_working || _conversationId == Guid.Empty)">
+                        @(_showConfiguration ? "Fechar config" : "Configurar")
+                    </button>
+                    <button type="button"
+                            class="archive-button"
+                            @onclick="ArchiveCurrentConversationAsync"
+                            disabled="@(_working || _conversationId == Guid.Empty)">
+                        Arquivar
+                    </button>
+                    <button type="button"
+                            class="danger-button"
+                            @onclick="() => RequestDeleteConversation(_conversationId)"
+                            disabled="@(_working || _conversationId == Guid.Empty)">
+                        Excluir
+                    </button>
+                    @if (_conversationId != Guid.Empty)
+                    {
+                        <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">Exportar MD</a>
+                        @if (!IsLite)
+                        {
+                            <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
+                        }
+                    }
+                </div>
+            </details>
         </div>
     </div>
 
@@ -222,15 +227,16 @@
                 </label>
                 <label>
                     CRIATIVIDADE // @_temperature.ToString("0.00")
-                    <input type="range" min="0" max="2" step="0.1" @bind="_temperature" disabled="@_working" />
+                    <input type="range" min="0" max="2" step="0.1" @bind="_temperature" @bind:event="oninput" disabled="@_working" />
                 </label>
                 <label>
-                    LIMITE DE RESPOSTA // TOKENS
-                    <input type="number"
+                    LIMITE DE RESPOSTA // @_maximumOutputTokens.ToString("N0") TOKENS
+                    <input type="range"
                            min="@ConversationAiSettings.MinimumOutputTokens"
                            max="@SelectedModelMaximumOutputTokens"
                            step="64"
                            @bind="_maximumOutputTokens"
+                           @bind:event="oninput"
                            disabled="@_working" />
                 </label>
                 <label class="system-instruction-field">
