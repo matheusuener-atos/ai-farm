@@ -3,6 +3,7 @@ using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure.Development;
 using atos.AIFarm.Infrastructure.Attachments;
 using atos.AIFarm.Infrastructure.Persistence;
+using atos.AIFarm.Infrastructure.Providers.Compatible;
 using atos.AIFarm.Infrastructure.Providers.OpenAI;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +19,8 @@ public static class DependencyInjection
         AiProviderProtectionOptions? providerProtection = null,
         OpenAiProviderOptions? openAi = null,
         ChatContextLimits? contextLimits = null,
-        AiUsageSafetyCapPolicy? safetyCap = null)
+        AiUsageSafetyCapPolicy? safetyCap = null,
+        OpenAiCompatibleOptions? compatible = null)
     {
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton(executionLimits ?? ChatExecutionLimits.Default);
@@ -47,7 +49,28 @@ public static class DependencyInjection
         services.AddSingleton<IAiUsageBudgetService, InMemoryAiUsageBudgetService>();
         services.AddSingleton<IInterfaceModeService, InMemoryInterfaceModeService>();
         services.TryAddScoped<IConversationExportService, ConversationExportService>();
-        if (openAi is null)
+        if (openAi is null && compatible is not null)
+        {
+            compatible.Validate();
+            var catalog = new OpenAiPriceCatalog(new AiPriceCatalogEntry(
+                new AiRoute(
+                    compatible.ProviderLabel,
+                    compatible.Model,
+                    compatible.PriceCatalogVersion),
+                compatible.InputCostPerMillionMinor,
+                compatible.OutputCostPerMillionMinor,
+                compatible.MaximumOutputTokens));
+            services.AddSingleton(compatible);
+            services.AddSingleton(catalog);
+            services.AddSingleton<IAiPriceCatalog>(catalog);
+            services.AddSingleton<IPriceEstimator>(catalog);
+            services.AddSingleton<IAiRouteSelector>(catalog);
+            services.AddSingleton<IAiModelCatalog>(catalog);
+            services.AddSingleton<OpenAiCompatibleChatProvider>();
+            services.AddSingleton<IAiProviderClient>(provider =>
+                provider.GetRequiredService<OpenAiCompatibleChatProvider>());
+        }
+        else if (openAi is null)
         {
             services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
             services.AddSingleton<BestAvailableRouteSelector>();
