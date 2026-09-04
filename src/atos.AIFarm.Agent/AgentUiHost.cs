@@ -146,6 +146,9 @@ internal sealed class AgentUiHost(
         {
             _controlGate.Release();
         }
+        // Ligar o farm também ressuscita uma sessão que morreu (ex.: erro na
+        // largada antes do retry existir, ou credencial recusada já resolvida).
+        if (acceptJobs) await StartLoopIfBoundAsync();
     }
 
     public async Task SetLimitsAsync(int logicalProcessors, long memoryMegabytes)

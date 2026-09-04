@@ -137,13 +137,34 @@ internal static class AgentApplication
         telemetry.SetBinding(configuration.NodeId, configuration.BaseUrl);
         telemetry.SetPolicy(configuration.EffectivePolicy);
         telemetry.SetPhase("CONECTANDO");
-        var trusted = await EnsureManifestTrustAsync(
-            client,
-            configuration,
-            credentials.Current,
-            configurationStore,
-            credentialStore,
-            linked.Token);
+        // A largada também precisa de retry: um servidor indisponível na
+        // abertura não pode matar a sessão (só Ctrl+C, painel ou auth).
+        (AgentConfiguration Configuration, string VerificationKey) trusted;
+        var trustFailures = 0;
+        while (true)
+        {
+            try
+            {
+                trusted = await EnsureManifestTrustAsync(
+                    client,
+                    configuration,
+                    credentials.Current,
+                    configurationStore,
+                    credentialStore,
+                    linked.Token);
+                break;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or TaskCanceledException &&
+                !linked.IsCancellationRequested)
+            {
+                trustFailures++;
+                var delay = Math.Min(60, Math.Max(5, 5 * (1 << Math.Min(trustFailures - 1, 3))));
+                telemetry.SetPhase("RECONECTANDO", exception.Message);
+                Write("RETRY", $"{exception.Message} // NOVA TENTATIVA={delay}s");
+                await Task.Delay(TimeSpan.FromSeconds(delay), linked.Token);
+            }
+        }
         configuration = trusted.Configuration;
         var manifestVerificationKey = trusted.VerificationKey;
         var worker = AgentWorkerProcessRunner.CreateCurrent();
