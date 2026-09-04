@@ -34,7 +34,8 @@ todos de uma vez.
   (OpenAI ou compatível);
 - as salvaguardas de classificação continuam: o provider compatível é
   externo, então `PRIVADO` nunca chega a ele e a memória da Farm permanece
-  exclusiva do provider local.
+  exclusiva do provider local (revisado pelo ADR 0035: liberação com
+  consentimento explícito por execução).
 
 ## Consequências
 
