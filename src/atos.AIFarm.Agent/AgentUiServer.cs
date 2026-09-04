@@ -11,7 +11,7 @@ namespace atos.AIFarm.Agent;
 
 internal sealed record AgentUiFarmRequest(bool AcceptJobs);
 internal sealed record AgentUiLimitsRequest(int LogicalProcessors, long MemoryMegabytes);
-internal sealed record AgentUiEnrollRequest(string Url, string Code);
+internal sealed record AgentUiEnrollRequest(string Url, string Email, string Code);
 
 /// <summary>
 /// Painel local do Agent: Kestrel preso a 127.0.0.1 com porta aleatória e um
@@ -47,7 +47,7 @@ internal sealed class AgentUiServer(AgentUiHost host) : IDisposable
         app.MapPost(root + "/api/enroll", (AgentUiEnrollRequest request) =>
             ExecuteAsync(async () =>
             {
-                await host.EnrollAsync(request.Url, request.Code);
+                await host.EnrollAsync(request.Url, request.Email, request.Code);
                 await host.RefreshIdentityAsync();
             }));
         app.MapPost(root + "/api/rotate", () =>

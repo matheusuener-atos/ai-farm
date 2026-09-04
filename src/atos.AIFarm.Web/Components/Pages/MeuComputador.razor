@@ -78,52 +78,87 @@
                     plataforma — e o gráfico de desempenho da janela do programa mostra
                     o poder sendo entregue.
                 </p>
-                @foreach (var node in _farm.Nodes.Where(x => x.ConnectionKind == FarmNodeConnectionKind.Agent))
-                {
-                    <div class="home-node-head">
-                        <span class="dot @(node.SharePlatformWork ? "orange" : "hollow")" aria-hidden="true"></span>
-                        <b>@node.Name</b>
-                        <span class="muted">· @(node.SharePlatformWork ? "ajudando a plataforma quando ocioso" : "trabalhando só para você")</span>
-                        <button class="btn" type="button" @onclick="() => ToggleShareAsync(node)" disabled="@_working">
-                            @(node.SharePlatformWork ? "Parar de ajudar" : "Ajudar a plataforma")
-                        </button>
-                    </div>
-                }
-                @if (_farm.Nodes.Any(x => x.ConnectionKind == FarmNodeConnectionKind.Agent))
-                {
-                    <p class="muted">
-                        Ao ajudar a plataforma, seu computador também faz tarefas dela —
-                        sempre do mesmo tipo seguro — e os pontos de trabalho continuam
-                        sendo seus.
-                    </p>
-                }
             }
         </div>
     </section>
 
-    <section class="win" aria-label="Ligar outro computador">
-        <div class="win-title"><span>Colocar um computador para trabalhar</span></div>
+    <section class="win" aria-label="Pool de computadores">
+        <div class="win-title"><span>Pool de computadores</span><span>um assento por máquina</span></div>
         <div class="win-body">
-            <ol class="lite-steps">
-                <li><b>Baixe o programa</b> no computador que vai trabalhar (Windows). Não precisa instalar mais nada.</li>
-                <li><b>Dê dois cliques</b> no programa: uma janela abre no navegador. Gere o código aqui embaixo e cole nela. O código vale uma única vez.</li>
-                <li><b>Aperte FARMAR.</b> A janela mostra em tempo real os trabalhos, o CP e a conta vinculada — e é lá que você pausa, limita ou troca a credencial.</li>
-            </ol>
-            <div class="page-actions">
-                <a class="btn primary" href="/downloads/atos-compute-agent-win-x64.exe" download="atos-compute-agent-win-x64.exe">Baixar o programa</a>
-                <button class="btn" type="button" @onclick="CreateCodeAsync" disabled="@_working">Gerar código</button>
+            <div class="pool-grid">
+                @if (_farm is not null)
+                {
+                    @foreach (var node in _farm.Nodes.Where(x => x.ConnectionKind == FarmNodeConnectionKind.Agent))
+                    {
+                        <article class="pool-card @(node.PendingConfirmation ? "pending" : node.Status == FarmNodeStatus.Online ? "online" : "offline")">
+                            <header>
+                                <span class="dot @(node.PendingConfirmation ? "hollow" : node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
+                                <b>@node.Name</b>
+                            </header>
+                            @if (node.PendingConfirmation)
+                            {
+                                <p class="pool-state">AGUARDANDO CONFIRMAÇÃO</p>
+                                <p class="muted">Digite a chave exibida na janela do programa daquela máquina.</p>
+                                <input class="pool-confirm-input" placeholder="XXXX-XXXX" maxlength="9"
+                                       value="@ConfirmDraft(node.Id)"
+                                       @oninput="e => _confirmDrafts[node.Id] = e.Value?.ToString() ?? string.Empty"
+                                       disabled="@_working" />
+                                <button class="btn primary" type="button" @onclick="() => ConfirmAsync(node)" disabled="@_working">Confirmar</button>
+                            }
+                            else if (node.Status == FarmNodeStatus.Online)
+                            {
+                                <p class="pool-state on">@(node.LiveWorkerCpuPercent is > 1 ? "ENTREGANDO PODER" : "OCIOSO // PRONTO")</p>
+                                <svg class="pool-spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
+                                    <polyline points="@SparkPoints(node.Id)" />
+                                </svg>
+                                <dl class="pool-facts">
+                                    <div><dt>USO AGORA</dt><dd>@((node.LiveWorkerCpuPercent ?? 0).ToString("0"))%</dd></div>
+                                    <div><dt>CP TOTAL</dt><dd>@((node.LifetimeComputeUnitsMilli / 1000d).ToString("N0"))</dd></div>
+                                </dl>
+                            }
+                            else
+                            {
+                                <p class="pool-state">DESLIGADA</p>
+                                <dl class="pool-facts">
+                                    <div><dt>CPU</dt><dd>@node.LogicalProcessors núcleos</dd></div>
+                                    <div><dt>MEMÓRIA</dt><dd>@((node.MemoryBytes / 1024d / 1024 / 1024).ToString("0.0")) GB</dd></div>
+                                    <div><dt>CP TOTAL</dt><dd>@((node.LifetimeComputeUnitsMilli / 1000d).ToString("N0"))</dd></div>
+                                    <div><dt>VISTO</dt><dd>@node.LastSeenAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</dd></div>
+                                </dl>
+                            }
+                            <footer>
+                                <a class="pool-detail-link" href="/pool/@node.Id">Detalhes →</a>
+                                <button class="pool-remove" type="button" @onclick="() => RemoveAsync(node)" disabled="@_working">
+                                    @(_removalArmedNodeId == node.Id ? "Confirmar exclusão?" : "Excluir da rede")
+                                </button>
+                            </footer>
+                        </article>
+                    }
+                }
+                <article class="pool-card pool-seat">
+                    @if (_enrollment is null)
+                    {
+                        <button class="pool-seat-add" type="button" @onclick="CreateCodeAsync" disabled="@_working">
+                            <span class="pool-seat-plus">+</span>
+                            Adicionar um computador
+                        </button>
+                        <p class="muted">Gera o código deste assento. Cada chave aparece uma única vez.</p>
+                    }
+                    else
+                    {
+                        <p class="pool-state">ASSENTO ABERTO // CÓDIGO VALE ATÉ @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm")</p>
+                        <code class="pool-code">@_enrollment.Token</code>
+                        <ol class="lite-steps">
+                            <li><a href="/downloads/atos-compute-agent-win-x64.exe" download="atos-compute-agent-win-x64.exe">Baixe o programa</a> na máquina nova e dê dois cliques.</li>
+                            <li>Na janela: endereço <code>@FarmUrl</code>, o e-mail desta conta e o código acima.</li>
+                            <li>A máquina mostra uma <b>chave de confirmação</b> — digite aqui no card dela para liberar o trabalho.</li>
+                        </ol>
+                    }
+                </article>
             </div>
-            @if (_enrollment is not null)
-            {
-                <div class="farm-enrollment-secret" role="status">
-                    <strong>SEU CÓDIGO // VALE ATÉ @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm")</strong>
-                    <code>@_enrollment.Token</code>
-                    <p>Copie agora: ele não aparece de novo. Cole na janela do programa junto com o endereço <code>@FarmUrl</code> — ou, no terminal: <code>atos-compute-agent-win-x64.exe enroll @FarmUrl</code></p>
-                </div>
-            }
             <p class="muted lite-footnote">
-                Detalhes técnicos (catálogo, evidências, agendamentos) ficam no modo
-                completo, no menu Conta.
+                Chaves nunca são reexibidas: se perder uma, exclua a máquina da rede e
+                adicione de novo. Ao ajudar a plataforma, os pontos continuam sendo seus.
             </p>
         </div>
     </section>
@@ -136,8 +171,71 @@
     private bool _continuousEnabled;
     private string? _error;
     private string? _notice;
+    private readonly Dictionary<Guid, string> _confirmDrafts = [];
+    private Guid? _removalArmedNodeId;
 
     private string FarmUrl => Navigation.BaseUri.TrimEnd('/');
+
+    private string ConfirmDraft(Guid nodeId) =>
+        _confirmDrafts.TryGetValue(nodeId, out var draft) ? draft : string.Empty;
+
+    private string SparkPoints(Guid nodeId)
+    {
+        if (_farm?.NodeCpSeries is null ||
+            !_farm.NodeCpSeries.TryGetValue(nodeId, out var series) ||
+            series.Count == 0)
+            return "0,33 120,33";
+        var peak = Math.Max(1, series.Max());
+        return string.Join(" ", series.Select((value, index) =>
+            $"{index * 120d / Math.Max(1, series.Count - 1):0.#},{33 - value * 30d / peak:0.#}"));
+    }
+
+    private async Task ConfirmAsync(FarmNodeSnapshot node)
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            _farm = await FarmLab.ConfirmNodeAsync(node.Id, ConfirmDraft(node.Id));
+            _confirmDrafts.Remove(node.Id);
+            _notice = $"{node.Name} confirmado! Ele já pode receber trabalho.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task RemoveAsync(FarmNodeSnapshot node)
+    {
+        if (_working) return;
+        if (_removalArmedNodeId != node.Id)
+        {
+            _removalArmedNodeId = node.Id;
+            return;
+        }
+        _working = true;
+        _error = null;
+        _removalArmedNodeId = null;
+        try
+        {
+            _farm = await FarmLab.RemoveNodeAsync(node.Id);
+            _notice = $"{node.Name} foi excluído da rede. O assento ficou livre — para voltar, adicione a máquina de novo.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 

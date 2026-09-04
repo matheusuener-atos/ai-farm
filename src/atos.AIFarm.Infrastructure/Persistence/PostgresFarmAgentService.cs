@@ -55,6 +55,11 @@ internal sealed class PostgresFarmAgentService(
     {
         var normalized = Validate(request);
         if (string.IsNullOrWhiteSpace(token)) return null;
+        // Handshake (ADR 0038): sem e-mail nao ha vinculo — e a checagem vem
+        // ANTES de consumir o codigo de uso unico, para nao queimar por typo.
+        if (string.IsNullOrWhiteSpace(normalized.AccountEmail))
+            throw new ArgumentException(
+                "Informe o e-mail da conta no vínculo — atualize o programa para a versão atual.");
 
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -75,10 +80,27 @@ internal sealed class PostgresFarmAgentService(
 
         var enrollment = await db.FarmAgentEnrollments
             .SingleAsync(x => x.TokenHash == tokenHash, cancellationToken);
+        var ownerEmail = await db.Users.AsNoTracking()
+            .Where(x => x.Id == enrollment.AccountId)
+            .Select(x => x.Email)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (ownerEmail is not null &&
+            !string.Equals(
+                ownerEmail.Trim(),
+                normalized.AccountEmail.Trim(),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            // O codigo ja foi consumido de proposito: um par codigo+e-mail
+            // errado queima o codigo e o dono gera outro no assento.
+            await transaction.CommitAsync(cancellationToken);
+            throw new ArgumentException(
+                "O e-mail informado não corresponde à conta que gerou o código. Gere um novo código no site e confira o e-mail.");
+        }
         var node = await db.FarmNodes
             .SingleOrDefaultAsync(
                 x => x.AccountId == enrollment.AccountId &&
                      x.ConnectionKind == "Agent" &&
+                     x.DecommissionedAtUtc == null &&
                      x.Name == normalized.Name,
                 cancellationToken);
         if (node is null)
@@ -95,6 +117,14 @@ internal sealed class PostgresFarmAgentService(
         }
 
         var credential = CreateSecret("afc");
+        var confirmationCode = FarmAgentSecrets.CreateConfirmationCode();
+        node.ConfirmationCodeHash = FarmAgentSecrets.Hash(
+            FarmAgentSecrets.NormalizeConfirmationCode(confirmationCode));
+        // Todo vinculo (novo ou re-vinculo) nasce pendente: a chave acima
+        // precisa ser digitada no site para o node voltar a farmar.
+        node.ConfirmedAtUtc = null;
+        node.LastWorkerCpuPercent = null;
+        node.LastWorkerMemoryBytes = null;
         node.Name = normalized.Name;
         node.Runtime = normalized.Runtime;
         node.LogicalProcessors = normalized.LogicalProcessors;
@@ -113,7 +143,8 @@ internal sealed class PostgresFarmAgentService(
         node.LastSeenAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new FarmAgentEnrollmentResult(node.Id, credential, HeartbeatIntervalSeconds);
+        return new FarmAgentEnrollmentResult(
+            node.Id, credential, HeartbeatIntervalSeconds, confirmationCode);
     }
 
     public async Task<FarmAgentHeartbeatResult?> HeartbeatAsync(
@@ -153,6 +184,10 @@ internal sealed class PostgresFarmAgentService(
         node.AgentAcceptJobs = normalized.AcceptJobs;
         node.AgentMaxLogicalProcessors = normalized.MaxLogicalProcessors;
         node.AgentMaxMemoryBytes = normalized.MaxMemoryBytes;
+        if (normalized.WorkerCpuPercent is double workerCpu)
+            node.LastWorkerCpuPercent = Math.Clamp(workerCpu, 0, 100d * 1024);
+        if (normalized.WorkerMemoryBytes is long workerMemory)
+            node.LastWorkerMemoryBytes = Math.Max(0, workerMemory);
         node.LastSeenAtUtc = now;
         if (node.Status == FarmNodeStatus.Offline.ToString())
             node.Status = FarmNodeStatus.Online.ToString();
@@ -190,17 +225,19 @@ internal sealed class PostgresFarmAgentService(
         await db.SaveChangesAsync(cancellationToken);
 
         var status = Enum.Parse<FarmNodeStatus>(node.Status);
+        var pendingConfirmation = node.ConfirmedAtUtc is null;
         return new FarmAgentHeartbeatResult(
             node.Id,
             status,
-            status == FarmNodeStatus.Online && node.AgentAcceptJobs,
+            status == FarmNodeStatus.Online && node.AgentAcceptJobs && !pendingConfirmation,
             now,
             HeartbeatIntervalSeconds,
             ActiveHeartbeatIntervalSeconds,
             activeJobIds.FirstOrDefault() == Guid.Empty ? null : activeJobIds[0],
             leaseExpiresAtUtc,
             cancelJobIds.Count > 0,
-            cancelJobIds);
+            cancelJobIds,
+            pendingConfirmation);
     }
 
     public async Task<FarmAgentTrust?> GetTrustAsync(
@@ -266,7 +303,8 @@ internal sealed class PostgresFarmAgentService(
         var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
         if (node is null ||
             node.Status != FarmNodeStatus.Online.ToString() ||
-            !node.AgentAcceptJobs)
+            !node.AgentAcceptJobs ||
+            node.ConfirmedAtUtc is null)
             return null;
         await FarmJobLifecycle.ExpireAsync(
             db,
@@ -805,12 +843,16 @@ internal sealed class PostgresFarmAgentService(
     private static FarmAgentEnrollmentRequest Validate(FarmAgentEnrollmentRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var accountEmail = request.AccountEmail?.Trim() ?? string.Empty;
+        if (accountEmail.Length > 320)
+            throw new ArgumentException("E-mail da conta longo demais.", nameof(request.AccountEmail));
         return new FarmAgentEnrollmentRequest(
             Required(request.Name, nameof(request.Name), 3, 160),
             Required(request.Runtime, nameof(request.Runtime), 3, 500),
             Positive(request.LogicalProcessors, nameof(request.LogicalProcessors), 1024),
             Positive(request.MemoryBytes, nameof(request.MemoryBytes), 16L * 1024 * 1024 * 1024 * 1024),
-            Required(request.AgentVersion, nameof(request.AgentVersion), 1, 80));
+            Required(request.AgentVersion, nameof(request.AgentVersion), 1, 80),
+            accountEmail);
     }
 
     private static FarmAgentHeartbeatRequest Validate(FarmAgentHeartbeatRequest request)

@@ -1,0 +1,114 @@
+@page "/pool/{NodeId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFarmLabService FarmLab
+
+<PageTitle>Computador da pool // atos AI Farm</PageTitle>
+
+@if (_node is null)
+{
+    <div class="page-head">
+        <p class="eyebrow">atos:/POOL</p>
+        <h1>@(_loaded ? "Computador não encontrado" : "Carregando…")</h1>
+        @if (_loaded)
+        {
+            <p class="muted">Este assento não existe mais nesta conta. <a href="/meu-computador">Voltar à pool</a></p>
+        }
+    </div>
+}
+else
+{
+    <div class="page-head">
+        <p class="eyebrow">atos:/POOL/@_node.Name</p>
+        <h1>@_node.Name</h1>
+        <p>
+            @(_node.PendingConfirmation
+                ? "AGUARDANDO CONFIRMAÇÃO"
+                : _node.Status == FarmNodeStatus.Online ? "ONLINE" : _node.Status == FarmNodeStatus.Paused ? "PAUSADO" : "DESLIGADA")
+            // @_node.ConnectionKind.ToString().ToUpperInvariant()
+            // <a href="/meu-computador">← voltar à pool</a>
+        </p>
+    </div>
+
+    @if (_error is not null)
+    {
+        <p class="error" role="alert">@_error</p>
+    }
+
+    <section class="win">
+        <div class="win-title"><span>Identidade técnica</span></div>
+        <div class="win-body">
+            <dl class="pool-facts pool-facts-wide">
+                <div><dt>CPU</dt><dd>@_node.LogicalProcessors núcleos (@_node.AuthorizedLogicalProcessors autorizados)</dd></div>
+                <div><dt>MEMÓRIA</dt><dd>@((_node.MemoryBytes / 1024d / 1024 / 1024).ToString("0.0")) GB (@((_node.AuthorizedMemoryBytes / 1024d / 1024).ToString("N0")) MB autorizados)</dd></div>
+                <div><dt>USO AGORA</dt><dd>@(_node.LiveWorkerCpuPercent is double cpu ? $"{cpu:0}% · {(_node.LiveWorkerMemoryBytes ?? 0) / 1024d / 1024:0.0} MB" : "—")</dd></div>
+                <div><dt>CP TOTAL</dt><dd>@((_node.LifetimeComputeUnitsMilli / 1000d).ToString("N0")) CP</dd></div>
+                <div><dt>VERSÃO</dt><dd>@(_node.AgentVersion ?? "—")</dd></div>
+                <div><dt>VERIFICAÇÃO</dt><dd>@_node.VerificationLevel.ToString().ToUpperInvariant()</dd></div>
+                <div><dt>VISTO POR ÚLTIMO</dt><dd>@_node.LastSeenAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</dd></div>
+                <div><dt>PLATAFORMA</dt><dd>@(_node.SharePlatformWork ? "ajudando quando ocioso" : "só esta conta")</dd></div>
+            </dl>
+            <p class="muted">RUNTIME // @_node.Runtime</p>
+        </div>
+    </section>
+
+    <section class="win">
+        <div class="win-title"><span>Últimos trabalhos desta máquina</span><span>@_jobs.Count exibidos</span></div>
+        <div class="win-body">
+            @if (_jobs.Count == 0)
+            {
+                <p class="muted">Nenhum trabalho registrado ainda.</p>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr><th>QUANDO</th><th>WORKLOAD</th><th>STATUS</th><th>CP</th><th>DURAÇÃO</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var job in _jobs)
+                            {
+                                <tr>
+                                    <td>@job.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</td>
+                                    <td>@job.WorkloadVersion</td>
+                                    <td>@job.Status.ToString().ToUpperInvariant()</td>
+                                    <td>@((job.ComputeUnitsMilli / 1000d).ToString("0.###"))</td>
+                                    <td>@(job.DurationMilliseconds is long duration ? $"{duration} ms" : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public Guid NodeId { get; set; }
+
+    private FarmNodeSnapshot? _node;
+    private IReadOnlyList<FarmJobSnapshot> _jobs = [];
+    private bool _loaded;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            var dashboard = await FarmLab.GetDashboardAsync();
+            _node = dashboard.Nodes.FirstOrDefault(x => x.Id == NodeId);
+            _jobs = _node is null ? [] : await FarmLab.GetNodeJobsAsync(NodeId);
+            _error = null;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível carregar este computador agora.";
+        }
+        finally
+        {
+            _loaded = true;
+        }
+    }
+}

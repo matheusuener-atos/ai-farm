@@ -22,7 +22,7 @@ public sealed class PostgresContinuousFarmTests
             await provider.InitializeAIFarmAsync();
             await provider.GetRequiredService<IContinuousFarmModeService>().SetAsync(true);
             var agents = provider.GetRequiredService<IFarmAgentService>();
-            var linked = await EnrollAsync(agents, "CONTINUOUS-PC");
+            var linked = await EnrollAsync(provider, "CONTINUOUS-PC");
 
             // Fila vazia + farm contínua ligada: o claim cria e oferece um
             // marathon pinado no próprio node.
@@ -69,7 +69,7 @@ public sealed class PostgresContinuousFarmTests
             var agents = provider.GetRequiredService<IFarmAgentService>();
 
             // Conta sem opt-in: ocioso continua ocioso.
-            var withoutOptIn = await EnrollAsync(agents, "CONTINUOUS-OFF");
+            var withoutOptIn = await EnrollAsync(provider, "CONTINUOUS-OFF");
             Assert.Null(await agents.ClaimJobAsync(withoutOptIn.Credential));
 
             // Opt-in ligado, mas binário antigo: o top-up não acontece.
@@ -79,7 +79,9 @@ public sealed class PostgresContinuousFarmTests
                 enrollment.Token,
                 new FarmAgentEnrollmentRequest(
                     "CONTINUOUS-OLD", ".NET 10 // TEST", 4, 512L * 1024 * 1024,
-                    "atos-agent/0.1.0")));
+                    "atos-agent/0.1.0", "teste@atos.local")));
+            await provider.GetRequiredService<IFarmLabService>()
+                .ConfirmNodeAsync(outdated.NodeId, outdated.ConfirmationCode!);
             Assert.NotNull(await agents.HeartbeatAsync(outdated.Credential,
                 new FarmAgentHeartbeatRequest(
                     ".NET 10 // TEST", 4, 512L * 1024 * 1024,
@@ -90,14 +92,17 @@ public sealed class PostgresContinuousFarmTests
     }
 
     private static async Task<FarmAgentEnrollmentResult> EnrollAsync(
-        IFarmAgentService agents, string name)
+        IServiceProvider provider, string name)
     {
+        var agents = provider.GetRequiredService<IFarmAgentService>();
         var enrollment = await agents.CreateEnrollmentAsync();
         var linked = Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
             enrollment.Token,
             new FarmAgentEnrollmentRequest(
                 name, ".NET 10 // TEST", 4, 512L * 1024 * 1024,
-                FarmAgentProtocol.CurrentAgentVersion)));
+                FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
+        await provider.GetRequiredService<IFarmLabService>()
+            .ConfirmNodeAsync(linked.NodeId, linked.ConfirmationCode!);
         Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
             new FarmAgentHeartbeatRequest(
                 ".NET 10 // TEST", 4, 512L * 1024 * 1024,

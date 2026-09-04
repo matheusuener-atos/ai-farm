@@ -24,8 +24,8 @@ public sealed class PostgresFarmDemandFailoverTests
             var lab = provider.GetRequiredService<IFarmLabService>();
             await lab.SetNodeStatusAsync(FarmNodeStatus.Paused);
             var agents = provider.GetRequiredService<IFarmAgentService>();
-            var first = await EnrollAsync(agents, "FAILOVER-A", 128L * 1024 * 1024);
-            var second = await EnrollAsync(agents, "FAILOVER-B", 256L * 1024 * 1024);
+            var first = await EnrollAsync(provider, "FAILOVER-A", 128L * 1024 * 1024);
+            var second = await EnrollAsync(provider, "FAILOVER-B", 256L * 1024 * 1024);
             var byNode = new Dictionary<Guid, FarmAgentEnrollmentResult>
             {
                 [first.NodeId] = first,
@@ -119,7 +119,7 @@ public sealed class PostgresFarmDemandFailoverTests
             var lab = provider.GetRequiredService<IFarmLabService>();
             await lab.SetNodeStatusAsync(FarmNodeStatus.Paused);
             var agents = provider.GetRequiredService<IFarmAgentService>();
-            var linked = await EnrollAsync(agents, "BUDGET-A", 128L * 1024 * 1024);
+            var linked = await EnrollAsync(provider, "BUDGET-A", 128L * 1024 * 1024);
             var queue = provider.GetRequiredService<IFarmDemandQueueService>();
             var dispatcher = provider.GetRequiredService<IFarmDemandDispatcher>();
             var demand = await queue.SubmitAsync(new FarmDemandRequest(
@@ -154,14 +154,17 @@ public sealed class PostgresFarmDemandFailoverTests
     }
 
     private static async Task<FarmAgentEnrollmentResult> EnrollAsync(
-        IFarmAgentService agents, string name, long maxMemoryBytes)
+        IServiceProvider provider, string name, long maxMemoryBytes)
     {
+        var agents = provider.GetRequiredService<IFarmAgentService>();
         var enrollment = await agents.CreateEnrollmentAsync();
         var linked = Assert.IsType<FarmAgentEnrollmentResult>(await agents.EnrollAsync(
             enrollment.Token,
             new FarmAgentEnrollmentRequest(
                 name, ".NET 10 // TEST", 4, 512L * 1024 * 1024,
-                FarmAgentProtocol.CurrentAgentVersion)));
+                FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
+        await provider.GetRequiredService<IFarmLabService>()
+            .ConfirmNodeAsync(linked.NodeId, linked.ConfirmationCode!);
         Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
             new FarmAgentHeartbeatRequest(
                 ".NET 10 // TEST", 4, 512L * 1024 * 1024,

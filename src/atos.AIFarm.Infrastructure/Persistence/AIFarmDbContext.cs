@@ -272,9 +272,11 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             });
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => x.AccountId);
+            // Unicidade de nome só entre assentos ATIVOS: descomissionar
+            // libera o nome para um novo vínculo da mesma máquina (ADR 0038).
             entity.HasIndex(x => new { x.AccountId, x.Name })
                 .IsUnique()
-                .HasFilter("\"ConnectionKind\" = 'Agent'");
+                .HasFilter("\"ConnectionKind\" = 'Agent' AND \"DecommissionedAtUtc\" IS NULL");
             entity.HasIndex(x => x.AccountId)
                 .HasDatabaseName("UX_farm_nodes_account_embedded")
                 .IsUnique()
@@ -643,6 +645,15 @@ public sealed class FarmNodeRecord
     public string? AgentVersion { get; set; }
     public string? AgentCredentialHash { get; set; }
     public DateTimeOffset? AgentCredentialIssuedAtUtc { get; set; }
+    // Handshake de mão dupla (ADR 0038): a chave de confirmação é digitada
+    // no site; o node só farma depois de ConfirmedAtUtc. Descomissionado
+    // nunca volta a autenticar — o assento é liberado e o histórico fica.
+    public string? ConfirmationCodeHash { get; set; }
+    public DateTimeOffset? ConfirmedAtUtc { get; set; }
+    public DateTimeOffset? DecommissionedAtUtc { get; set; }
+    // Última amostra de uso enviada no heartbeat (ADR 0039).
+    public double? LastWorkerCpuPercent { get; set; }
+    public long? LastWorkerMemoryBytes { get; set; }
     public bool AgentAcceptJobs { get; set; } = true;
     // Opt-in explícito do dono: o node pode receber demandas da conta da
     // plataforma (ADR 0031). Nunca vale para nodes embedded.

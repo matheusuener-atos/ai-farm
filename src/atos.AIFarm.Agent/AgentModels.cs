@@ -193,18 +193,22 @@ internal static class AgentInventory
     public static int LogicalProcessors => Math.Max(1, Environment.ProcessorCount);
     public static long MemoryBytes => Memory();
 
-    public static FarmAgentEnrollmentRequest Enrollment() => new(
+    public static FarmAgentEnrollmentRequest Enrollment(string accountEmail) => new(
         Environment.MachineName.ToUpperInvariant(),
         Runtime(),
         LogicalProcessors,
         MemoryBytes,
-        Version);
+        Version,
+        accountEmail);
 
     public static FarmAgentHeartbeatRequest Heartbeat(
         AgentLocalPolicy? policy = null,
         IReadOnlyList<Guid>? activeJobIds = null)
     {
         var effective = AgentLocalPolicy.Normalize(policy ?? AgentLocalPolicy.Default());
+        // O uso vivo dos workers viaja no heartbeat para os cards da pool
+        // (ADR 0039) — a mesma medida da aba Desempenho local.
+        var (workerCpuPercent, workerMemoryBytes) = AgentTelemetry.Instance.LiveLoad();
         return new(
         Runtime(),
         LogicalProcessors,
@@ -214,7 +218,9 @@ internal static class AgentInventory
         effective.MaxLogicalProcessors,
         effective.MaxMemoryBytes,
         activeJobIds?.FirstOrDefault(),
-        activeJobIds);
+        activeJobIds,
+        Math.Round(workerCpuPercent, 1),
+        workerMemoryBytes);
     }
 
     private static string Runtime() =>
