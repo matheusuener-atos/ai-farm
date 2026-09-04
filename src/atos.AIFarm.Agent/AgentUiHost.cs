@@ -194,16 +194,19 @@ internal sealed class AgentUiHost(
         }
     }
 
-    public async Task EnrollAsync(string baseUrl, string enrollmentToken)
+    public async Task EnrollAsync(string baseUrl, string accountEmail, string enrollmentToken)
     {
         await _controlGate.WaitAsync();
         try
         {
             if (string.IsNullOrWhiteSpace(enrollmentToken))
                 throw new ArgumentException("Código de vínculo obrigatório.");
+            if (string.IsNullOrWhiteSpace(accountEmail))
+                throw new ArgumentException("Informe o e-mail da conta.");
             var normalized = AgentEndpoint.Normalize(baseUrl);
             var enrollment = await client.EnrollAsync(
-                normalized, enrollmentToken.Trim(), _shutdown.Token);
+                normalized, enrollmentToken.Trim(), accountEmail.Trim(), _shutdown.Token);
+            AgentTelemetry.Instance.SetPendingConfirmationKey(enrollment.ConfirmationCode);
             var target = $"atos.ai-farm.agent/{enrollment.NodeId:N}";
             credentialStore.Save(target, enrollment.NodeId.ToString(), enrollment.Credential);
             await configurationStore.SaveAsync(new AgentConfiguration(

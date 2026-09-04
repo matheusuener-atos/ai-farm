@@ -26,7 +26,7 @@ public sealed class PostgresFarmAgentCredentialTests
                 enrollment.Token,
                 new FarmAgentEnrollmentRequest(
                     "ROTATION-PC", ".NET 10 // TEST", 4, 512L * 1024 * 1024,
-                    FarmAgentProtocol.CurrentAgentVersion)));
+                    FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
 
             var before = Assert.IsType<FarmAgentIdentity>(
                 await agents.GetIdentityAsync(linked.Credential));

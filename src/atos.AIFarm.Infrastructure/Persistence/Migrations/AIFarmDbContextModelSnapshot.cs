@@ -1330,6 +1330,12 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
+                    b.Property<string>("ConfirmationCodeHash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("ConnectionKind")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1340,8 +1346,17 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("DecommissionedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("LastSeenAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<double?>("LastWorkerCpuPercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<long?>("LastWorkerMemoryBytes")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("LogicalProcessors")
                         .HasColumnType("integer");
@@ -1393,7 +1408,7 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("AccountId", "Name")
                         .IsUnique()
-                        .HasFilter("\"ConnectionKind\" = 'Agent'");
+                        .HasFilter("\"ConnectionKind\" = 'Agent' AND \"DecommissionedAtUtc\" IS NULL");
 
                     b.ToTable("farm_nodes", "aifarm", t =>
                         {

@@ -108,6 +108,81 @@ internal sealed class PostgresFarmLabService(
         return await BuildDashboardAsync(db, accountId, cancellationToken);
     }
 
+    public async Task<FarmDashboard> ConfirmNodeAsync(
+        Guid nodeId,
+        string confirmationCode,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.Id == nodeId && x.AccountId == identity.AccountId &&
+                 x.DecommissionedAtUtc == null,
+            cancellationToken)
+            ?? throw new InvalidOperationException("Node não encontrado para esta conta.");
+        if (node.ConnectionKind != "Agent" || node.ConfirmationCodeHash is null)
+            throw new InvalidOperationException("Este computador não está aguardando confirmação.");
+        if (node.ConfirmedAtUtc is not null)
+            return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
+        var normalized = confirmationCode?.Trim().ToUpperInvariant().Replace("-", "") ?? string.Empty;
+        if (normalized.Length == 0 ||
+            !string.Equals(
+                node.ConfirmationCodeHash,
+                FarmAgentSecrets.Hash(normalized),
+                StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Chave de confirmação incorreta. Confira a chave exibida na janela do programa.");
+        node.ConfirmedAtUtc = timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
+    }
+
+    public async Task<FarmDashboard> RemoveNodeAsync(
+        Guid nodeId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await db.FarmNodes.SingleOrDefaultAsync(
+            x => x.Id == nodeId && x.AccountId == identity.AccountId &&
+                 x.DecommissionedAtUtc == null,
+            cancellationToken)
+            ?? throw new InvalidOperationException("Node não encontrado para esta conta.");
+        if (node.ConnectionKind != "Agent")
+            throw new InvalidOperationException("O computador embutido da plataforma não pode ser removido.");
+        // Descomissionamento (ADR 0038): credencial revogada para sempre; o
+        // histórico de jobs permanece e o assento fica livre para re-vínculo.
+        node.DecommissionedAtUtc = timeProvider.GetUtcNow();
+        node.AgentCredentialHash = null;
+        node.ConfirmationCodeHash = null;
+        node.AgentAcceptJobs = false;
+        node.SharePlatformWork = false;
+        node.Status = FarmNodeStatus.Paused.ToString();
+        await db.SaveChangesAsync(cancellationToken);
+        return await BuildDashboardAsync(db, identity.AccountId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<FarmJobSnapshot>> GetNodeJobsAsync(
+        Guid nodeId,
+        int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var bounded = Math.Clamp(limit, 1, 50);
+        var jobs = await db.FarmJobs
+            .Where(x => x.AccountId == identity.AccountId && x.NodeId == nodeId)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(bounded)
+            .ToArrayAsync(cancellationToken);
+        var ids = jobs.Select(x => x.Id).ToArray();
+        var events = await db.FarmJobEvents
+            .Where(x => ids.Contains(x.JobId))
+            .OrderBy(x => x.Sequence)
+            .ToArrayAsync(cancellationToken);
+        return jobs.Select(x => ToSnapshot(x, events.Where(e => e.JobId == x.Id))).ToArray();
+    }
+
     public Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default) =>
         RunWorkloadAsync(FarmWorkloadCatalog.DefaultId, cancellationToken);
 
@@ -643,8 +718,12 @@ internal sealed class PostgresFarmLabService(
         // explicitamente; embedded nunca executa trabalho da plataforma. Um
         // node-alvo (farm contínua) restringe a disputa a ele mesmo — as
         // checagens de capacidade e confiabilidade continuam valendo.
+        // Pendente (ADR 0038) CONTINUA na lista: ocupa o assento e mantém o
+        // embedded suprimido — o bloqueio vem do acceptJobs=false do snapshot.
+        // Descomissionado sai de verdade: o assento não existe mais.
         var nodes = await db.FarmNodes
             .Where(x => x.AccountId == accountId &&
+                x.DecommissionedAtUtc == null &&
                 (targetNodeId == null || x.Id == targetNodeId) &&
                 (!platformPool ||
                  (x.ConnectionKind == "Agent" && x.SharePlatformWork)))
@@ -732,7 +811,8 @@ internal sealed class PostgresFarmLabService(
         Guid accountId,
         CancellationToken cancellationToken)
     {
-        var nodes = await db.FarmNodes.Where(x => x.AccountId == accountId)
+        var nodes = await db.FarmNodes.Where(x =>
+                x.AccountId == accountId && x.DecommissionedAtUtc == null)
             .OrderByDescending(x => x.ConnectionKind == "Agent")
             .ThenBy(x => x.CreatedAtUtc)
             .ToArrayAsync(cancellationToken);
@@ -747,10 +827,42 @@ internal sealed class PostgresFarmLabService(
             .Where(x => ids.Contains(x.JobId))
             .OrderBy(x => x.Sequence)
             .ToArrayAsync(cancellationToken);
+        var lifetimeByNode = await db.FarmJobs
+            .Where(x => x.AccountId == accountId && x.Status == "Completed")
+            .GroupBy(x => x.NodeId)
+            .Select(group => new { NodeId = group.Key, Milli = group.Sum(x => x.ComputeUnitsMilli) })
+            .ToDictionaryAsync(x => x.NodeId, x => x.Milli, cancellationToken);
+        // Sparkline dos cards (ADR 0039): CP verificado por minuto, 30 min.
+        var seriesNowUtc = timeProvider.GetUtcNow();
+        var seriesStartUtc = seriesNowUtc.AddMinutes(-30);
+        var seriesJobs = await db.FarmJobs.AsNoTracking()
+            .Where(x => x.AccountId == accountId &&
+                        x.Status == "Completed" &&
+                        x.FinishedAtUtc != null &&
+                        x.FinishedAtUtc > seriesStartUtc)
+            .Select(x => new { x.NodeId, x.FinishedAtUtc, x.ComputeUnitsMilli })
+            .ToArrayAsync(cancellationToken);
+        var nodeCpSeries = seriesJobs
+            .GroupBy(x => x.NodeId)
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var buckets = new long[30];
+                    foreach (var job in group)
+                    {
+                        var minute = (int)Math.Clamp(
+                            Math.Floor((job.FinishedAtUtc!.Value - seriesStartUtc).TotalMinutes),
+                            0, 29);
+                        buckets[minute] += job.ComputeUnitsMilli;
+                    }
+                    return (IReadOnlyList<long>)buckets;
+                });
         return new FarmDashboard(
-            ToSnapshot(node),
+            ToSnapshot(node, lifetimeByNode.GetValueOrDefault(node.Id)),
             jobs.Select(x => ToSnapshot(x, events.Where(e => e.JobId == x.Id))).ToArray(),
-            nodes.Select(ToSnapshot).ToArray());
+            nodes.Select(x => ToSnapshot(x, lifetimeByNode.GetValueOrDefault(x.Id))).ToArray(),
+            nodeCpSeries);
     }
 
     private async Task<FarmJobSnapshot> LoadJobAsync(
@@ -852,7 +964,7 @@ internal sealed class PostgresFarmLabService(
             OccurredAtUtc = occurredAtUtc
         });
 
-    private FarmNodeSnapshot ToSnapshot(FarmNodeRecord node)
+    private FarmNodeSnapshot ToSnapshot(FarmNodeRecord node, long lifetimeComputeUnitsMilli = 0)
     {
         var connectionKind = Enum.TryParse<FarmNodeConnectionKind>(node.ConnectionKind, out var parsedKind)
             ? parsedKind
@@ -861,7 +973,12 @@ internal sealed class PostgresFarmLabService(
             timeProvider.GetUtcNow() - node.LastSeenAtUtc <= AgentHeartbeatTolerance;
         var persistedStatus = Enum.Parse<FarmNodeStatus>(node.Status);
         var effectiveStatus = heartbeatFresh ? persistedStatus : FarmNodeStatus.Offline;
+        // Assento pendente (ADR 0038): vinculado, mas o dono ainda nao digitou
+        // a chave de confirmacao no site - nao aceita trabalho.
+        var pendingConfirmation = connectionKind == FarmNodeConnectionKind.Agent &&
+            node.ConfirmedAtUtc is null;
         var acceptJobs = effectiveStatus == FarmNodeStatus.Online &&
+            !pendingConfirmation &&
             (connectionKind == FarmNodeConnectionKind.Embedded || node.AgentAcceptJobs);
         return new FarmNodeSnapshot(
             node.Id,
@@ -880,7 +997,11 @@ internal sealed class PostgresFarmLabService(
             node.AgentMaxMemoryBytes ?? node.MemoryBytes,
             node.VerifiedProfileHash,
             node.ProfileVerifiedAtUtc,
-            node.SharePlatformWork);
+            node.SharePlatformWork,
+            pendingConfirmation,
+            heartbeatFresh ? node.LastWorkerCpuPercent : null,
+            heartbeatFresh ? node.LastWorkerMemoryBytes : null,
+            lifetimeComputeUnitsMilli);
     }
 
     internal FarmJobSnapshot ToSnapshot(

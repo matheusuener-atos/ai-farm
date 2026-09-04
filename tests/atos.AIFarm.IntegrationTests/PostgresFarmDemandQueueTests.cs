@@ -105,6 +105,7 @@ public sealed class PostgresFarmDemandQueueTests
                     AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
                     AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
                     AgentCredentialIssuedAtUtc = clock.GetUtcNow(),
+                    ConfirmedAtUtc = clock.GetUtcNow(),
                     AgentAcceptJobs = true,
                     AgentMaxLogicalProcessors = 1,
                     AgentMaxMemoryBytes = 256L * 1024 * 1024,
@@ -211,7 +212,8 @@ public sealed class PostgresFarmDemandQueueTests
                     enrollment.Token,
                     new FarmAgentEnrollmentRequest(
                         name, ".NET 10 // TEST", 4, 512L * 1024 * 1024,
-                        FarmAgentProtocol.CurrentAgentVersion)));
+                        FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
+                await lab.ConfirmNodeAsync(linked.NodeId, linked.ConfirmationCode!);
                 Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
                     new FarmAgentHeartbeatRequest(
                         ".NET 10 // TEST", 4, 512L * 1024 * 1024,
@@ -297,7 +299,8 @@ public sealed class PostgresFarmDemandQueueTests
                 enrollment.Token,
                 new FarmAgentEnrollmentRequest(
                     "MULTI-SLOT-A", ".NET 10 // TEST", 4, 1024L * 1024 * 1024,
-                    FarmAgentProtocol.CurrentAgentVersion)));
+                    FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
+            await lab.ConfirmNodeAsync(linked.NodeId, linked.ConfirmationCode!);
             Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
                 new FarmAgentHeartbeatRequest(
                     ".NET 10 // TEST", 4, 1024L * 1024 * 1024,
@@ -416,6 +419,7 @@ public sealed class PostgresFarmDemandQueueTests
             AgentVersion = FarmAgentProtocol.CurrentAgentVersion,
             AgentCredentialHash = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"),
             AgentCredentialIssuedAtUtc = now,
+            ConfirmedAtUtc = now,
             AgentAcceptJobs = true,
             AgentMaxLogicalProcessors = 1,
             AgentMaxMemoryBytes = authorizedMemory,

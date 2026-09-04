@@ -21,7 +21,7 @@ public enum FarmRemoteJobRejectionKind { Policy, Timeout, Cancelled }
 
 public static class FarmAgentProtocol
 {
-    public const string CurrentAgentVersion = "atos-agent/0.9.0";
+    public const string CurrentAgentVersion = "atos-agent/0.10.0";
 }
 
 public static class FarmWorkerEnforcement
@@ -55,7 +55,11 @@ public sealed record FarmNodeSnapshot(
     long AuthorizedMemoryBytes,
     string? VerifiedProfileHash,
     DateTimeOffset? ProfileVerifiedAtUtc,
-    bool SharePlatformWork = false);
+    bool SharePlatformWork = false,
+    bool PendingConfirmation = false,
+    double? LiveWorkerCpuPercent = null,
+    long? LiveWorkerMemoryBytes = null,
+    long LifetimeComputeUnitsMilli = 0);
 
 public sealed record FarmAgentEnrollment(
     Guid Id,
@@ -67,12 +71,14 @@ public sealed record FarmAgentEnrollmentRequest(
     string Runtime,
     int LogicalProcessors,
     long MemoryBytes,
-    string AgentVersion);
+    string AgentVersion,
+    string AccountEmail = "");
 
 public sealed record FarmAgentEnrollmentResult(
     Guid NodeId,
     string Credential,
-    int HeartbeatIntervalSeconds);
+    int HeartbeatIntervalSeconds,
+    string? ConfirmationCode = null);
 
 public sealed record FarmAgentHeartbeatRequest(
     string Runtime,
@@ -83,7 +89,9 @@ public sealed record FarmAgentHeartbeatRequest(
     int MaxLogicalProcessors = 0,
     long MaxMemoryBytes = 0,
     Guid? ActiveJobId = null,
-    IReadOnlyList<Guid>? ActiveJobIds = null);
+    IReadOnlyList<Guid>? ActiveJobIds = null,
+    double? WorkerCpuPercent = null,
+    long? WorkerMemoryBytes = null);
 
 public sealed record FarmAgentHeartbeatResult(
     Guid NodeId,
@@ -95,7 +103,8 @@ public sealed record FarmAgentHeartbeatResult(
     Guid? ActiveJobId,
     DateTimeOffset? LeaseExpiresAtUtc,
     bool CancelActiveJob,
-    IReadOnlyList<Guid>? CancelActiveJobIds = null);
+    IReadOnlyList<Guid>? CancelActiveJobIds = null,
+    bool PendingConfirmation = false);
 
 public sealed record FarmAgentClaimRequest(IReadOnlyList<Guid>? ActiveJobIds = null);
 
@@ -223,7 +232,10 @@ public sealed record FarmJobSnapshot(
 public sealed record FarmDashboard(
     FarmNodeSnapshot Node,
     IReadOnlyList<FarmJobSnapshot> RecentJobs,
-    IReadOnlyList<FarmNodeSnapshot>? PoolNodes = null)
+    IReadOnlyList<FarmNodeSnapshot>? PoolNodes = null,
+    // CP verificado por minuto (últimos 30 min) por node — a sparkline dos
+    // cards da pool (ADR 0039). Índice 0 = minuto mais antigo.
+    IReadOnlyDictionary<Guid, IReadOnlyList<long>>? NodeCpSeries = null)
 {
     public IReadOnlyList<FarmNodeSnapshot> Nodes => PoolNodes ?? [Node];
     public int OnlineNodeCount => Nodes.Count(x => x.Status == FarmNodeStatus.Online);
@@ -247,6 +259,17 @@ public interface IFarmLabService
     Task<FarmDashboard> SetNodeSharingAsync(
         Guid nodeId,
         bool sharePlatformWork,
+        CancellationToken cancellationToken = default);
+    Task<FarmDashboard> ConfirmNodeAsync(
+        Guid nodeId,
+        string confirmationCode,
+        CancellationToken cancellationToken = default);
+    Task<FarmDashboard> RemoveNodeAsync(
+        Guid nodeId,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FarmJobSnapshot>> GetNodeJobsAsync(
+        Guid nodeId,
+        int limit = 20,
         CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunBenchmarkAsync(CancellationToken cancellationToken = default);
     Task<FarmJobSnapshot> RunWorkloadAsync(

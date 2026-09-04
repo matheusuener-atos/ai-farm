@@ -37,7 +37,8 @@ public sealed class PostgresFarmPlatformPoolTests
                 enrollment.Token,
                 new FarmAgentEnrollmentRequest(
                     "POOL-WORKER-01", ".NET 10 // TEST", 4, 512L * 1024 * 1024,
-                    FarmAgentProtocol.CurrentAgentVersion)));
+                    FarmAgentProtocol.CurrentAgentVersion, "teste@atos.local")));
+            await workerLab.ConfirmNodeAsync(linked.NodeId, linked.ConfirmationCode!);
             Assert.NotNull(await workerAgents.HeartbeatAsync(linked.Credential,
                 new FarmAgentHeartbeatRequest(
                     ".NET 10 // TEST", 4, 512L * 1024 * 1024,

@@ -45,7 +45,8 @@ internal sealed record AgentTelemetrySnapshot(
     FarmAgentIdentity? Identity,
     IReadOnlyList<AgentTelemetryActiveJob> ActiveJobs,
     IReadOnlyList<AgentTelemetryLogEntry> Log,
-    IReadOnlyList<AgentUtilizationSample> Utilization);
+    IReadOnlyList<AgentUtilizationSample> Utilization,
+    string? PendingConfirmationKey);
 
 /// <summary>
 /// Estado observável da sessão do Agent, compartilhado entre o loop de
@@ -80,6 +81,7 @@ internal sealed class AgentTelemetry
     private long _workerCpuMilliseconds;
     private long _peakWorkerMemoryBytes;
     private FarmAgentIdentity? _identity;
+    private string? _pendingConfirmationKey;
 
     private sealed record WorkerSample(
         long WorkingSetBytes,
@@ -137,6 +139,11 @@ internal sealed class AgentTelemetry
     public void SetIdentity(FarmAgentIdentity? identity)
     {
         lock (_gate) _identity = identity;
+    }
+
+    public void SetPendingConfirmationKey(string? key)
+    {
+        lock (_gate) _pendingConfirmationKey = key;
     }
 
     public void JobStarted(Guid jobId, string workloadVersion, int logicalProcessors, long memoryBytes)
@@ -233,6 +240,11 @@ internal sealed class AgentTelemetry
         }
     }
 
+    public (double CpuPercent, long MemoryBytes) LiveLoad()
+    {
+        lock (_gate) return LiveWorkerLoad(DateTimeOffset.UtcNow);
+    }
+
     public AgentTelemetrySnapshot Snapshot()
     {
         lock (_gate)
@@ -264,7 +276,8 @@ internal sealed class AgentTelemetry
                 _identity,
                 [.. _activeJobs.Values.OrderBy(x => x.StartedAtUtc)],
                 [.. _log],
-                [.. _utilization]);
+                [.. _utilization],
+                _pendingConfirmationKey);
         }
     }
 
@@ -292,6 +305,7 @@ internal sealed class AgentTelemetry
             _workerCpuMilliseconds = 0;
             _peakWorkerMemoryBytes = 0;
             _identity = null;
+            _pendingConfirmationKey = null;
         }
     }
 }

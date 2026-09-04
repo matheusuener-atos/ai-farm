@@ -16,13 +16,14 @@ internal sealed class AgentClient(HttpClient httpClient)
     public async Task<FarmAgentEnrollmentResult> EnrollAsync(
         string baseUrl,
         string enrollmentToken,
+        string accountEmail,
         CancellationToken cancellationToken)
     {
         using var message = new HttpRequestMessage(
             HttpMethod.Post,
             $"{AgentEndpoint.Normalize(baseUrl)}/api/farm/agents/enroll")
         {
-            Content = JsonContent.Create(AgentInventory.Enrollment(), options: JsonOptions)
+            Content = JsonContent.Create(AgentInventory.Enrollment(accountEmail), options: JsonOptions)
         };
         message.Headers.Add("X-Enrollment-Token", enrollmentToken);
         using var response = await httpClient.SendAsync(message, cancellationToken);
