@@ -445,6 +445,13 @@ internal static class AgentApplication
                     workerResult.Enforcement,
                     workerResult.OutputPayload),
                 execution.Token);
+            if (acknowledgement is null)
+            {
+                telemetry.JobFinished(offer.JobId, false, 0,
+                    workerResult.ProcessorTimeMilliseconds, workerResult.PeakMemoryBytes);
+                Write("JOB", $"SUPERSEDED // {offer.JobId:N} // o servidor encerrou o job antes do resultado.");
+                return;
+            }
             telemetry.JobFinished(
                 offer.JobId,
                 acknowledgement.Verified,
@@ -458,26 +465,19 @@ internal static class AgentApplication
         catch (OperationCanceledException) when (!execution.IsCancellationRequested)
         {
             telemetry.JobFinished(offer.JobId, false, 0, 0, 0);
-            await client.RejectJobAsync(
-                configuration,
-                credentials.Current,
-                offer.JobId,
-                "Timeout local do manifesto.",
-                CancellationToken.None,
-                FarmRemoteJobRejectionKind.Timeout);
+            await TryRejectQuietlyAsync(
+                client, configuration, credentials, offer.JobId,
+                "Timeout local do manifesto.", FarmRemoteJobRejectionKind.Timeout);
             Write("JOB", $"TIMEOUT // {offer.JobId:N}");
         }
         catch (OperationCanceledException)
         {
             telemetry.JobFinished(offer.JobId, false, 0, 0, 0);
-            await client.RejectJobAsync(
-                configuration,
-                credentials.Current,
-                offer.JobId,
+            await TryRejectQuietlyAsync(
+                client, configuration, credentials, offer.JobId,
                 remoteCancellationToken.IsCancellationRequested
                     ? "Cancelamento cooperativo recebido do servidor."
                     : "Agent encerrado durante a execução.",
-                CancellationToken.None,
                 FarmRemoteJobRejectionKind.Cancelled);
             Write("JOB", $"CANCELLED // {offer.JobId:N}");
         }
@@ -485,14 +485,37 @@ internal static class AgentApplication
         {
             telemetry.JobFinished(offer.JobId, false, 0, 0, 0);
             var reason = $"Worker local falhou: {exception.Message}";
-            await client.RejectJobAsync(
-                configuration,
-                credentials.Current,
-                offer.JobId,
-                reason[..Math.Min(reason.Length, 200)],
-                CancellationToken.None,
-                FarmRemoteJobRejectionKind.Policy);
+            await TryRejectQuietlyAsync(
+                client, configuration, credentials, offer.JobId,
+                reason[..Math.Min(reason.Length, 200)], FarmRemoteJobRejectionKind.Policy);
             Write("JOB", $"WORKER_FAILED // {offer.JobId:N} // {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Devolver um job em um caminho de cancelamento nunca pode derrubar o
+    /// loop: falha de rede aqui vira uma linha no diário, não um RETRY.
+    /// </summary>
+    private static async Task TryRejectQuietlyAsync(
+        AgentClient client,
+        AgentConfiguration configuration,
+        AgentCredentialHandle credentials,
+        Guid jobId,
+        string reason,
+        FarmRemoteJobRejectionKind kind)
+    {
+        try
+        {
+            await client.RejectJobAsync(
+                configuration, credentials.Current, jobId, reason,
+                CancellationToken.None, kind);
+        }
+        catch (Exception exception) when (exception is
+            HttpRequestException or
+            TaskCanceledException or
+            AgentAuthenticationException)
+        {
+            Write("AVISO", $"Devolução do job {jobId:N} falhou: {exception.Message}");
         }
     }
 

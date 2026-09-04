@@ -161,10 +161,13 @@ internal sealed class AgentClient(HttpClient httpClient)
         message.Content = JsonContent.Create(new FarmRemoteJobRejection(reason, kind), options: JsonOptions);
         using var response = await httpClient.SendAsync(message, cancellationToken);
         EnsureAuthorized(response);
+        // 404/409: o servidor já encerrou o job (cancelado, expirado ou
+        // reatribuído) — devolvê-lo é redundante, não é erro.
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Conflict) return;
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task<FarmRemoteJobAcknowledgement> SubmitResultAsync(
+    public async Task<FarmRemoteJobAcknowledgement?> SubmitResultAsync(
         AgentConfiguration configuration,
         string credential,
         Guid jobId,
@@ -178,6 +181,9 @@ internal sealed class AgentClient(HttpClient httpClient)
         message.Content = JsonContent.Create(result, options: JsonOptions);
         using var response = await httpClient.SendAsync(message, cancellationToken);
         EnsureAuthorized(response);
+        // 404/409: o servidor encerrou o job antes do resultado chegar — o
+        // trabalho local foi superado, não falhou.
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Conflict) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<FarmRemoteJobAcknowledgement>(JsonOptions, cancellationToken)
             ?? throw new InvalidOperationException("O servidor retornou confirmação vazia.");
