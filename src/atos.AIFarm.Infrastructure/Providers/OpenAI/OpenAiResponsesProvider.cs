@@ -215,6 +215,7 @@ public sealed class OpenAiStreamException(
     {
         "rate_limit_exceeded" => "RateLimited",
         "server_error" => "ProviderUnavailable",
+        "insufficient_quota" or "credit_balance_exhausted" => "QuotaExhausted",
         _ => "ProviderFailure"
     };
     public bool IsRetryable { get; } =
@@ -225,6 +226,8 @@ public sealed class OpenAiStreamException(
             "A OpenAI atingiu um limite temporário. Aguarde e tente novamente.",
         "server_error" =>
             "A OpenAI interrompeu a resposta por uma falha temporária.",
+        "insufficient_quota" or "credit_balance_exhausted" =>
+            "A conta da OpenAI está sem créditos. Adicione créditos no painel de billing da OpenAI e tente novamente.",
         _ => "A OpenAI interrompeu a resposta antes da conclusão."
     };
     public string? DiagnosticId { get; } = requestId;
@@ -275,10 +278,7 @@ public sealed class OpenAiResponsesProvider :
             cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var requestId = response.Headers.TryGetValues("x-request-id", out var values)
-                ? values.FirstOrDefault()
-                : null;
-            throw new OpenAiProviderException(response.StatusCode, requestId);
+            throw await BuildRequestExceptionAsync(response, cancellationToken);
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -313,7 +313,10 @@ public sealed class OpenAiResponsesProvider :
             message,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        EnsureSuccess(response);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw await BuildRequestExceptionAsync(response, cancellationToken);
+        }
         var requestId = RequestId(response);
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -405,14 +408,28 @@ public sealed class OpenAiResponsesProvider :
             catalogEntry.Cost(inputUnits, outputUnits));
     }
 
-    private static void EnsureSuccess(HttpResponseMessage response)
+    private static async Task<Exception> BuildRequestExceptionAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
     {
-        if (response.IsSuccessStatusCode)
+        var requestId = RequestId(response);
+        // "Sem créditos" chega como recusa HTTP com código próprio no corpo;
+        // sem esta distinção o usuário veria "limite temporário, tente de novo".
+        try
         {
-            return;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("error", out var error) &&
+                error.TryGetProperty("code", out var code) &&
+                code.GetString() is ("insufficient_quota" or "credit_balance_exhausted") and { } quotaCode)
+            {
+                return new OpenAiStreamException(quotaCode, requestId);
+            }
         }
-
-        throw new OpenAiProviderException(response.StatusCode, RequestId(response));
+        catch (Exception exception) when (exception is JsonException or IOException or InvalidOperationException)
+        {
+        }
+        return new OpenAiProviderException(response.StatusCode, requestId);
     }
 
     private static string? RequestId(HttpResponseMessage response) =>
