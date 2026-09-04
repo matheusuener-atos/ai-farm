@@ -79,6 +79,7 @@ dt { color:var(--muted); }
 dd { margin:0; overflow-wrap:anywhere; }
 form.stack { display:grid; gap:10px; max-width:420px; }
 label { display:grid; gap:4px; color:var(--muted); font-size:.72rem; }
+label > span { display:block; }
 input {
   font:inherit; border:1.5px solid var(--ink); background:var(--surface);
   padding:8px 10px; width:100%;
@@ -179,9 +180,9 @@ input:focus, button:focus-visible { outline:2px solid var(--orange); outline-off
     <div class="win-title"><span>LIMITES DO MEU COMPUTADOR</span></div>
     <div class="win-body">
       <form id="limits-form" class="stack">
-        <label>Processadores lógicos para a rede (máx. <span id="cpu-max">?</span>)
+        <label><span>Processadores lógicos para a rede (máx. <span id="cpu-max">?</span>)</span>
           <input id="limit-cpu" type="number" min="1" step="1" required></label>
-        <label>Memória para a rede, em MB (máx. <span id="mem-max">?</span>)
+        <label><span>Memória para a rede, em MB (máx. <span id="mem-max">?</span>)</span>
           <input id="limit-mem" type="number" min="64" step="64" required></label>
         <button type="submit">Aplicar limites</button>
       </form>
@@ -332,14 +333,23 @@ function render(s) {
     : '—';
 }
 
+let lostContact = 0;
 async function refresh() {
   try {
     const response = await fetch(base + 'api/state');
     if (!response.ok) return;
+    lostContact = 0;
     render(await response.json());
   } catch (e) {
+    // Duas falhas seguidas = o Agent desta janela foi encerrado (janela órfã).
+    if (++lostContact < 2) return;
     $('phase-dot').className = 'dot err';
     $('phase-short').textContent = 'painel desconectado';
+    $('phase-text').textContent = 'Esta janela ficou para trás: o Agent dela foi encerrado.';
+    $('phase-detail').textContent = 'Feche esta janela e abra o programa de novo (duplo clique no executável).';
+    $('farm-toggle').disabled = true;
+    $('rotate').disabled = true;
+    showError('O painel perdeu contato com o Agent. Feche esta janela e abra o programa novamente.');
   }
 }
 
