@@ -380,6 +380,18 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// A re-execução de status vale só para páginas: re-executar um 401/404 de
+// API como POST no componente Blazor de not-found derruba a resposta em 400
+// de content-type e mascara o status verdadeiro para clientes como o Agent.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api") &&
+        context.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } statusPages)
+    {
+        statusPages.Enabled = false;
+    }
+    await next(context);
+});
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
