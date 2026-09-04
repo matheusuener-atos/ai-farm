@@ -275,8 +275,9 @@ No laboratório `EMBEDDED`, cada transição é persistida de forma ordenada:
     QUEUED → RUNNING → VERIFYING → COMPLETED
                                     ↘ FAILED
 
-Este CP (Ponto de Processamento) é uma medição técnica experimental e específica dessa política; ainda
-não existe conversão CP → AIC. O laboratório não concede reward, não aceita
+Este CP (Ponto de Processamento) é uma medição técnica específica dessa
+política. A conversão CP → AIC existe via settlement financiado (ADRs 0022 e
+0033) e depende da política de rewards ativa. O laboratório não aceita
 shell, imagem de container, egress ou Jobs enviados pelo usuário. No modo
 `EMBEDDED`, o hardware exibido pertence ao host onde a aplicação está
 executando — localmente, a máquina de desenvolvimento; no Render, o container
@@ -291,7 +292,18 @@ O usuário autenticado pode gerar um código de vínculo de uso único, válido 
 Agent recebe uma credencial de heartbeat que só é armazenada como SHA-256 no
 PostgreSQL; a credencial em texto puro é retornada uma única vez.
 
-O executável dedicado está no projeto `atos.AIFarm.Agent`. Na primeira
+O executável dedicado está no projeto `atos.AIFarm.Agent`. Aberto sem
+argumentos (duplo clique), ele entra no modo `ui` (ADR 0034): um painel local
+com a identidade Macintosh servido por Kestrel em
+`http://127.0.0.1:{porta aleatória}/{token de sessão}/` — somente loopback —
+e aberto como janela de app pelo Edge. O painel cobre o ciclo completo:
+vincular com o código, Farmar/Pausar, limites de CPU e memória, medições em
+tempo real (jobs ativos, CP da sessão, CPU e memória vivas dos workers),
+identidade da conta vinculada e rotação de credencial
+(`POST /api/farm/agents/credential/rotate` mantém o mesmo node e invalida o
+hash anterior atomicamente).
+
+A linha de comando continua disponível para automação. Na primeira
 instalação, gere o código em `/farm` e execute:
 
 ```powershell
@@ -793,21 +805,24 @@ O settlement é atômico, único por proposta e registra a partida dobrada no
 Ledger: débito no bucket `Earned` da Wallet e crédito na conta versionada do
 Reward Pool. Repetir a mesma solicitação devolve o settlement existente.
 
-A política permanece desativada por padrão. Para uma homologação controlada,
-configure valores inteiros em mAIC (1 AIC = 1.000 mAIC):
+A política permanece desativada por padrão em ambientes novos. Em produção
+vale a política inaugural aprovada no ADR 0033 (valores inteiros em mAIC;
+1 AIC = 1.000 mAIC):
 
 ```dotenv
 AIFarm__Farm__Rewards__Enabled=true
-AIFarm__Farm__Rewards__PolicyVersion=atos-reward-policy-2026-09-v1
-AIFarm__Farm__Rewards__AicMinorPerThousandCp=1000
-AIFarm__Farm__Rewards__MonthlyBudgetMinor=100000
-AIFarm__Farm__Rewards__MaximumPerSettlementMinor=10000
+AIFarm__Farm__Rewards__PolicyVersion=reward-policy-2026-09-v1
+AIFarm__Farm__Rewards__AicMinorPerThousandCp=2000
+AIFarm__Farm__Rewards__MonthlyBudgetMinor=10000
+AIFarm__Farm__Rewards__MaximumPerSettlementMinor=100
 ```
 
-Nesse exemplo, 1.000 CP rendem 1 AIC, o pool mensal possui 100 AIC e cada
-settlement está limitado a 10 AIC. Esses números são apenas parâmetros de
-homologação, não preço ou recomendação comercial. O orçamento é global por
-versão e mês UTC; não há pagamento parcial quando o saldo é insuficiente.
+Nessa política, 1.000 CP rendem 2 AIC — a paridade escolhida faz um job de
+1 CP valer 2 mAIC, o custo de uma mensagem da Iris na tarifa simbólica do
+provider gratuito. O pool mensal emite no máximo 10 AIC e cada settlement é
+limitado a 0,1 AIC. O orçamento é global por versão e mês UTC; não há
+pagamento parcial quando o saldo é insuficiente, e mudar qualquer valor
+exige uma nova versão de política.
 Qualquer alteração de taxa, teto ou orçamento deve usar uma nova
 `PolicyVersion`. Tokens pessoais consultam o pool em
 `GET /api/v1/farm/rewards/pool` e liquidam uma proposta própria com escopo

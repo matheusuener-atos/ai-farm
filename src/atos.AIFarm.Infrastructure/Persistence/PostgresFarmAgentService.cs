@@ -211,6 +211,43 @@ internal sealed class PostgresFarmAgentService(
         return new FarmAgentTrust(SignatureAlgorithm, key.VerificationKey, key.KeyId);
     }
 
+    public async Task<FarmAgentIdentity?> GetIdentityAsync(
+        string credential,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null) return null;
+        var account = await db.Accounts
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == node.AccountId, cancellationToken);
+        return new FarmAgentIdentity(
+            node.Id,
+            node.Name,
+            account.DisplayName,
+            node.SharePlatformWork,
+            node.Status,
+            node.VerificationLevel,
+            node.CreatedAtUtc,
+            node.AgentCredentialIssuedAtUtc);
+    }
+
+    public async Task<FarmAgentCredentialRotation?> RotateCredentialAsync(
+        string credential,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var node = await AuthenticateNodeAsync(db, credential, cancellationToken);
+        if (node is null) return null;
+        var now = timeProvider.GetUtcNow();
+        var rotated = CreateSecret("afc");
+        node.AgentCredentialHash = HashSecret(rotated);
+        node.AgentCredentialIssuedAtUtc = now;
+        node.LastSeenAtUtc = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return new FarmAgentCredentialRotation(node.Id, rotated, now);
+    }
+
     public async Task<FarmRemoteJobOffer?> ClaimJobAsync(
         string credential,
         CancellationToken cancellationToken = default,

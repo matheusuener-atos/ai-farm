@@ -1209,6 +1209,30 @@ app.MapGet("/api/farm/agents/trust", async (
     return trust is null ? Results.Unauthorized() : Results.Ok(trust);
 }).RequireRateLimiting("farm-agent");
 
+app.MapGet("/api/farm/agents/identity", async (
+    HttpRequest request,
+    HttpResponse response,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var identity = await farmAgents.GetIdentityAsync(ReadBearer(request), cancellationToken);
+    return identity is null ? Results.Unauthorized() : Results.Ok(identity);
+}).RequireRateLimiting("farm-agent");
+
+app.MapPost("/api/farm/agents/credential/rotate", async (
+    HttpRequest request,
+    HttpResponse response,
+    IFarmAgentService farmAgents,
+    CancellationToken cancellationToken) =>
+{
+    response.Headers.CacheControl = "no-store";
+    var rotation = await farmAgents.RotateCredentialAsync(ReadBearer(request), cancellationToken);
+    return rotation is null ? Results.Unauthorized() : Results.Ok(rotation);
+}).DisableAntiforgery()
+  .RequireRateLimiting("farm-agent")
+  .WithMetadata(new RequestSizeLimitAttribute(1024));
+
 app.MapPost("/api/farm/agents/jobs/claim", async (
     HttpRequest request,
     HttpResponse response,
