@@ -8,7 +8,9 @@ internal static class AgentApplication
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        var command = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "run";
+        // Sem argumentos (duplo clique no executável) o Agent abre o painel
+        // local; "run" continua sendo o modo headless para terminal e serviços.
+        var command = args.FirstOrDefault()?.Trim().ToLowerInvariant() ?? "ui";
         if (command == "__worker")
             return await AgentWorkerHost.RunAsync(Console.In, Console.Out, Console.Error);
         var configurationStore = new AgentConfigurationStore(
@@ -28,6 +30,7 @@ internal static class AgentApplication
                 "enroll" => await EnrollAsync(args, client, configurationStore, credentialStore),
                 "import" => await ImportAsync(args, configurationStore, credentialStore),
                 "run" => await RunHeartbeatsAsync(client, configurationStore, credentialStore),
+                "ui" => await AgentUiHost.RunAsync(client, configurationStore, credentialStore),
                 "status" => await ShowStatusAsync(configurationStore, credentialStore),
                 "pause" => await SetAvailabilityAsync(false, configurationStore),
                 "resume" => await SetAvailabilityAsync(true, configurationStore),
@@ -112,25 +115,56 @@ internal static class AgentApplication
         return 0;
     }
 
-    private static async Task<int> RunHeartbeatsAsync(
+    internal static async Task<int> RunHeartbeatsAsync(
         AgentClient client,
         AgentConfigurationStore configurationStore,
-        WindowsCredentialStore credentialStore)
+        WindowsCredentialStore credentialStore,
+        AgentCredentialHandle? credentialHandle = null,
+        CancellationToken externalToken = default)
     {
+        var telemetry = AgentTelemetry.Instance;
         var configuration = await RequiredConfigurationAsync(configurationStore);
-        var credential = credentialStore.Read(configuration.CredentialTarget);
-        if (string.IsNullOrWhiteSpace(credential))
+        var initialCredential = credentialStore.Read(configuration.CredentialTarget);
+        if (string.IsNullOrWhiteSpace(initialCredential))
             throw new AgentAuthenticationException(
                 "Credencial local ausente. Execute 'atos-agent enroll <url>'.");
+        var credentials = credentialHandle ?? new AgentCredentialHandle();
+        credentials.Current = initialCredential;
 
         using var cancellation = CreateCancellation();
-        var trusted = await EnsureManifestTrustAsync(
-            client,
-            configuration,
-            credential,
-            configurationStore,
-            credentialStore,
-            cancellation.Source.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellation.Source.Token, externalToken);
+        telemetry.SetBinding(configuration.NodeId, configuration.BaseUrl);
+        telemetry.SetPolicy(configuration.EffectivePolicy);
+        telemetry.SetPhase("CONECTANDO");
+        // A largada também precisa de retry: um servidor indisponível na
+        // abertura não pode matar a sessão (só Ctrl+C, painel ou auth).
+        (AgentConfiguration Configuration, string VerificationKey) trusted;
+        var trustFailures = 0;
+        while (true)
+        {
+            try
+            {
+                trusted = await EnsureManifestTrustAsync(
+                    client,
+                    configuration,
+                    credentials.Current,
+                    configurationStore,
+                    credentialStore,
+                    linked.Token);
+                break;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or TaskCanceledException &&
+                !linked.IsCancellationRequested)
+            {
+                trustFailures++;
+                var delay = Math.Min(60, Math.Max(5, 5 * (1 << Math.Min(trustFailures - 1, 3))));
+                telemetry.SetPhase("RECONECTANDO", exception.Message);
+                Write("RETRY", $"{exception.Message} // NOVA TENTATIVA={delay}s");
+                await Task.Delay(TimeSpan.FromSeconds(delay), linked.Token);
+            }
+        }
         configuration = trusted.Configuration;
         var manifestVerificationKey = trusted.VerificationKey;
         var worker = AgentWorkerProcessRunner.CreateCurrent();
@@ -142,7 +176,7 @@ internal static class AgentApplication
             $"Node {configuration.NodeId} // {configuration.BaseUrl} // {ProfileLabel()} // {PolicyLabel(configuration.EffectivePolicy)} // Ctrl+C para parar.");
         try
         {
-            while (!cancellation.Source.IsCancellationRequested)
+            while (!linked.IsCancellationRequested)
             {
                 try
                 {
@@ -160,13 +194,20 @@ internal static class AgentApplication
                         throw new AgentAuthenticationException(
                             "O vínculo local mudou. Reinicie o processo do Agent.");
                     configuration = latest with { Policy = latest.EffectivePolicy };
+                    telemetry.SetPolicy(configuration.EffectivePolicy);
+                    var credential = credentials.Current;
                     var activeJobIds = activeJobs.Keys.ToArray();
                     var heartbeat = await client.HeartbeatAsync(
                         configuration,
                         credential,
-                        cancellation.Source.Token,
+                        linked.Token,
                         activeJobIds);
                     failures = 0;
+                    telemetry.SetHeartbeat(heartbeat.Status.ToString().ToUpperInvariant());
+                    telemetry.SetPhase(
+                        !configuration.EffectivePolicy.AcceptJobs
+                            ? "PAUSADO"
+                            : heartbeat.AcceptJobs ? "FARMANDO" : "EM_ESPERA");
                     interval = activeJobs.Count == 0
                         ? Math.Clamp(heartbeat.HeartbeatIntervalSeconds, 10, 300)
                         : Math.Clamp(heartbeat.ActiveHeartbeatIntervalSeconds, 1, 10);
@@ -191,9 +232,9 @@ internal static class AgentApplication
                                 activeJobs.Values.Sum(x => x.MemoryBytes);
                             if (availableProcessors <= 0 || availableMemory <= 0) break;
                             var activeJob = await TryStartNextJobAsync(
-                                client, configuration, credential, manifestVerificationKey, worker,
+                                client, configuration, credentials, manifestVerificationKey, worker,
                                 activeJobs.Keys.ToArray(), availableProcessors, availableMemory,
-                                cancellation.Source.Token);
+                                linked.Token);
                             if (activeJob is null) break;
                             activeJobs.Add(activeJob.JobId, activeJob);
                             interval = Math.Clamp(heartbeat.ActiveHeartbeatIntervalSeconds, 1, 10);
@@ -206,16 +247,17 @@ internal static class AgentApplication
                 }
                 catch (Exception exception) when (
                     exception is HttpRequestException or TaskCanceledException &&
-                    !cancellation.Source.IsCancellationRequested)
+                    !linked.IsCancellationRequested)
                 {
                     failures++;
                     interval = activeJobs.Count == 0
                         ? Math.Min(60, Math.Max(5, 5 * (1 << Math.Min(failures - 1, 3))))
                         : 2;
+                    telemetry.SetPhase("RECONECTANDO", exception.Message);
                     Write("RETRY", $"{exception.Message} // NOVA TENTATIVA={interval}s");
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(interval), cancellation.Source.Token);
+                await Task.Delay(TimeSpan.FromSeconds(interval), linked.Token);
             }
         }
         finally
@@ -293,7 +335,7 @@ internal static class AgentApplication
     private static async Task<ActiveJobExecution?> TryStartNextJobAsync(
         AgentClient client,
         AgentConfiguration configuration,
-        string credential,
+        AgentCredentialHandle credentials,
         string manifestVerificationKey,
         AgentWorkerProcessRunner worker,
         IReadOnlyList<Guid> activeJobIds,
@@ -302,7 +344,7 @@ internal static class AgentApplication
         CancellationToken cancellationToken)
     {
         var offer = await client.ClaimJobAsync(
-            configuration, credential, cancellationToken, activeJobIds);
+            configuration, credentials.Current, cancellationToken, activeJobIds);
         if (offer is null) return null;
         RemoteJobManifest manifest;
         try
@@ -317,7 +359,7 @@ internal static class AgentApplication
         {
             await client.RejectJobAsync(
                 configuration,
-                credential,
+                credentials.Current,
                 offer.JobId,
                 exception.Message[..Math.Min(exception.Message.Length, 200)],
                 cancellationToken);
@@ -329,7 +371,7 @@ internal static class AgentApplication
             manifest.MaxMemoryBytes > availableMemoryBytes)
         {
             await client.RejectJobAsync(
-                configuration, credential, offer.JobId,
+                configuration, credentials.Current, offer.JobId,
                 "Capacidade residual local insuficiente para o manifesto.",
                 cancellationToken);
             Write("REJECT", $"JOB={offer.JobId:N} // capacidade residual insuficiente.");
@@ -338,13 +380,13 @@ internal static class AgentApplication
 
         if (!await client.MarkJobStartedAsync(
             configuration,
-            credential,
+            credentials.Current,
             offer.JobId,
             cancellationToken))
         {
             await client.RejectJobAsync(
                 configuration,
-                credential,
+                credentials.Current,
                 offer.JobId,
                 "O servidor revogou a oferta antes do início.",
                 CancellationToken.None,
@@ -352,11 +394,16 @@ internal static class AgentApplication
             return null;
         }
         Write("JOB", $"RUNNING // {offer.JobId:N} // {manifest.WorkloadVersion}");
+        AgentTelemetry.Instance.JobStarted(
+            offer.JobId,
+            manifest.WorkloadVersion,
+            manifest.MaxLogicalProcessors,
+            manifest.MaxMemoryBytes);
         var remoteCancellation = new CancellationTokenSource();
         var completion = ExecuteClaimedJobAsync(
             client,
             configuration,
-            credential,
+            credentials,
             offer,
             manifest,
             worker,
@@ -370,13 +417,14 @@ internal static class AgentApplication
     private static async Task ExecuteClaimedJobAsync(
         AgentClient client,
         AgentConfiguration configuration,
-        string credential,
+        AgentCredentialHandle credentials,
         FarmRemoteJobOffer offer,
         RemoteJobManifest manifest,
         AgentWorkerProcessRunner worker,
         CancellationToken remoteCancellationToken,
         CancellationToken processCancellationToken)
     {
+        var telemetry = AgentTelemetry.Instance;
         using var execution = CancellationTokenSource.CreateLinkedTokenSource(
             processCancellationToken,
             remoteCancellationToken);
@@ -387,7 +435,7 @@ internal static class AgentApplication
             var workerResult = await worker.RunAsync(manifest, offer.Input, timeout.Token);
             var acknowledgement = await client.SubmitResultAsync(
                 configuration,
-                credential,
+                credentials.Current,
                 offer.JobId,
                 new FarmRemoteJobResult(
                     workerResult.Digest,
@@ -397,15 +445,22 @@ internal static class AgentApplication
                     workerResult.Enforcement,
                     workerResult.OutputPayload),
                 execution.Token);
+            telemetry.JobFinished(
+                offer.JobId,
+                acknowledgement.Verified,
+                acknowledgement.ComputeUnitsMilli,
+                workerResult.ProcessorTimeMilliseconds,
+                workerResult.PeakMemoryBytes);
             Write(
                 "JOB",
                 $"{acknowledgement.Status.ToString().ToUpperInvariant()} // VERIFIED={acknowledgement.Verified} // CP={acknowledgement.ComputeUnitsMilli / 1000d:0.000} // PEAK={workerResult.PeakMemoryBytes / 1024d / 1024d:0.0}MB // CPU={workerResult.ProcessorTimeMilliseconds}ms // LIMIT={workerResult.Enforcement}");
         }
         catch (OperationCanceledException) when (!execution.IsCancellationRequested)
         {
+            telemetry.JobFinished(offer.JobId, false, 0, 0, 0);
             await client.RejectJobAsync(
                 configuration,
-                credential,
+                credentials.Current,
                 offer.JobId,
                 "Timeout local do manifesto.",
                 CancellationToken.None,
@@ -414,9 +469,10 @@ internal static class AgentApplication
         }
         catch (OperationCanceledException)
         {
+            telemetry.JobFinished(offer.JobId, false, 0, 0, 0);
             await client.RejectJobAsync(
                 configuration,
-                credential,
+                credentials.Current,
                 offer.JobId,
                 remoteCancellationToken.IsCancellationRequested
                     ? "Cancelamento cooperativo recebido do servidor."
@@ -427,10 +483,11 @@ internal static class AgentApplication
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {
+            telemetry.JobFinished(offer.JobId, false, 0, 0, 0);
             var reason = $"Worker local falhou: {exception.Message}";
             await client.RejectJobAsync(
                 configuration,
-                credential,
+                credentials.Current,
                 offer.JobId,
                 reason[..Math.Min(reason.Length, 200)],
                 CancellationToken.None,
@@ -554,8 +611,10 @@ internal static class AgentApplication
     private static int ShowHelp()
     {
         Console.WriteLine("atos Compute Agent");
+        Console.WriteLine("  atos-agent               Abre o painel local (o mesmo que 'ui').");
+        Console.WriteLine("  atos-agent ui            Painel Macintosh no navegador, com farm ligado.");
         Console.WriteLine("  atos-agent enroll [url]  Vincula esta máquina usando código de uso único.");
-        Console.WriteLine("  atos-agent run           Envia heartbeats até Ctrl+C.");
+        Console.WriteLine("  atos-agent run           Envia heartbeats até Ctrl+C (modo headless).");
         Console.WriteLine("  atos-agent status        Mostra configuração e presença da credencial.");
         Console.WriteLine("  atos-agent pause         Para de aceitar novos Jobs após o Job atual.");
         Console.WriteLine("  atos-agent resume        Volta a aceitar novos Jobs.");
@@ -570,8 +629,11 @@ internal static class AgentApplication
         return 2;
     }
 
-    private static void Write(string status, string message) =>
+    internal static void Write(string status, string message)
+    {
+        AgentTelemetry.Instance.Log(status, message);
         Console.WriteLine($"{DateTimeOffset.Now:HH:mm:ss} // {status} // {message}");
+    }
 
     private static string PolicyLabel(AgentLocalPolicy policy) =>
         $"ACCEPT_JOBS={policy.AcceptJobs} // CPU_MAX={policy.MaxLogicalProcessors} // MEMORY_MAX={policy.MaxMemoryBytes / 1024 / 1024}MB";
