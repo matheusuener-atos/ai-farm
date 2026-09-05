@@ -30,6 +30,8 @@ public sealed class FarmNetworkAiCatalog(
     public const string PriceCatalogVersion = "farm-network-aic-v1";
     public const string GenerateModel = "iris-generate-network";
     public const string GeneratePriceCatalogVersion = "farm-generate-aic-v1";
+    public const string PremiumModel = "iris-premium-network";
+    public const string PremiumPriceCatalogVersion = "farm-premium-aic-v1";
 
     // Orquestrador do "auto" (ADR 0041): score mínimo da biblioteca para a
     // rede assumir a resposta; abaixo disso a rota externa responde melhor.
@@ -41,6 +43,13 @@ public sealed class FarmNetworkAiCatalog(
         new(AiProviderNames.FarmNetwork, GenerateModel, GeneratePriceCatalogVersion);
 
     public static AiPriceCatalogEntry GenerateEntry { get; } = new(GenerateRoute, 500, 500, 1_024);
+
+    public static AiRoute PremiumRoute { get; } =
+        new(AiProviderNames.FarmNetwork, PremiumModel, PremiumPriceCatalogVersion);
+
+    // Premium custa mais (best-of-N usa varias maquinas + juiz), mas segue
+    // simbolico frente ao provedor externo.
+    public static AiPriceCatalogEntry PremiumEntry { get; } = new(PremiumRoute, 2_000, 2_000, 1_024);
 
     // Tarifa simbólica: a computação é da própria conta; o AIC cobre o custo
     // de orquestração/verificação. 500 mAIC por 1M de unidades ≈ ~2 mAIC por
@@ -60,6 +69,8 @@ public sealed class FarmNetworkAiCatalog(
             return Route;
         if (string.Equals(preference, GenerateModel, StringComparison.OrdinalIgnoreCase))
             return GenerateRoute;
+        if (string.Equals(preference, PremiumModel, StringComparison.OrdinalIgnoreCase))
+            return PremiumRoute;
         // "Auto" orquestra: se a biblioteca cobre bem a pergunta, a rede
         // responde; senão, a rota externa. Preferência explícita nunca é
         // sobrescrita, e o preflight sempre mostra a rota escolhida.
@@ -94,6 +105,10 @@ public sealed class FarmNetworkAiCatalog(
             GenerateModel,
             "AI FARM GENERATE (modelo da rede — experimental)",
             GenerateEntry.MaximumOutputUnits),
+        new AiModelOption(
+            PremiumModel,
+            "AI FARM PREMIUM (varias maquinas → melhor resposta)",
+            PremiumEntry.MaximumOutputUnits),
     ];
 
     public async Task<PriceEstimate> EstimateAsync(
@@ -101,7 +116,8 @@ public sealed class FarmNetworkAiCatalog(
         AiRoute route,
         CancellationToken cancellationToken)
     {
-        if (route == Route || route == GenerateRoute) return Estimate(prompt.Length);
+        if (route == Route || route == GenerateRoute || route == PremiumRoute)
+            return Estimate(prompt.Length);
         return await primary.Estimator.EstimateAsync(prompt, route, cancellationToken);
     }
 
@@ -109,7 +125,8 @@ public sealed class FarmNetworkAiCatalog(
         AiProviderRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.Route == Route || request.Route == GenerateRoute)
+        if (request.Route == Route || request.Route == GenerateRoute ||
+            request.Route == PremiumRoute)
             return Estimate(request.Prompt.Length);
         if (primary.Estimator is IAiRequestPriceEstimator requestEstimator)
             return await requestEstimator.EstimateAsync(request, cancellationToken);
@@ -121,6 +138,7 @@ public sealed class FarmNetworkAiCatalog(
     {
         if (route == Route) return Entry;
         if (route == GenerateRoute) return GenerateEntry;
+        if (route == PremiumRoute) return PremiumEntry;
         if (primary.Catalog is not null) return primary.Catalog.Get(route);
         throw new InvalidOperationException("A rota não pertence ao catálogo ativo.");
     }
@@ -161,6 +179,8 @@ public sealed class FarmNetworkChatProvider(
                 "A rota AI Farm Network ainda não aceita anexos. Envie sem anexos ou use a rota externa.");
         if (request.Route == FarmNetworkAiCatalog.GenerateRoute)
             return await GenerateAsync(request, cancellationToken);
+        if (request.Route == FarmNetworkAiCatalog.PremiumRoute)
+            return await GeneratePremiumAsync(request, cancellationToken);
 
         var search = await knowledge.SearchAsync(
             request.Prompt, maximumHits: 6, cancellationToken: cancellationToken);
@@ -223,9 +243,90 @@ public sealed class FarmNetworkChatProvider(
         AiProviderRequest request,
         CancellationToken cancellationToken)
     {
+        var input = BuildGenerateInput(
+            networkOptions.NetworkModel, request.Prompt, request.SystemInstruction, request.Context);
+        var result = await RunGenerationAsync(input, request.Prompt, cancellationToken);
+        var content = result.Answer +
+            $"\n\n[gerado pela rede // modelo {result.Model} // não verificado — CP=0 até o quórum]";
+        return BuildResult(content, request.Prompt, result, FarmNetworkAiCatalog.GenerateEntry);
+    }
+
+    /// <summary>
+    /// best-of-N (ADR 0045): a mesma pergunta vai para N máquinas da rede em
+    /// paralelo; um juiz (mais uma geração da rede) sintetiza a melhor
+    /// resposta. É o único jeito legítimo de várias máquinas melhorarem UMA
+    /// resposta — a inferência não se soma, mas a diversidade de candidatos sim.
+    /// </summary>
+    private async Task<AiProviderResult> GeneratePremiumAsync(
+        AiProviderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var input = BuildGenerateInput(
+            networkOptions.NetworkModel, request.Prompt, request.SystemInstruction, request.Context);
+        var candidateCount = networkOptions.PremiumCandidates;
+        var tasks = Enumerable.Range(0, candidateCount)
+            .Select(async _ =>
+            {
+                try { return await RunGenerationAsync(input, request.Prompt, cancellationToken); }
+                catch (InvalidOperationException) { return null; }
+            })
+            .ToArray();
+        var candidates = (await Task.WhenAll(tasks))
+            .Where(x => x is not null && !string.IsNullOrWhiteSpace(x.Answer))
+            .Select(x => x!)
+            .ToArray();
+
+        if (candidates.Length == 0)
+            throw new InvalidOperationException(
+                "Nenhuma máquina da rede gerou uma resposta. Ative a geração em pelo menos um computador da pool " +
+                $"(instale o Ollama e o modelo {networkOptions.NetworkModel}).");
+        if (candidates.Length == 1)
+        {
+            var only = candidates[0];
+            var soloContent = only.Answer +
+                $"\n\n[gerado pela rede // {candidates.Length} de {candidateCount} máquina(s) responderam // não verificado — CP=0]";
+            return BuildResult(soloContent, request.Prompt, only, FarmNetworkAiCatalog.PremiumEntry);
+        }
+
+        // Juiz: sintetiza a melhor resposta a partir das candidatas.
+        var judgeQuestion = new StringBuilder();
+        judgeQuestion.AppendLine("Você é um avaliador. Abaixo estão respostas independentes à mesma pergunta.");
+        judgeQuestion.AppendLine("Escreva a MELHOR resposta possível, combinando o que há de mais correto e completo. Não mencione que existem candidatas.");
+        judgeQuestion.AppendLine();
+        judgeQuestion.AppendLine($"PERGUNTA: {request.Prompt}");
+        for (var index = 0; index < candidates.Length; index++)
+        {
+            var answer = candidates[index].Answer;
+            if (answer.Length > 3_000) answer = answer[..3_000];
+            judgeQuestion.AppendLine($"\nRESPOSTA {index + 1}:\n{answer}");
+        }
+        var judgeInput = BuildGenerateInput(
+            networkOptions.NetworkModel,
+            judgeQuestion.ToString(),
+            "Responda de forma objetiva e correta, em português.",
+            null);
+        FarmGenerateResult judged;
+        try
+        {
+            judged = await RunGenerationAsync(judgeInput, request.Prompt, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // Juiz indisponível: devolve a candidata mais longa (heurística
+            // simples) em vez de falhar — melhor-esforço.
+            judged = candidates.OrderByDescending(x => x.Answer.Length).First();
+        }
+        var content = judged.Answer +
+            $"\n\n[AI FARM PREMIUM // sintetizado de {candidates.Length} respostas da rede // não verificado — CP=0]";
+        return BuildResult(content, request.Prompt, judged, FarmNetworkAiCatalog.PremiumEntry);
+    }
+
+    private static string BuildGenerateInput(
+        string model, string prompt, string? systemInstruction, IReadOnlyList<AiContextMessage>? messages)
+    {
         var context = new List<string>();
         var budget = 22 * 1024;
-        foreach (var message in (request.Context ?? []).TakeLast(8))
+        foreach (var message in (messages ?? []).TakeLast(8))
         {
             var line = $"{message.Role}: {message.Content}";
             if (line.Length > 2_000) line = line[..2_000];
@@ -233,18 +334,25 @@ public sealed class FarmNetworkChatProvider(
             budget -= line.Length;
             context.Add(line);
         }
-        var input = JsonSerializer.Serialize(
+        return JsonSerializer.Serialize(
             new FarmGenerateInput(
                 FarmWorkloadCatalog.GenerateInputSchema,
-                networkOptions.NetworkModel,
-                request.Prompt,
-                request.SystemInstruction,
+                model,
+                prompt,
+                systemInstruction,
                 context),
             JsonOptions);
+    }
+
+    private async Task<FarmGenerateResult> RunGenerationAsync(
+        string input,
+        string prompt,
+        CancellationToken cancellationToken)
+    {
         var demand = await demands.SubmitAsync(
             new FarmDemandRequest(
                 FarmWorkloadCatalog.GenerateId,
-                DemandLabel(request.Prompt),
+                DemandLabel(prompt),
                 input,
                 FarmDemandPriority.High,
                 LifetimeMinutes: 5,
@@ -261,17 +369,8 @@ public sealed class FarmNetworkChatProvider(
             if (output is not null)
             {
                 var payload = Encoding.UTF8.GetString(output.Content);
-                var result = JsonSerializer.Deserialize<FarmGenerateResult>(payload, JsonOptions)
+                return JsonSerializer.Deserialize<FarmGenerateResult>(payload, JsonOptions)
                     ?? throw new InvalidOperationException("A rede devolveu uma geração vazia.");
-                var content = result.Answer +
-                    $"\n\n[gerado pela rede // modelo {result.Model} // não verificado — CP=0 até o quórum]";
-                var inputUnits = result.PromptUnits ?? Math.Max(1, request.Prompt.Length / 4);
-                var outputUnits = result.CompletionUnits ?? Math.Max(1, result.Answer.Length / 4);
-                var entry = FarmNetworkAiCatalog.GenerateEntry;
-                var cost = Math.Max(1,
-                    (inputUnits * entry.InputCostPerMillionMinor +
-                     outputUnits * entry.OutputCostPerMillionMinor) / 1_000_000);
-                return new AiProviderResult(content, inputUnits, outputUnits, cost);
             }
             if (++polls % 5 == 0)
             {
@@ -287,6 +386,17 @@ public sealed class FarmNetworkChatProvider(
                     "A rede não gerou a tempo. Verifique se um computador com o runtime local está FARMANDO.");
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
+    }
+
+    private static AiProviderResult BuildResult(
+        string content, string prompt, FarmGenerateResult result, AiPriceCatalogEntry entry)
+    {
+        var inputUnits = result.PromptUnits ?? Math.Max(1, prompt.Length / 4);
+        var outputUnits = result.CompletionUnits ?? Math.Max(1, result.Answer.Length / 4);
+        var cost = Math.Max(1,
+            (inputUnits * entry.InputCostPerMillionMinor +
+             outputUnits * entry.OutputCostPerMillionMinor) / 1_000_000);
+        return new AiProviderResult(content, inputUnits, outputUnits, cost);
     }
 
     private static string BuildInput(string question, IReadOnlyList<FarmKnowledgeHit> hits)
