@@ -61,6 +61,67 @@ internal static class AgentModelRuntime
         }
     }
 
+    private const string OllamaInstallerUrl = "https://ollama.com/download/OllamaSetup.exe";
+
+    /// <summary>
+    /// Instala o Ollama nesta máquina (ADR 0046, opção A): baixa o instalador
+    /// oficial e roda em modo silencioso. Best-effort — o Windows pode pedir
+    /// UAC; falhas viram exceção com o link oficial como plano B.
+    /// </summary>
+    public static async Task InstallOllamaAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new InvalidOperationException(
+                "A instalação automática do runtime só é suportada no Windows. " +
+                $"Instale manualmente pelo site: {OllamaInstallerUrl}");
+        if (IsAvailable) return;
+
+        var installerPath = Path.Combine(Path.GetTempPath(), $"OllamaSetup-{Guid.NewGuid():N}.exe");
+        try
+        {
+            using (var download = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+            using (var response = await download.GetAsync(
+                OllamaInstallerUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+            {
+                response.EnsureSuccessStatusCode();
+                await using var file = File.Create(installerPath);
+                await response.Content.CopyToAsync(file, cancellationToken);
+            }
+
+            // O instalador do Ollama é Inno Setup: /VERYSILENT sem UI.
+            var start = new ProcessStartInfo
+            {
+                FileName = installerPath,
+                Arguments = "/VERYSILENT /NORESTART",
+                UseShellExecute = true // permite o prompt de UAC
+            };
+            using var process = Process.Start(start)
+                ?? throw new InvalidOperationException("Não foi possível iniciar o instalador do Ollama.");
+            await process.WaitForExitAsync(cancellationToken);
+
+            // Espera o serviço subir em 127.0.0.1:11434 (até ~60s).
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(60);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                InvalidateProbeCache();
+                if (IsAvailable) return;
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+            throw new InvalidOperationException(
+                "O Ollama foi instalado mas o serviço não respondeu a tempo. Abra o Ollama e tente ativar a geração de novo.");
+        }
+        finally
+        {
+            try { if (File.Exists(installerPath)) File.Delete(installerPath); }
+            catch (IOException) { }
+        }
+    }
+
+    private static void InvalidateProbeCache()
+    {
+        lock (ProbeGate) _probedAtUtc = DateTimeOffset.MinValue;
+    }
+
     /// <summary>
     /// Garante o modelo da plataforma baixado no runtime local (pull). Usado
     /// pelo painel para o leigo não tocar em linha de comando.

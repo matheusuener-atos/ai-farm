@@ -288,6 +288,50 @@ internal sealed class AgentUiHost(
         }
     }
 
+    /// <summary>
+    /// Ativação de geração de um clique (ADR 0046, opção A): instala o Ollama
+    /// se faltar, baixa o modelo da plataforma, e a máquina passa a aceitar
+    /// geração no próximo heartbeat. Roda em segundo plano; o painel acompanha
+    /// pelo estado de setup na telemetria.
+    /// </summary>
+    public void EnableGeneration()
+    {
+        var identity = AgentTelemetry.Instance.Snapshot().Identity;
+        var model = identity?.NetworkModel;
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            AgentTelemetry.Instance.SetGenerationSetup(
+                "ERRO", "Vincule e confirme este computador antes de ativar a geração.");
+            return;
+        }
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!AgentModelRuntime.IsAvailable)
+                {
+                    AgentTelemetry.Instance.SetGenerationSetup(
+                        "INSTALANDO", "Baixando e instalando o runtime (o Windows pode pedir confirmação).");
+                    await AgentModelRuntime.InstallOllamaAsync(_shutdown.Token);
+                }
+                AgentTelemetry.Instance.SetGenerationSetup(
+                    "BAIXANDO", $"Baixando o modelo {model} (alguns GB).");
+                await AgentModelRuntime.PullAsync(model, _shutdown.Token);
+                AgentTelemetry.Instance.SetGenerationSetup(
+                    "PRONTO", $"Geração ativa com o modelo {model}.");
+                await RefreshIdentityAsync();
+                AgentApplication.Write("GERACAO", $"Geração ativada // modelo {model}.");
+            }
+            catch (Exception exception) when (exception is
+                InvalidOperationException or HttpRequestException or
+                IOException or TaskCanceledException)
+            {
+                AgentTelemetry.Instance.SetGenerationSetup("ERRO", exception.Message);
+                AgentApplication.Write("GERACAO", $"Falha ao ativar geração: {exception.Message}");
+            }
+        });
+    }
+
     private async Task<AgentConfiguration> RequiredConfigurationAsync() =>
         await configurationStore.LoadAsync() ?? throw new InvalidOperationException(
             "Agent não vinculado. Use o formulário de vínculo do painel.");

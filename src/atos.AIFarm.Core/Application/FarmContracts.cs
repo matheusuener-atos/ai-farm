@@ -130,7 +130,8 @@ public sealed record FarmAgentIdentity(
     DateTimeOffset? CredentialIssuedAtUtc,
     bool RewardPolicyEnabled = false,
     long RewardRatePerThousandCpMinor = 0,
-    long LifetimeComputeUnitsMilli = 0);
+    long LifetimeComputeUnitsMilli = 0,
+    string NetworkModel = "");
 
 public sealed record FarmAgentCredentialRotation(
     Guid NodeId,
