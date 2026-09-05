@@ -1,18 +1,82 @@
+@page "/biblioteca"
 @page "/farm/knowledge"
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IFarmKnowledgeSearchService Knowledge
+@inject IFarmDemandQueueService Demands
 
-<PageTitle>Conhecimento da Farm // atos AI Farm</PageTitle>
+<PageTitle>Biblioteca // atos AI Farm</PageTitle>
 
 <div class="page-head">
-    <p class="eyebrow">atos:/FARM/CONHECIMENTO</p>
-    <h1>Biblioteca computada</h1>
-    <p>RECUPERAÇÃO LEXICAL // ÍNDICES VERIFICADOS // ESCOPO DA CONTA</p>
+    <p class="eyebrow">atos:/BIBLIOTECA</p>
+    <h1>Biblioteca da rede</h1>
+    <p>O QUE VOCÊ ALIMENTA AQUI, A REDE INDEXA — E O CHAT RESPONDE DAQUI</p>
 </div>
 
+@if (_error is not null)
+{
+    <p class="error" role="alert">@_error</p>
+}
+@if (_notice is not null)
+{
+    <p class="muted" role="status">@_notice</p>
+}
+
+<section class="win">
+    <div class="win-title"><span>Adicionar conhecimento</span><span>vira trabalho da rede</span></div>
+    <div class="win-body">
+        <div class="library-form">
+            <label>TÍTULO
+                <input maxlength="80" @bind="_newLabel" placeholder="Ex.: Anotações sobre gravidade modificada" disabled="@_working" />
+            </label>
+            <label>CONTEÚDO // MÁX. 32 KB
+                <textarea rows="7" maxlength="30000" @bind="_newContent"
+                          placeholder="Cole aqui o texto que a rede deve conhecer."
+                          disabled="@_working"></textarea>
+            </label>
+            <button class="btn primary" type="button" @onclick="AddToLibraryAsync" disabled="@_working">
+                @(_working ? "Enviando…" : "Indexar na rede")
+            </button>
+        </div>
+        <p class="muted">Um computador da sua pool executa a indexação (com verificação e CP) e o conteúdo passa a valer para a busca e para a rota AI FARM NETWORK do chat.</p>
+    </div>
+</section>
+
+<section class="win">
+    <div class="win-title"><span>Conteúdos da biblioteca</span><span>@(_entries?.Count ?? 0) item(ns)</span></div>
+    <div class="win-body">
+        @if (_entries is null)
+        {
+            <p class="muted">Carregando…</p>
+        }
+        else if (_entries.Count == 0)
+        {
+            <p class="muted">A biblioteca está vazia — adicione o primeiro conteúdo acima.</p>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table>
+                    <thead><tr><th>TÍTULO</th><th>SITUAÇÃO</th><th>QUANDO</th></tr></thead>
+                    <tbody>
+                        @foreach (var entry in _entries)
+                        {
+                            <tr>
+                                <td>@entry.Label</td>
+                                <td>@StatusLabel(entry.Status)</td>
+                                <td>@entry.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn" type="button" @onclick="ReloadEntriesAsync" disabled="@_working">Atualizar</button>
+        }
+    </div>
+</section>
+
 <section class="terminal">
-    <div class="terminal-title"><span>Buscar nos índices concluídos</span></div>
+    <div class="terminal-title"><span>Buscar na biblioteca</span></div>
     <form class="knowledge-search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
         <label for="knowledge-query">PERGUNTA OU TERMOS</label>
         <div>
@@ -21,13 +85,8 @@
             <button type="submit" disabled="@_working">@(_working ? "Buscando…" : "Buscar")</button>
         </div>
     </form>
-    <p class="muted">Somente demandas IRIS TEXT INDEX concluídas, íntegras e pertencentes à conta atual são consultadas.</p>
+    <p class="muted">Somente conteúdos indexados, verificados e desta conta são consultados.</p>
 </section>
-
-@if (_error is not null)
-{
-    <p class="error-banner" role="alert">@_error</p>
-}
 
 @if (_result is not null)
 {
@@ -38,7 +97,7 @@
         </div>
         @if (!_result.HasHits)
         {
-            <p class="empty-state">Nenhum trecho relevante encontrado. Crie e conclua uma demanda “Iris Text Index” ou refine a busca.</p>
+            <p class="empty-state">Nenhum trecho relevante encontrado. Adicione conteúdo acima ou refine a busca.</p>
         }
         else
         {
@@ -65,9 +124,81 @@
 
 @code {
     private string _query = string.Empty;
+    private string _newLabel = string.Empty;
+    private string _newContent = string.Empty;
     private bool _working;
     private string? _error;
+    private string? _notice;
     private FarmKnowledgeSearchResult? _result;
+    private IReadOnlyList<FarmDemandSnapshot>? _entries;
+
+    protected override async Task OnInitializedAsync() => await ReloadEntriesAsync();
+
+    private async Task ReloadEntriesAsync()
+    {
+        try
+        {
+            var dashboard = await Demands.GetDashboardAsync();
+            _entries = dashboard.Demands
+                .Where(x => x.WorkloadId == "iris-text-index-v1")
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .ToArray();
+            _error = null;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível carregar a biblioteca agora.";
+        }
+    }
+
+    private async Task AddToLibraryAsync()
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var label = string.IsNullOrWhiteSpace(_newLabel) ? "Conteúdo da biblioteca" : _newLabel.Trim();
+            var demand = await Demands.SubmitAsync(new FarmDemandRequest(
+                "iris-text-index-v1",
+                label,
+                _newContent,
+                FarmDemandPriority.Normal,
+                TargetShards: TargetShardsFor(_newContent)));
+            _newLabel = string.Empty;
+            _newContent = string.Empty;
+            _notice = $"\"{demand.Label}\" foi para a rede indexar — em instantes entra na biblioteca.";
+            await ReloadEntriesAsync();
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível enviar o conteúdo agora. Tente de novo em instantes.";
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private static int TargetShardsFor(string content) =>
+        Math.Clamp(System.Text.Encoding.UTF8.GetByteCount(content ?? string.Empty) / (8 * 1024) + 1, 1, 4);
+
+    private static string StatusLabel(FarmDemandStatus status) => status switch
+    {
+        FarmDemandStatus.Completed => "NA BIBLIOTECA",
+        FarmDemandStatus.Failed => "FALHOU",
+        FarmDemandStatus.Expired => "EXPIROU",
+        _ => "A REDE ESTÁ INDEXANDO…"
+    };
 
     private async Task SearchAsync()
     {
@@ -76,7 +207,7 @@
         _error = null;
         try { _result = await Knowledge.SearchAsync(_query, 8); }
         catch (ArgumentException exception) { _error = exception.Message; }
-        catch (Exception) { _error = "Não foi possível consultar os índices da Farm."; }
+        catch (Exception) { _error = "Não foi possível consultar a biblioteca."; }
         finally { _working = false; }
     }
 }

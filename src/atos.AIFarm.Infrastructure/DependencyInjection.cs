@@ -96,14 +96,15 @@ public static class DependencyInjection
         }
         // Rota AI Farm Network (ADR 0040): catálogo composto por cima do
         // primário e despachante por rota; o breaker protege só o externo.
-        services.AddSingleton<FarmNetworkAiCatalog>();
-        services.AddSingleton<IAiPriceCatalog>(provider =>
+        // Scoped: o orquestrador do "auto" sonda a biblioteca da conta.
+        services.AddScoped<FarmNetworkAiCatalog>();
+        services.AddScoped<IAiPriceCatalog>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
-        services.AddSingleton<IPriceEstimator>(provider =>
+        services.AddScoped<IPriceEstimator>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
-        services.AddSingleton<IAiRouteSelector>(provider =>
+        services.AddScoped<IAiRouteSelector>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
-        services.AddSingleton<IAiModelCatalog>(provider =>
+        services.AddScoped<IAiModelCatalog>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
         services.AddSingleton<ProtectedAiProvider>();
         services.AddScoped<FarmNetworkChatProvider>();
