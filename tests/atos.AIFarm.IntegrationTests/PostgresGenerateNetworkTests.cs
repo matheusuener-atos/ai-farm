@@ -80,9 +80,15 @@ public sealed class PostgresGenerateNetworkTests
             Assert.Equal(0, acknowledgement.ComputeUnitsMilli);
 
             // Consolidação passthrough + download íntegro do output da demanda.
-            _ = await dispatcher.DispatchDueAsync();
-            var download = Assert.IsType<FarmUsefulJobOutput>(
-                await queue.DownloadOutputAsync(demand.Id));
+            // No runner a consolidação pode não fechar num único dispatch.
+            FarmUsefulJobOutput? consolidated = null;
+            for (var round = 0; round < 40 && consolidated is null; round++)
+            {
+                _ = await dispatcher.DispatchDueAsync();
+                consolidated = await queue.DownloadOutputAsync(demand.Id);
+                if (consolidated is null) await Task.Delay(TimeSpan.FromMilliseconds(250));
+            }
+            var download = Assert.IsType<FarmUsefulJobOutput>(consolidated);
             var payload = Encoding.UTF8.GetString(download.Content);
             var result = JsonSerializer.Deserialize<FarmGenerateResult>(payload, JsonOptions)!;
             Assert.Equal("O ledger usa partidas dobradas e é imutável.", result.Answer);
