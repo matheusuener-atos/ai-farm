@@ -163,7 +163,7 @@ public sealed class OpenAiCompatibleChatProvider :
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         var root = document.RootElement;
         var content = ReadMessageContent(root);
-        var (inputUnits, outputUnits) = ReadUsage(root);
+        var (inputUnits, outputUnits) = ReadUsage(root, request.Prompt, content);
         return new AiProviderResult(
             content, inputUnits, outputUnits, catalogEntry.Cost(inputUnits, outputUnits));
     }
@@ -236,16 +236,21 @@ public sealed class OpenAiCompatibleChatProvider :
             }
         }
 
-        if (content.Length == 0 || inputUnits is null || outputUnits is null)
+        if (content.Length == 0)
         {
             throw new CompatibleStreamException(
                 _options.ProviderLabel, "incomplete_stream", requestId);
         }
+        // Servidores compatíveis como o Ollama nem sempre devolvem `usage` no
+        // streaming; estimamos por ~4 caracteres/token em vez de falhar. A
+        // tarifa é simbólica, então a estimativa não distorce cobrança.
+        var finalInput = inputUnits ?? EstimateUnits(request.Prompt);
+        var finalOutput = outputUnits ?? EstimateUnits(content.ToString());
         return new AiProviderResult(
             content.ToString(),
-            inputUnits.Value,
-            outputUnits.Value,
-            catalogEntry.Cost(inputUnits.Value, outputUnits.Value));
+            finalInput,
+            finalOutput,
+            catalogEntry.Cost(finalInput, finalOutput));
     }
 
     public void Dispose() => _httpClient.Dispose();
@@ -341,17 +346,22 @@ public sealed class OpenAiCompatibleChatProvider :
             $"O provider {_options.ProviderLabel} não retornou texto utilizável.");
     }
 
-    private (long InputUnits, long OutputUnits) ReadUsage(JsonElement root)
+    private static (long InputUnits, long OutputUnits) ReadUsage(
+        JsonElement root, string prompt, string content)
     {
         if (root.TryGetProperty("usage", out var usage) &&
-            usage.TryGetProperty("prompt_tokens", out var prompt) &&
-            usage.TryGetProperty("completion_tokens", out var completion))
+            usage.ValueKind == JsonValueKind.Object &&
+            usage.TryGetProperty("prompt_tokens", out var promptTokens) &&
+            usage.TryGetProperty("completion_tokens", out var completionTokens))
         {
-            return (prompt.GetInt64(), completion.GetInt64());
+            return (promptTokens.GetInt64(), completionTokens.GetInt64());
         }
-        throw new InvalidOperationException(
-            $"O provider {_options.ProviderLabel} não retornou medição de uso.");
+        // Sem `usage` (ex.: Ollama), estima por ~4 caracteres/token.
+        return (EstimateUnits(prompt), EstimateUnits(content));
     }
+
+    private static long EstimateUnits(string text) =>
+        Math.Max(1, (text?.Length ?? 0) / 4);
 
     private async Task<Exception> BuildRequestExceptionAsync(
         HttpResponseMessage response,
