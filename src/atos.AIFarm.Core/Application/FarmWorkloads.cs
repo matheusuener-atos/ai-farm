@@ -340,7 +340,7 @@ public static class FarmDeterministicWorkloads
         if (candidates.Count == 0)
         {
             answer = "A rede ainda não tem esse conhecimento indexado. " +
-                "Alimente a biblioteca em Farm → Demandas úteis, ou use a rota externa para perguntas gerais.";
+                "Adicione conteúdo na página Biblioteca e pergunte de novo, ou use a rota externa para perguntas gerais.";
             sources = [];
         }
         else
