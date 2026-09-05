@@ -99,6 +99,49 @@ public sealed class PostgresGenerateNetworkTests
         finally { await CleanupAsync(connectionString, accountId); }
     }
 
+    [RequiresPostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task GenerationIsNotRoutedToNodesWithoutTheLocalRuntime()
+    {
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "generate capability test");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            await lab.SetNodeStatusAsync(FarmNodeStatus.Paused);
+            var linked = await EnrollConfirmedAsync(provider, "NO-OLLAMA-PC");
+            // Heartbeat SEM capacidade de geracao (nao tem Ollama).
+            Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
+                new FarmAgentHeartbeatRequest(
+                    ".NET 10 // TEST", 8, 12L * 1024 * 1024 * 1024,
+                    FarmAgentProtocol.CurrentAgentVersion, true, 4, 8L * 1024 * 1024 * 1024,
+                    SupportsGeneration: false)));
+
+            var queue = provider.GetRequiredService<IFarmDemandQueueService>();
+            var dispatcher = provider.GetRequiredService<IFarmDemandDispatcher>();
+            var input = JsonSerializer.Serialize(new FarmGenerateInput(
+                FarmWorkloadCatalog.GenerateInputSchema, "llama3.2:3b", "oi"), JsonOptions);
+            var demand = await queue.SubmitAsync(new FarmDemandRequest(
+                FarmWorkloadCatalog.GenerateId, "Chat // geracao", input,
+                FarmDemandPriority.High, 5, TargetShards: 1, MaxAttemptsPerShard: 1));
+
+            // Varios dispatches: nenhum job e criado (node inelegivel para geracao).
+            for (var round = 0; round < 4; round++)
+            {
+                _ = await dispatcher.DispatchDueAsync();
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+            }
+            Assert.Null(await agents.ClaimJobAsync(linked.Credential));
+            var state = (await queue.GetDashboardAsync()).Demands.Single(x => x.Id == demand.Id);
+            Assert.NotEqual(FarmDemandStatus.Submitted, state.Status);
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
     private static async Task<FarmAgentEnrollmentResult> EnrollConfirmedAsync(
         IServiceProvider provider, string name)
     {
@@ -114,7 +157,8 @@ public sealed class PostgresGenerateNetworkTests
         Assert.NotNull(await agents.HeartbeatAsync(linked.Credential,
             new FarmAgentHeartbeatRequest(
                 ".NET 10 // TEST", 8, 12L * 1024 * 1024 * 1024,
-                FarmAgentProtocol.CurrentAgentVersion, true, 4, 8L * 1024 * 1024 * 1024)));
+                FarmAgentProtocol.CurrentAgentVersion, true, 4, 8L * 1024 * 1024 * 1024,
+                SupportsGeneration: true)));
         return linked;
     }
 

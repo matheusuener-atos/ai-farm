@@ -291,6 +291,7 @@ public sealed class AIFarmDbContext(DbContextOptions<AIFarmDbContext> options)
             entity.Property(x => x.VerifiedProfileHash).HasMaxLength(64);
             entity.Property(x => x.AgentAcceptJobs).HasDefaultValue(true);
             entity.Property(x => x.SharePlatformWork).HasDefaultValue(false);
+            entity.Property(x => x.SupportsGeneration).HasDefaultValue(false);
             entity.Property(x => x.Runtime).HasMaxLength(500);
             entity.HasOne<AccountRecord>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -658,6 +659,10 @@ public sealed class FarmNodeRecord
     // Opt-in explícito do dono: o node pode receber demandas da conta da
     // plataforma (ADR 0031). Nunca vale para nodes embedded.
     public bool SharePlatformWork { get; set; }
+    // Detectado no heartbeat (ADR 0043): o node tem o runtime local do modelo
+    // (Ollama) e pode receber jobs de geração. Só nodes assim recebem
+    // IRIS_GENERATE — evita desperdício de tentativas em pool mista.
+    public bool SupportsGeneration { get; set; }
     public int? AgentMaxLogicalProcessors { get; set; }
     public long? AgentMaxMemoryBytes { get; set; }
     public string? VerifiedProfileHash { get; set; }

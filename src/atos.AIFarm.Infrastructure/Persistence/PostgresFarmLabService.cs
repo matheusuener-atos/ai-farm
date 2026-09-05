@@ -724,10 +724,15 @@ internal sealed class PostgresFarmLabService(
         // Pendente (ADR 0038) CONTINUA na lista: ocupa o assento e mantém o
         // embedded suprimido — o bloqueio vem do acceptJobs=false do snapshot.
         // Descomissionado sai de verdade: o assento não existe mais.
+        // Geração (ADR 0043) só vai para Agents com o runtime local detectado
+        // — evita o job cair numa máquina sem Ollama, falhar e reencaminhar.
+        var requiresGeneration = string.Equals(
+            definition.Id, FarmWorkloadCatalog.GenerateId, StringComparison.Ordinal);
         var nodes = await db.FarmNodes
             .Where(x => x.AccountId == accountId &&
                 x.DecommissionedAtUtc == null &&
                 (targetNodeId == null || x.Id == targetNodeId) &&
+                (!requiresGeneration || (x.ConnectionKind == "Agent" && x.SupportsGeneration)) &&
                 (!platformPool ||
                  (x.ConnectionKind == "Agent" && x.SharePlatformWork)))
             .ToArrayAsync(cancellationToken);

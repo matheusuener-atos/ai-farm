@@ -95,7 +95,8 @@ public sealed record FarmAgentHeartbeatRequest(
     Guid? ActiveJobId = null,
     IReadOnlyList<Guid>? ActiveJobIds = null,
     double? WorkerCpuPercent = null,
-    long? WorkerMemoryBytes = null);
+    long? WorkerMemoryBytes = null,
+    bool SupportsGeneration = false);
 
 public sealed record FarmAgentHeartbeatResult(
     Guid NodeId,
