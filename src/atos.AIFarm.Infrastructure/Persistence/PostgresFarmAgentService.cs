@@ -185,6 +185,9 @@ internal sealed class PostgresFarmAgentService(
         node.AgentAcceptJobs = normalized.AcceptJobs;
         node.AgentMaxLogicalProcessors = normalized.MaxLogicalProcessors;
         node.AgentMaxMemoryBytes = normalized.MaxMemoryBytes;
+        // Capacidade de geração detectada pelo Agent (ADR 0043): só quem tem o
+        // runtime local recebe IRIS_GENERATE.
+        node.SupportsGeneration = normalized.SupportsGeneration;
         if (normalized.WorkerCpuPercent is double workerCpu)
             node.LastWorkerCpuPercent = Math.Clamp(workerCpu, 0, 100d * 1024);
         if (normalized.WorkerMemoryBytes is long workerMemory)
@@ -906,7 +909,10 @@ internal sealed class PostgresFarmAgentService(
             maxLogicalProcessors,
             maxMemoryBytes,
             request.ActiveJobId,
-            NormalizeActiveJobIds(request.ActiveJobId, request.ActiveJobIds));
+            NormalizeActiveJobIds(request.ActiveJobId, request.ActiveJobIds),
+            request.WorkerCpuPercent,
+            request.WorkerMemoryBytes,
+            request.SupportsGeneration);
     }
 
     private static Guid[] NormalizeActiveJobIds(Guid? legacyJobId, IReadOnlyList<Guid>? jobIds)

@@ -22,6 +22,66 @@ internal static class AgentModelRuntime
         BaseAddress = new Uri("http://127.0.0.1:11434"),
         Timeout = Timeout.InfiniteTimeSpan
     };
+    private static readonly HttpClient Probe = new()
+    {
+        BaseAddress = new Uri("http://127.0.0.1:11434"),
+        Timeout = TimeSpan.FromSeconds(2)
+    };
+
+    private static volatile bool _available;
+    private static DateTimeOffset _probedAtUtc = DateTimeOffset.MinValue;
+    private static readonly Lock ProbeGate = new();
+
+    /// <summary>
+    /// O runtime local (Ollama) está de pé? Sondado com cache de 30s e usado
+    /// no heartbeat para o servidor rotear geração só a quem pode executá-la
+    /// (ADR 0043). Best-effort e síncrono para caber no builder do heartbeat.
+    /// </summary>
+    public static bool IsAvailable
+    {
+        get
+        {
+            lock (ProbeGate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (now - _probedAtUtc < TimeSpan.FromSeconds(30)) return _available;
+                _probedAtUtc = now;
+            }
+            try
+            {
+                using var response = Probe.GetAsync("/api/tags").GetAwaiter().GetResult();
+                _available = response.IsSuccessStatusCode;
+            }
+            catch (Exception exception) when (exception is
+                HttpRequestException or TaskCanceledException or InvalidOperationException)
+            {
+                _available = false;
+            }
+            return _available;
+        }
+    }
+
+    /// <summary>
+    /// Garante o modelo da plataforma baixado no runtime local (pull). Usado
+    /// pelo painel para o leigo não tocar em linha de comando.
+    /// </summary>
+    public static async Task PullAsync(string model, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/pull")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new { model, stream = false }, JsonOptions),
+                Encoding.UTF8, "application/json")
+        };
+        using var pull = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:11434"), Timeout = TimeSpan.FromMinutes(30) };
+        using var response = await pull.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"Não foi possível baixar o modelo {model} ({(int)response.StatusCode}): {Truncate(body, 160)}");
+        }
+    }
 
     public static async Task<AgentWorkerResult> GenerateAsync(
         RemoteJobManifest manifest,
