@@ -71,6 +71,14 @@ public sealed record ChatAttachmentLimits(
 {
     public static ChatAttachmentLimits Default { get; } = new(3, 5 * 1024 * 1024, 15 * 1024 * 1024);
 }
+public static class AiProviderNames
+{
+    public const string Local = "atos Fake Provider";
+    // Rota da rede da farm (ADR 0040): os dados vao apenas para nodes da
+    // propria conta - mesmo dominio de confianca do ambiente local.
+    public const string FarmNetwork = "AI Farm Network";
+}
+
 public sealed record PriceEstimate(long MaximumCostMinor);
 public sealed record AiContextMessage(
     ChatMessageRole Role,

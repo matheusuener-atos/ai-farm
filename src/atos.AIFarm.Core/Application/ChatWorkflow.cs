@@ -168,7 +168,8 @@ public sealed class ChatWorkflow(
             normalizedSettings.ModelPreference,
             cancellationToken);
         if (dataClassification == AiDataClassification.Private &&
-            !string.Equals(route.Provider, "atos Fake Provider", StringComparison.Ordinal))
+            !string.Equals(route.Provider, AiProviderNames.Local, StringComparison.Ordinal) &&
+            !string.Equals(route.Provider, AiProviderNames.FarmNetwork, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 "Dados classificados como PRIVADO não podem sair deste ambiente. Use CONFIÁVEL somente se o envio ao provedor indicado no preflight estiver autorizado.");
@@ -177,7 +178,8 @@ public sealed class ChatWorkflow(
         // local com consentimento explícito por execução (ADR 0035). PRIVADO
         // continua bloqueando qualquer rota externa pelo gate acima.
         if (useFarmKnowledge &&
-            !string.Equals(route.Provider, "atos Fake Provider", StringComparison.Ordinal) &&
+            !string.Equals(route.Provider, AiProviderNames.Local, StringComparison.Ordinal) &&
+            !string.Equals(route.Provider, AiProviderNames.FarmNetwork, StringComparison.Ordinal) &&
             !authorizeFarmKnowledgeExternally)
         {
             throw new InvalidOperationException(

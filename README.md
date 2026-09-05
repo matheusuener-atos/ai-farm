@@ -895,6 +895,20 @@ demandas e pool têm prioridade natural — o consumo só acontece com a fila
 vazia. O painel do Agent mostra a entrega na janela DESEMPENHO e os ganhos
 estimados da sessão pela política de rewards (ADR 0037).
 
+### Rota "AI Farm Network" — o chat como trabalho da rede
+
+No perfil da conversa, o modelo `AI FARM NETWORK (extrai da sua biblioteca)`
+transforma a mensagem numa demanda útil da própria conta (ADR 0040): um node
+da pool executa o workload `iris-answer-v1` — extração determinística sobre
+os trechos recuperados da biblioteca indexada — com verificação por
+reexecução como qualquer job. A resposta volta ao chat com "Fontes da Farm",
+o CP pertence ao node que computou e a tarifa é simbólica. O v1 responde COM
+O QUE A REDE INDEXOU (não é um LLM): perguntas fora da biblioteca recebem a
+orientação honesta de indexar conteúdo ou usar a rota externa. PRIVADO e a
+Memória da Farm são permitidos nesta rota — os dados só vão para nodes da
+própria conta. Inferência generativa nos nodes (quórum) é o próximo ADR
+desta linha.
+
 ## Provider compatível — modelos open source e gratuitos
 
 Além do OpenAI, `AIFarm__AI__Provider=OpenAICompatible` aceita qualquer
