@@ -38,7 +38,8 @@ public sealed class PostgresBestOfNPremiumTests
                 queue,
                 provider.GetRequiredService<IFarmKnowledgeSearchService>(),
                 TimeProvider.System,
-                new FarmNetworkOptions("llama3.2:3b", PremiumCandidates: 2));
+                new FarmNetworkOptions("llama3.2:3b", PremiumCandidates: 2),
+                provider.GetRequiredService<IFarmLabService>());
             var request = new AiProviderRequest(
                 "o que é o ledger?", FarmNetworkAiCatalog.PremiumRoute);
 
@@ -53,6 +54,55 @@ public sealed class PostgresBestOfNPremiumTests
             Assert.Contains("AI FARM PREMIUM", result.Content);
             Assert.Contains("sintetizado de 2 respostas", result.Content);
             Assert.True(result.ActualCostMinor >= 1);
+        }
+        finally { await CleanupAsync(connectionString, accountId); }
+    }
+
+    [RequiresPostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task PremiumScalesDownUnderLoadToProtectThePool()
+    {
+        var connectionString = PostgresTestEnvironment.GetRequiredConnectionString();
+        var accountId = Guid.NewGuid();
+        var identity = new AIFarmIdentity(accountId, accountId, "premium adaptive test");
+        try
+        {
+            await using var provider = BuildProvider(connectionString, identity);
+            await provider.InitializeAIFarmAsync();
+            var agents = provider.GetRequiredService<IFarmAgentService>();
+            var lab = provider.GetRequiredService<IFarmLabService>();
+            await lab.SetNodeStatusAsync(FarmNodeStatus.Paused);
+            var linked = await EnrollConfirmedAsync(provider, "PREMIUM-BUSY-PC");
+            var queue = provider.GetRequiredService<IFarmDemandQueueService>();
+            var dispatcher = provider.GetRequiredService<IFarmDemandDispatcher>();
+
+            // Carga pré-existente: uma geração já ativa na fila (nao servida),
+            // com apenas 1 node capaz -> folga zero -> premium degrada para N=1.
+            var loadInput = JsonSerializer.Serialize(new FarmGenerateInput(
+                FarmWorkloadCatalog.GenerateInputSchema, "llama3.2:3b", "carga"), JsonOptions);
+            await queue.SubmitAsync(new FarmDemandRequest(
+                FarmWorkloadCatalog.GenerateId, "carga", loadInput,
+                FarmDemandPriority.High, 5, TargetShards: 1, MaxAttemptsPerShard: 1));
+
+            var farmProvider = new FarmNetworkChatProvider(
+                queue,
+                provider.GetRequiredService<IFarmKnowledgeSearchService>(),
+                TimeProvider.System,
+                new FarmNetworkOptions("llama3.2:3b", PremiumCandidates: 3),
+                lab);
+            var request = new AiProviderRequest(
+                "o que e o ledger?", FarmNetworkAiCatalog.PremiumRoute);
+
+            var execution = farmProvider.ExecuteAsync(request, CancellationToken.None);
+            for (var round = 0; round < 120 && !execution.IsCompleted; round++)
+            {
+                await ServeGenerationJobsAsync(agents, dispatcher, linked.Credential);
+                await Task.Delay(TimeSpan.FromMilliseconds(250));
+            }
+            var result = await execution;
+
+            // N=1 sob carga: geração simples, sem síntese de várias respostas.
+            Assert.DoesNotContain("sintetizado de", result.Content);
         }
         finally { await CleanupAsync(connectionString, accountId); }
     }

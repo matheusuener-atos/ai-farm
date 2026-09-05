@@ -162,7 +162,8 @@ public sealed class FarmNetworkChatProvider(
     IFarmDemandQueueService demands,
     IFarmKnowledgeSearchService knowledge,
     TimeProvider timeProvider,
-    FarmNetworkOptions networkOptions)
+    FarmNetworkOptions networkOptions,
+    IFarmLabService lab)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -263,7 +264,7 @@ public sealed class FarmNetworkChatProvider(
     {
         var input = BuildGenerateInput(
             networkOptions.NetworkModel, request.Prompt, request.SystemInstruction, request.Context);
-        var candidateCount = networkOptions.PremiumCandidates;
+        var candidateCount = await ResolveCandidateCountAsync(cancellationToken);
         var tasks = Enumerable.Range(0, candidateCount)
             .Select(async _ =>
             {
@@ -319,6 +320,46 @@ public sealed class FarmNetworkChatProvider(
         var content = judged.Answer +
             $"\n\n[AI FARM PREMIUM // sintetizado de {candidates.Length} respostas da rede // não verificado — CP=0]";
         return BuildResult(content, request.Prompt, judged, FarmNetworkAiCatalog.PremiumEntry);
+    }
+
+    /// <summary>
+    /// N adaptativo (ADR 0045): sem concorrência, best-of-N completo; sob
+    /// carga, cai pela capacidade livre de geração para não amarrar o pool
+    /// que deveria atender outros chats. Best-effort — falha na sondagem
+    /// mantém o N configurado.
+    /// </summary>
+    private async Task<int> ResolveCandidateCountAsync(CancellationToken cancellationToken)
+    {
+        var configured = networkOptions.PremiumCandidates;
+        try
+        {
+            var activeGeneration = (await demands.GetDashboardAsync(cancellationToken))
+                .Demands.Count(x =>
+                    string.Equals(x.WorkloadId, FarmWorkloadCatalog.GenerateId, StringComparison.Ordinal) &&
+                    x.Status is FarmDemandStatus.Queued
+                        or FarmDemandStatus.Dispatching
+                        or FarmDemandStatus.Processing);
+            // Sem outra geração em curso, é só este chat: usa o N cheio
+            // (mesmo com uma máquina só, as candidatas rodam em série).
+            if (activeGeneration == 0) return configured;
+
+            var capableNodes = (await lab.GetDashboardAsync(cancellationToken)).Nodes
+                .Count(node =>
+                    node.ConnectionKind == FarmNodeConnectionKind.Agent &&
+                    node.Status == FarmNodeStatus.Online &&
+                    node.IsHeartbeatFresh &&
+                    node.AcceptJobs &&
+                    node.SupportsGeneration);
+            // Sob concorrência, nunca dispara mais candidatas que máquinas
+            // livres; se não há folga, degrada para geração simples (N=1).
+            var free = capableNodes - activeGeneration;
+            return Math.Clamp(free, 1, configured);
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or ArgumentException)
+        {
+            return configured;
+        }
     }
 
     private static string BuildGenerateInput(

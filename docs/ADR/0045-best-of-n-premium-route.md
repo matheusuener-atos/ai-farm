@@ -31,6 +31,11 @@ a melhor — o padrão que laboratórios usam para elevar qualidade.
   paga. Os jobs internos seguem CP=0 (não verificados, ADR 0043).
 - **Latência honesta**: as N candidatas rodam em paralelo entre máquinas, então
   o relógio ≈ 1 geração + 1 juiz (~2×), não N×; com uma máquina só, é ~N+1×.
+- **N adaptativo (justiça do pool)**: premium ocupa máquinas que poderiam
+  atender outros chats. Sem geração concorrente, usa o N cheio; sob carga,
+  N cai pela capacidade livre de geração (`livres = nodes capazes − gerações
+  ativas`), e sem folga degrada para geração simples (N=1). Assim um chat
+  premium nunca amarra o pool inteiro nem atrasa os chats normais.
 
 ## Consequências
 
