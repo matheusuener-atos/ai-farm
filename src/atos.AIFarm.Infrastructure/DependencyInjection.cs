@@ -1,6 +1,7 @@
 using atos.AIFarm.Core.Application;
 using atos.AIFarm.Core.Wallet;
 using atos.AIFarm.Infrastructure.Development;
+using atos.AIFarm.Infrastructure.Providers.FarmNetwork;
 using atos.AIFarm.Infrastructure.Attachments;
 using atos.AIFarm.Infrastructure.Persistence;
 using atos.AIFarm.Infrastructure.Providers.Compatible;
@@ -63,22 +64,20 @@ public static class DependencyInjection
                 compatible.MaximumOutputTokens));
             services.AddSingleton(compatible);
             services.AddSingleton(catalog);
-            services.AddSingleton<IAiPriceCatalog>(catalog);
-            services.AddSingleton<IPriceEstimator>(catalog);
-            services.AddSingleton<IAiRouteSelector>(catalog);
-            services.AddSingleton<IAiModelCatalog>(catalog);
+            services.AddSingleton(new PrimaryAiCatalogHandles(catalog, catalog, catalog, catalog));
             services.AddSingleton<OpenAiCompatibleChatProvider>();
             services.AddSingleton<IAiProviderClient>(provider =>
                 provider.GetRequiredService<OpenAiCompatibleChatProvider>());
         }
         else if (openAi is null)
         {
-            services.AddSingleton<IPriceEstimator, FixedPriceEstimator>();
             services.AddSingleton<BestAvailableRouteSelector>();
-            services.AddSingleton<IAiRouteSelector>(provider =>
-                provider.GetRequiredService<BestAvailableRouteSelector>());
-            services.AddSingleton<IAiModelCatalog>(provider =>
-                provider.GetRequiredService<BestAvailableRouteSelector>());
+            services.AddSingleton(provider =>
+            {
+                var selector = provider.GetRequiredService<BestAvailableRouteSelector>();
+                return new PrimaryAiCatalogHandles(
+                    selector, selector, new FixedPriceEstimator(), null);
+            });
             services.AddSingleton<IAiProviderClient, FakeAiProvider>();
         }
         else
@@ -86,19 +85,29 @@ public static class DependencyInjection
             openAi.Validate();
             services.AddSingleton(openAi);
             services.AddSingleton<OpenAiPriceCatalog>();
-            services.AddSingleton<IAiPriceCatalog>(provider =>
-                provider.GetRequiredService<OpenAiPriceCatalog>());
-            services.AddSingleton<IPriceEstimator>(provider =>
-                provider.GetRequiredService<OpenAiPriceCatalog>());
-            services.AddSingleton<IAiRouteSelector>(provider =>
-                provider.GetRequiredService<OpenAiPriceCatalog>());
-            services.AddSingleton<IAiModelCatalog>(provider =>
-                provider.GetRequiredService<OpenAiPriceCatalog>());
+            services.AddSingleton(provider =>
+            {
+                var catalog = provider.GetRequiredService<OpenAiPriceCatalog>();
+                return new PrimaryAiCatalogHandles(catalog, catalog, catalog, catalog);
+            });
             services.AddSingleton<OpenAiResponsesProvider>();
             services.AddSingleton<IAiProviderClient>(provider =>
                 provider.GetRequiredService<OpenAiResponsesProvider>());
         }
-        services.AddSingleton<IAiProvider, ProtectedAiProvider>();
+        // Rota AI Farm Network (ADR 0040): catálogo composto por cima do
+        // primário e despachante por rota; o breaker protege só o externo.
+        services.AddSingleton<FarmNetworkAiCatalog>();
+        services.AddSingleton<IAiPriceCatalog>(provider =>
+            provider.GetRequiredService<FarmNetworkAiCatalog>());
+        services.AddSingleton<IPriceEstimator>(provider =>
+            provider.GetRequiredService<FarmNetworkAiCatalog>());
+        services.AddSingleton<IAiRouteSelector>(provider =>
+            provider.GetRequiredService<FarmNetworkAiCatalog>());
+        services.AddSingleton<IAiModelCatalog>(provider =>
+            provider.GetRequiredService<FarmNetworkAiCatalog>());
+        services.AddSingleton<ProtectedAiProvider>();
+        services.AddScoped<FarmNetworkChatProvider>();
+        services.AddScoped<IAiProvider, RoutingAiProvider>();
         services.AddScoped<ChatWorkflow>();
         services.AddScoped<IrisApiService>();
         services.AddHostedService<ReservationExpirationWorker>();
