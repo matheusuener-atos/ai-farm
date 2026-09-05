@@ -1009,7 +1009,8 @@ internal sealed class PostgresFarmLabService(
             pendingConfirmation,
             heartbeatFresh ? node.LastWorkerCpuPercent : null,
             heartbeatFresh ? node.LastWorkerMemoryBytes : null,
-            lifetimeComputeUnitsMilli);
+            lifetimeComputeUnitsMilli,
+            node.SupportsGeneration);
     }
 
     internal FarmJobSnapshot ToSnapshot(

@@ -52,7 +52,8 @@ public sealed class PostgresFarmNetworkRouteTests
                 queue,
                 provider.GetRequiredService<IFarmKnowledgeSearchService>(),
                 TimeProvider.System,
-                FarmNetworkOptions.Default);
+                FarmNetworkOptions.Default,
+                provider.GetRequiredService<IFarmLabService>());
             var request = new AiProviderRequest(
                 "como nasce o credito computacional?",
                 FarmNetworkAiCatalog.Route);
