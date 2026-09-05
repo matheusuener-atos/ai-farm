@@ -7,18 +7,29 @@ public sealed class FarmWorkloadCatalogTests
     [Fact]
     public void CatalogHasUniqueImmutableIdentifiersAndSafePolicies()
     {
-        Assert.Equal(5, FarmWorkloadCatalog.Definitions.Count);
+        Assert.Equal(6, FarmWorkloadCatalog.Definitions.Count);
         Assert.Equal(
             FarmWorkloadCatalog.Definitions.Count,
             FarmWorkloadCatalog.Definitions.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count());
         Assert.All(FarmWorkloadCatalog.Definitions, definition =>
         {
-            Assert.Equal("DENY_ALL", definition.NetworkPolicy);
             Assert.Equal("STANDARD", definition.DataClassification);
-            Assert.StartsWith("DETERMINISTIC_", definition.VerificationPolicy, StringComparison.Ordinal);
-            Assert.Equal(1, definition.MaxLogicalProcessors);
-            Assert.InRange(definition.MaxMemoryBytes, 1, 256L * 1024 * 1024);
             Assert.True(definition.ProcessingPointsMilli > 0);
+            if (definition.Id == FarmWorkloadCatalog.GenerateId)
+            {
+                // ADR 0043: geração usa o runtime local do node e não é
+                // reexecutável — a exceção deliberada e única do catálogo.
+                Assert.Equal(FarmWorkloadCatalog.UnverifiedGenerationPolicy, definition.VerificationPolicy);
+                Assert.Equal(FarmWorkloadCatalog.LocalhostModelNetworkPolicy, definition.NetworkPolicy);
+                Assert.InRange(definition.TimeoutSeconds, 30, 120);
+            }
+            else
+            {
+                Assert.Equal("DENY_ALL", definition.NetworkPolicy);
+                Assert.StartsWith("DETERMINISTIC_", definition.VerificationPolicy, StringComparison.Ordinal);
+                Assert.Equal(1, definition.MaxLogicalProcessors);
+                Assert.InRange(definition.MaxMemoryBytes, 1, 256L * 1024 * 1024);
+            }
         });
     }
 

@@ -240,7 +240,11 @@ builder.Services.AddAIFarmDevelopment(
     openAi,
     contextLimits,
     safetyCap,
-    compatibleProvider);
+    compatibleProvider,
+    new FarmNetworkOptions(
+        builder.Configuration.GetValue(
+            "AIFarm:AI:NetworkModel",
+            FarmNetworkOptions.Default.NetworkModel)!));
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();

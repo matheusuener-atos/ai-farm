@@ -54,6 +54,15 @@ public static class FarmWorkloadCatalog
     public const string AnswerInputSchema = "atos-answer-input-v1";
     public const string AnswerOutputSchema = "atos-answer-output-v1";
 
+    // Modelo da plataforma servido pela rede (ADR 0043): geracao nos nodes
+    // via runtime local; sem verificacao (CP=0) ate o quorum por par.
+    public const string GenerateId = "iris-generate-v1";
+    public const string GenerateVersion = "atos-iris-generate-v1";
+    public const string GenerateInputSchema = "atos-generate-input-v1";
+    public const string GenerateOutputSchema = "atos-generate-output-v1";
+    public const string UnverifiedGenerationPolicy = "UNVERIFIED_GENERATION_V1";
+    public const string LocalhostModelNetworkPolicy = "LOCALHOST_MODEL_V1";
+
     public static IReadOnlyList<FarmWorkloadDefinition> Definitions { get; } =
     [
         new(
@@ -134,7 +143,24 @@ public static class FarmWorkloadCatalog
             "STANDARD",
             AnswerInputSchema,
             AnswerOutputSchema,
-            RequiredMemoryBytes: 128L * 1024 * 1024)
+            RequiredMemoryBytes: 128L * 1024 * 1024),
+        new(
+            GenerateId,
+            "IRIS_GENERATE",
+            GenerateVersion,
+            "IRIS GENERATE",
+            "Gera texto com o modelo da plataforma no runtime local do node (experimental, sem CP ate o quorum).",
+            UnverifiedGenerationPolicy,
+            1,
+            120,
+            1,
+            2L * 1024 * 1024 * 1024,
+            50_000,
+            LocalhostModelNetworkPolicy,
+            "STANDARD",
+            GenerateInputSchema,
+            GenerateOutputSchema,
+            RequiredMemoryBytes: 2L * 1024 * 1024 * 1024)
     ];
 
     public static FarmWorkloadDefinition GetRequired(string id)
@@ -173,6 +199,8 @@ public static class FarmDeterministicWorkloads
             "MERKLE_ROOT_SHA256" => DigestOnly(ComputeMerkleRoot(nonce, iterations, cancellationToken)),
             "IRIS_TEXT_INDEX" => ComputeTextIndex(inputPayload, cancellationToken),
             "IRIS_ANSWER" => ComputeAnswer(inputPayload, cancellationToken),
+            "IRIS_GENERATE" => throw new InvalidOperationException(
+                "IRIS_GENERATE roda no runtime local do Agent e nao e reexecutavel (ADR 0043)."),
             _ => throw new ArgumentException("Workload não autorizado.", nameof(workload))
         };
 
@@ -435,3 +463,17 @@ public sealed record FarmAnswerResult(
     string Answer,
     IReadOnlyList<FarmAnswerSource> Sources,
     int ScoredSentences);
+
+public sealed record FarmGenerateInput(
+    string Version,
+    string Model,
+    string Question,
+    string? SystemInstruction = null,
+    IReadOnlyList<string>? Context = null);
+
+public sealed record FarmGenerateResult(
+    string Version,
+    string Model,
+    string Answer,
+    long? PromptUnits = null,
+    long? CompletionUnits = null);
