@@ -1387,6 +1387,11 @@ namespace atos.AIFarm.Infrastructure.Persistence.Migrations
                         .HasMaxLength(24)
                         .HasColumnType("character varying(24)");
 
+                    b.Property<bool>("SupportsGeneration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("VerificationLevel")
                         .IsRequired()
                         .HasMaxLength(24)

@@ -220,7 +220,8 @@ internal static class AgentInventory
         activeJobIds?.FirstOrDefault(),
         activeJobIds,
         Math.Round(workerCpuPercent, 1),
-        workerMemoryBytes);
+        workerMemoryBytes,
+        AgentModelRuntime.IsAvailable);
     }
 
     private static string Runtime() =>
