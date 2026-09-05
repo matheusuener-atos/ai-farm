@@ -63,7 +63,8 @@ public sealed record FarmNodeSnapshot(
     bool PendingConfirmation = false,
     double? LiveWorkerCpuPercent = null,
     long? LiveWorkerMemoryBytes = null,
-    long LifetimeComputeUnitsMilli = 0);
+    long LifetimeComputeUnitsMilli = 0,
+    bool SupportsGeneration = false);
 
 public sealed record FarmAgentEnrollment(
     Guid Id,
