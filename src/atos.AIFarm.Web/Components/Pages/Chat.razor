@@ -7,6 +7,7 @@
 @inject IChatStore ChatStore
 @inject IWalletService Wallet
 @inject NavigationManager Navigation
+@inject IFarmDemandQueueService LibraryDemands
 @inject IJSRuntime JS
 @inject ChatContextLimits ContextLimits
 @inject IAiModelCatalog ModelCatalog
@@ -378,6 +379,12 @@
                             @onclick="() => StartNegativeFeedback(message)"
                             disabled="@_working">
                         Não útil
+                    </button>
+                    <button type="button"
+                            class="message-action"
+                            @onclick="() => SaveToLibraryAsync(message)"
+                            disabled="@_working">
+                        @(_savedToLibraryMessageId == message.Id ? "Na fila da Biblioteca" : "Guardar na Biblioteca")
                     </button>
                 }
             </div>
@@ -764,6 +771,7 @@
     private AiDataClassification _dataClassification = AiDataClassification.Standard;
     private bool _useFarmKnowledge;
     private bool _authorizeFarmExternal;
+    private Guid? _savedToLibraryMessageId;
 
     private IReadOnlyList<AiModelOption> ModelOptions => ModelCatalog.GetOptions();
     private int SelectedModelMaximumOutputTokens =>
@@ -1221,6 +1229,44 @@
         _editingBranch = true;
         _branchSourceConversationId = _conversationId;
         _branchMessageId = message.Id;
+    }
+
+    private async Task SaveToLibraryAsync(ChatMessageSnapshot message)
+    {
+        if (_working || string.IsNullOrWhiteSpace(message.Content)) return;
+        _working = true;
+        _error = null;
+        try
+        {
+            // O chat alimenta a biblioteca: a resposta vira demanda de
+            // indexação executada pela rede (ADR 0041).
+            var content = message.Content.Length > 28_000
+                ? message.Content[..28_000]
+                : message.Content;
+            var label = $"Chat // {CurrentConversationLabel}";
+            await LibraryDemands.SubmitAsync(new FarmDemandRequest(
+                "iris-text-index-v1",
+                label.Length <= 80 ? label : label[..80],
+                content,
+                FarmDemandPriority.Normal));
+            _savedToLibraryMessageId = message.Id;
+        }
+        catch (ArgumentException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        catch (Exception)
+        {
+            _error = "Não foi possível guardar na Biblioteca agora.";
+        }
+        finally
+        {
+            _working = false;
+        }
     }
 
     private async Task CopyMessageAsync(ChatMessageSnapshot message)

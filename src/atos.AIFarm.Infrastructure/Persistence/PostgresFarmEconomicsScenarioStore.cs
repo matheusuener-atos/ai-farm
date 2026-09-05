@@ -16,6 +16,20 @@ public sealed class PostgresFarmEconomicsScenarioStore(
     public const string CurrentVersion = "atos-farm-economics-v1";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    internal async Task<IReadOnlyList<FarmEconomicsScenarioSnapshot>> ListForAccountAsync(
+        Guid accountId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var records = await db.FarmEconomicsScenarios.AsNoTracking()
+            .Where(x => x.AccountId == accountId)
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(Math.Clamp(limit, 1, 50))
+            .ToListAsync(cancellationToken);
+        return records.Select(ToSnapshot).ToArray();
+    }
+
     public async Task<IReadOnlyList<FarmEconomicsScenarioSnapshot>> ListAsync(
         int limit = 10,
         CancellationToken cancellationToken = default)
@@ -38,9 +52,25 @@ public sealed class PostgresFarmEconomicsScenarioStore(
         Guid? sourceJobId = null,
         CancellationToken cancellationToken = default)
     {
+        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        return await SaveForAccountAsync(
+            identity.AccountId, name, scenario, sourceJobId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Caminho por conta explicita (auto-propostas do ADR 0042): a conclusao
+    /// de um job de Agent nao carrega identidade de usuario.
+    /// </summary>
+    internal async Task<FarmEconomicsScenarioSnapshot> SaveForAccountAsync(
+        Guid accountId,
+        string name,
+        FarmEconomicsScenario scenario,
+        Guid? sourceJobId = null,
+        CancellationToken cancellationToken = default)
+    {
         var normalizedName = NormalizeName(name);
         var result = FarmEconomicsCalculator.Calculate(scenario);
-        var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        var identity = new { AccountId = accountId };
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
         string? sourceEvidenceDigest = null;
