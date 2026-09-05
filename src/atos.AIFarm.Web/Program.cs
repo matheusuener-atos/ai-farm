@@ -244,7 +244,10 @@ builder.Services.AddAIFarmDevelopment(
     new FarmNetworkOptions(
         builder.Configuration.GetValue(
             "AIFarm:AI:NetworkModel",
-            FarmNetworkOptions.Default.NetworkModel)!));
+            FarmNetworkOptions.Default.NetworkModel)!,
+        builder.Configuration.GetValue(
+            "AIFarm:AI:PremiumCandidates",
+            FarmNetworkOptions.Default.PremiumCandidates)));
 builder.Services.RemoveAll<IAIFarmIdentityAccessor>();
 builder.Services.AddScoped<IAIFarmIdentityAccessor,
     AuthenticatedAIFarmIdentityAccessor>();
