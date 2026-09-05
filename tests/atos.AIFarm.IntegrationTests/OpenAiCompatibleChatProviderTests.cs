@@ -77,6 +77,32 @@ public sealed class OpenAiCompatibleChatProviderTests
     }
 
     [Fact]
+    public async Task StreamingWithoutUsageEstimatesUnitsInsteadOfFailing()
+    {
+        // Ollama e outros compatíveis podem omitir `usage` no streaming — a
+        // resposta deve valer com estimativa, não quebrar.
+        var options = Options();
+        var catalog = Catalog(options);
+        var body = string.Join("\n",
+            """data: {"choices":[{"delta":{"content":"resposta local"}}]}""",
+            "data: [DONE]",
+            string.Empty);
+        var handler = new StubHandler(_ => Text(body));
+        using var provider = new OpenAiCompatibleChatProvider(options, catalog, handler);
+        var route = await catalog.SelectAsync("uma pergunta", CancellationToken.None);
+
+        var result = await provider.ExecuteStreamingAsync(
+            new AiProviderRequest("uma pergunta", route),
+            (_, _) => ValueTask.CompletedTask,
+            CancellationToken.None);
+
+        Assert.Equal("resposta local", result.Content);
+        Assert.True(result.InputUnits >= 1);
+        Assert.True(result.OutputUnits >= 1);
+        Assert.True(result.ActualCostMinor >= 1);
+    }
+
+    [Fact]
     public async Task ExhaustedFreeQuotaSurfacesAsQuotaFailureWithProviderLabel()
     {
         var options = Options();
