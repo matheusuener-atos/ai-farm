@@ -126,7 +126,8 @@ public static class DependencyInjection
         FarmNodeReliabilityPolicy? nodeReliabilityPolicy = null,
         FarmRewardPolicy? rewardPolicy = null,
         FarmPlatformPoolOptions? platformPool = null,
-        FarmContinuousOptions? continuousOptions = null)
+        FarmContinuousOptions? continuousOptions = null,
+        FarmVerificationOptions? verificationOptions = null)
     {
         var normalized = NeonPostgresConnection.Normalize(connectionString);
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
@@ -140,6 +141,9 @@ public static class DependencyInjection
         services.TryAddSingleton(platformPool ?? FarmPlatformPoolOptions.Disabled);
         services.TryAddSingleton(
             (continuousOptions ?? FarmContinuousOptions.Default).Validate());
+        // Fundação do pagamento de geração (ADR 0047), desligada por padrão.
+        services.TryAddSingleton(
+            (verificationOptions ?? FarmVerificationOptions.Disabled).Validate());
         services.AddPooledDbContextFactory<AIFarmDbContext>(
             options => options.UseNpgsql(normalized));
         if (identity is not null)

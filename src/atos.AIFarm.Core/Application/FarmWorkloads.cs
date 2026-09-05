@@ -61,6 +61,11 @@ public static class FarmWorkloadCatalog
     public const string GenerateInputSchema = "atos-generate-input-v1";
     public const string GenerateOutputSchema = "atos-generate-output-v1";
     public const string UnverifiedGenerationPolicy = "UNVERIFIED_GENERATION_V1";
+    // Fundação do pagamento de geração (ADR 0047): policy versionada que a fatia
+    // futura aplicará ao iris-generate quando as camadas anti-fraude existirem.
+    // AINDA NÃO aplicada a nenhum workload — trocar a policy do manifesto exige
+    // bump de FarmAgentProtocol.CurrentAgentVersion (o manifesto é assinado).
+    public const string VerifiedGenerationPolicy = "VERIFIED_GENERATION_V1";
     public const string LocalhostModelNetworkPolicy = "LOCALHOST_MODEL_V1";
 
     public static IReadOnlyList<FarmWorkloadDefinition> Definitions { get; } =
