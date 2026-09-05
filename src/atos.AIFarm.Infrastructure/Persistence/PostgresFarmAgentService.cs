@@ -14,7 +14,8 @@ internal sealed class PostgresFarmAgentService(
     FarmRewardPolicy rewardPolicy,
     IFarmContinuousDispatcher continuousDispatcher,
     FarmContinuousOptions continuousOptions,
-    FarmRewardAutoProposer rewardAutoProposer) : IFarmAgentService
+    FarmRewardAutoProposer rewardAutoProposer,
+    FarmNetworkOptions networkOptions) : IFarmAgentService
 {
     internal const int HeartbeatIntervalSeconds = 30;
     internal const int ActiveHeartbeatIntervalSeconds = 2;
@@ -279,7 +280,8 @@ internal sealed class PostgresFarmAgentService(
             node.AgentCredentialIssuedAtUtc,
             rewardPolicy.IsEnabled,
             rewardPolicy.IsEnabled ? rewardPolicy.AicMinorPerThousandCp : 0,
-            lifetimeComputeUnitsMilli);
+            lifetimeComputeUnitsMilli,
+            networkOptions.NetworkModel);
     }
 
     public async Task<FarmAgentCredentialRotation?> RotateCredentialAsync(

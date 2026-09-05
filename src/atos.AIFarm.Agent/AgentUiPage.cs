@@ -102,6 +102,8 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
 .confirm-key { margin-top:12px; padding:12px 14px; border:1.5px solid var(--ink); background:var(--amber-deep); font-size:13px; }
 .confirm-key b { font-size:22px; letter-spacing:.08em; font-variant-numeric:tabular-nums; display:inline-block; margin:0 6px; }
 .confirm-key small { display:block; color:var(--muted); margin-top:4px; }
+.gen-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.gen-row span { flex:1 1 240px; }
 .bars { display:grid; gap:10px; }
 .bar-row { display:grid; grid-template-columns:150px 1fr 150px; gap:12px; align-items:center; }
 @media (max-width:560px){ .bar-row { grid-template-columns:110px 1fr 110px; } }
@@ -240,6 +242,18 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
       </div>
     </section>
   </div>
+
+  <section class="win">
+    <div class="win-title"><span>GERAÇÃO DE IA (OPCIONAL)</span></div>
+    <div class="win-body">
+      <div class="gen-row">
+        <span id="gen-status">Este computador ainda não gera respostas de IA.</span>
+        <button id="gen-enable" class="primary" disabled>Ativar geração neste computador</button>
+      </div>
+      <p class="note">Farmar não exige isto. Ative só se quiser que a rede use esta máquina para <b>pensar</b> as respostas do chat — um clique instala o runtime e baixa o modelo (alguns GB; o Windows pode pedir confirmação).</p>
+      <p id="gen-detail" class="note" hidden></p>
+    </div>
+  </section>
 
   <section class="win">
     <div class="win-title"><span>LIMITES DO MEU COMPUTADOR</span></div>
@@ -482,6 +496,23 @@ function render(s) {
   $('cred-node').textContent = s.nodeId || '—';
   $('rotate').disabled = !bound;
 
+  const setup = s.generationSetupPhase || 'OCIOSO';
+  const generating = s.identity && s.identity.networkModel && setup === 'PRONTO';
+  const busy = setup === 'INSTALANDO' || setup === 'BAIXANDO';
+  const genStatus = {
+    OCIOSO: 'Este computador ainda não gera respostas de IA.',
+    INSTALANDO: 'Instalando o runtime de IA…',
+    BAIXANDO: 'Baixando o modelo da rede…',
+    PRONTO: 'Gerando respostas de IA para a rede ✓',
+    ERRO: 'Não foi possível ativar a geração.'
+  };
+  $('gen-status').textContent = genStatus[setup] || genStatus.OCIOSO;
+  $('gen-detail').hidden = !s.generationSetupDetail;
+  $('gen-detail').textContent = s.generationSetupDetail || '';
+  const genBtn = $('gen-enable');
+  genBtn.disabled = !bound || busy || generating;
+  genBtn.textContent = busy ? 'Ativando…' : generating ? 'Geração ativa' : 'Ativar geração neste computador';
+
   $('cpu-max').textContent = s.hardwareLogicalProcessors;
   $('mem-max').textContent = Math.floor(s.hardwareMemoryBytes / 1048576).toLocaleString('pt-BR');
   if (!limitsDirty) {
@@ -540,6 +571,10 @@ $('enroll-form').addEventListener('submit', event => {
 $('rotate').addEventListener('click', () => {
   if (confirm('Rotacionar a credencial? A anterior deixa de funcionar na hora, inclusive em outros atalhos desta máquina.'))
     post('rotate');
+});
+$('gen-enable').addEventListener('click', () => {
+  if (confirm('Ativar geração instala o runtime de IA e baixa o modelo (alguns GB). O Windows pode pedir confirmação. Continuar?'))
+    post('generation/enable');
 });
 $('exit').addEventListener('click', () => {
   if (confirm('Sair encerra o Agent e este computador para de farmar. Confirmar?')) {
