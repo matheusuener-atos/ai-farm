@@ -371,12 +371,15 @@ internal sealed class PostgresFarmDemandQueueService(
         string outputVersion;
         string outputPayload;
         string outputDigest;
-        if (string.Equals(demand.WorkloadId, FarmWorkloadCatalog.AnswerId, StringComparison.Ordinal))
+        if (string.Equals(demand.WorkloadId, FarmWorkloadCatalog.AnswerId, StringComparison.Ordinal) ||
+            string.Equals(demand.WorkloadId, FarmWorkloadCatalog.GenerateId, StringComparison.Ordinal))
         {
-            // Resposta do chat (ADR 0040): shard único, saída passa adiante
-            // com o próprio digest verificado — nada a consolidar.
+            // Resposta do chat (ADRs 0040/0043): shard único, saída passa
+            // adiante com o próprio digest — nada a consolidar.
             var answerJob = bySequence[shards.Single().Sequence];
-            outputVersion = FarmWorkloadCatalog.AnswerOutputSchema;
+            outputVersion = demand.WorkloadId == FarmWorkloadCatalog.GenerateId
+                ? FarmWorkloadCatalog.GenerateOutputSchema
+                : FarmWorkloadCatalog.AnswerOutputSchema;
             outputPayload = answerJob.OutputPayload!;
             outputDigest = answerJob.OutputDigest!;
         }

@@ -30,12 +30,16 @@ public static class FarmWorkerEnforcement
     public const string WindowsJobObject = "WINDOWS_JOB_OBJECT";
     public const string ProcessMonitorCpuAffinity = "PROCESS_MONITOR+CPU_AFFINITY";
     public const string ProcessMonitor = "PROCESS_MONITOR";
+    // Geração no runtime local do modelo (ADR 0043): não passa pelo worker
+    // sandbox, então declara sua própria contenção.
+    public const string LocalModelRuntime = "LOCAL_MODEL_RUNTIME";
 
     public static bool IsSupported(string value) => value is
         WindowsJobObjectCpuAffinity or
         WindowsJobObject or
         ProcessMonitorCpuAffinity or
-        ProcessMonitor;
+        ProcessMonitor or
+        LocalModelRuntime;
 }
 
 public sealed record FarmNodeSnapshot(
