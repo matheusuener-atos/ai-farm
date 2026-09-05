@@ -149,9 +149,9 @@ public sealed class FarmNetworkChatProvider(
         if (!search.HasHits)
         {
             const string emptyAnswer =
-                "A rede ainda não tem esse conhecimento indexado. Alimente a biblioteca em " +
-                "Farm → Demandas úteis (ou pela página Conhecimento) e pergunte de novo — " +
-                "ou use a rota externa para perguntas gerais.";
+                "A rede ainda não tem esse conhecimento indexado. Adicione conteúdo na " +
+                "página Biblioteca (menu Farm → Biblioteca, ou /biblioteca) e pergunte de " +
+                "novo — ou troque para o modelo automático, que usa a rota externa em perguntas gerais.";
             return Result(request, emptyAnswer);
         }
 
