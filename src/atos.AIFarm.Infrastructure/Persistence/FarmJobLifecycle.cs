@@ -33,7 +33,16 @@ internal static class FarmJobLifecycle
         Guid? nodeId = null)
     {
         var legacyDeadline = now.AddMinutes(-10);
-        var executionDeadline = now.AddSeconds(-30);
+        // O teto de execução é o TimeoutSeconds do manifesto/catálogo,
+        // limitado a 120s (ADR 0043). A query corta pelo maior teto e o
+        // refinamento por workload acontece em memória, workload a workload.
+        var maximumTimeoutSeconds = FarmWorkloadCatalog.Definitions
+            .Max(definition => Math.Clamp(definition.TimeoutSeconds, 5, 120));
+        var executionDeadline = now.AddSeconds(-maximumTimeoutSeconds);
+        var timeoutByVersion = FarmWorkloadCatalog.Definitions.ToDictionary(
+            definition => definition.Version,
+            definition => Math.Clamp(definition.TimeoutSeconds, 5, 120),
+            StringComparer.Ordinal);
         var cancellationDeadline = now.Subtract(CancellationGracePeriod);
         var query = db.FarmJobs.Where(x =>
             ActiveStatuses.Contains(x.Status) &&
@@ -55,6 +64,10 @@ internal static class FarmJobLifecycle
             {
                 x.Id,
                 x.Status,
+                x.WorkloadVersion,
+                x.StartedAtUtc,
+                x.ManifestExpiresAtUtc,
+                x.CreatedAtUtc,
                 x.CancellationRequestedAtUtc,
                 x.AgentLeaseExpiresAtUtc
             })
@@ -62,16 +75,30 @@ internal static class FarmJobLifecycle
         var expired = 0;
         foreach (var candidate in candidates)
         {
-            var cancellationRequested = candidate.CancellationRequestedAtUtc is not null;
+            var workloadTimeoutSeconds = timeoutByVersion.GetValueOrDefault(candidate.WorkloadVersion, 30);
+            var cancellationRequested = candidate.CancellationRequestedAtUtc is not null &&
+                candidate.CancellationRequestedAtUtc <= cancellationDeadline;
+            var leaseExpired = candidate.AgentLeaseExpiresAtUtc is not null &&
+                candidate.AgentLeaseExpiresAtUtc <= now;
+            var runtimeExceeded = ExecutingStatuses.Contains(candidate.Status, StringComparer.Ordinal) &&
+                candidate.StartedAtUtc is not null &&
+                candidate.StartedAtUtc <= now.AddSeconds(-workloadTimeoutSeconds);
+            var manifestExpired =
+                (candidate.ManifestExpiresAtUtc is not null && candidate.ManifestExpiresAtUtc <= now) ||
+                (candidate.ManifestExpiresAtUtc is null && candidate.CreatedAtUtc <= legacyDeadline);
+            // A query cortou pelo MAIOR teto; um workload de teto maior ainda
+            // dentro da própria janela não é encerrado aqui.
+            if (!cancellationRequested && !leaseExpired && !runtimeExceeded && !manifestExpired)
+                continue;
             var terminalStatus = cancellationRequested
                 ? FarmJobStatus.Cancelled
                 : FarmJobStatus.TimedOut;
             var detail = cancellationRequested
                 ? "Cancelamento remoto não foi confirmado dentro do prazo; o lease foi encerrado pelo servidor."
-                : candidate.AgentLeaseExpiresAtUtc is not null && candidate.AgentLeaseExpiresAtUtc <= now
+                : leaseExpired
                     ? "O lease do Compute Agent expirou durante a execução."
-                    : ExecutingStatuses.Contains(candidate.Status, StringComparer.Ordinal)
-                        ? "O runtime excedeu o timeout autorizado de 30 segundos."
+                    : runtimeExceeded
+                        ? $"O runtime excedeu o timeout autorizado de {workloadTimeoutSeconds} segundos."
                         : "A validade do manifesto terminou antes da conclusão do Job.";
             if (await TryTerminateAsync(
                     db,

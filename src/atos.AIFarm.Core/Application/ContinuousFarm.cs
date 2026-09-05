@@ -32,3 +32,20 @@ public interface IContinuousFarmModeService
     Task<bool> GetAsync(CancellationToken cancellationToken = default);
     Task SetAsync(bool enabled, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// O modelo que a PLATAFORMA serve pela rede (ADR 0043): identidade central;
+/// os nodes apenas hospedam o runtime local com este modelo baixado.
+/// </summary>
+public sealed record FarmNetworkOptions(string NetworkModel)
+{
+    public static FarmNetworkOptions Default { get; } = new("llama3.2:3b");
+
+    public FarmNetworkOptions Validate()
+    {
+        var model = NetworkModel?.Trim() ?? string.Empty;
+        if (model.Length is < 1 or > 80)
+            throw new ArgumentException("O modelo da rede deve ter entre 1 e 80 caracteres.", nameof(NetworkModel));
+        return this with { NetworkModel = model };
+    }
+}

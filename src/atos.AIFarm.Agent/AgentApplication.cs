@@ -442,7 +442,12 @@ internal static class AgentApplication
         timeout.CancelAfter(TimeSpan.FromSeconds(manifest.TimeoutSeconds));
         try
         {
-            var workerResult = await worker.RunAsync(manifest, offer.Input, timeout.Token);
+            // IRIS_GENERATE (ADR 0043) roda no runtime local do modelo, não
+            // no worker sandbox — é uma chamada HTTP à própria máquina.
+            var workerResult = manifest.Workload == "IRIS_GENERATE"
+                ? await AgentModelRuntime.GenerateAsync(
+                    manifest, offer.Input!.Payload, timeout.Token)
+                : await worker.RunAsync(manifest, offer.Input, timeout.Token);
             var acknowledgement = await client.SubmitResultAsync(
                 configuration,
                 credentials.Current,

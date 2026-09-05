@@ -51,7 +51,8 @@ public sealed class PostgresFarmNetworkRouteTests
             var farmProvider = new FarmNetworkChatProvider(
                 queue,
                 provider.GetRequiredService<IFarmKnowledgeSearchService>(),
-                TimeProvider.System);
+                TimeProvider.System,
+                FarmNetworkOptions.Default);
             var request = new AiProviderRequest(
                 "como nasce o credito computacional?",
                 FarmNetworkAiCatalog.Route);

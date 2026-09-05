@@ -28,12 +28,19 @@ public sealed class FarmNetworkAiCatalog(
 {
     public const string Model = "iris-answer-extractive";
     public const string PriceCatalogVersion = "farm-network-aic-v1";
+    public const string GenerateModel = "iris-generate-network";
+    public const string GeneratePriceCatalogVersion = "farm-generate-aic-v1";
 
     // Orquestrador do "auto" (ADR 0041): score mínimo da biblioteca para a
     // rede assumir a resposta; abaixo disso a rota externa responde melhor.
     public const decimal AutoRouteScoreThreshold = 3m;
 
     public static AiRoute Route { get; } = new(AiProviderNames.FarmNetwork, Model, PriceCatalogVersion);
+
+    public static AiRoute GenerateRoute { get; } =
+        new(AiProviderNames.FarmNetwork, GenerateModel, GeneratePriceCatalogVersion);
+
+    public static AiPriceCatalogEntry GenerateEntry { get; } = new(GenerateRoute, 500, 500, 1_024);
 
     // Tarifa simbólica: a computação é da própria conta; o AIC cobre o custo
     // de orquestração/verificação. 500 mAIC por 1M de unidades ≈ ~2 mAIC por
@@ -51,6 +58,8 @@ public sealed class FarmNetworkAiCatalog(
         var preference = modelPreference?.Trim();
         if (string.Equals(preference, Model, StringComparison.OrdinalIgnoreCase))
             return Route;
+        if (string.Equals(preference, GenerateModel, StringComparison.OrdinalIgnoreCase))
+            return GenerateRoute;
         // "Auto" orquestra: se a biblioteca cobre bem a pergunta, a rede
         // responde; senão, a rota externa. Preferência explícita nunca é
         // sobrescrita, e o preflight sempre mostra a rota escolhida.
@@ -81,6 +90,10 @@ public sealed class FarmNetworkAiCatalog(
             Model,
             "AI FARM NETWORK (extrai da sua biblioteca)",
             Entry.MaximumOutputUnits),
+        new AiModelOption(
+            GenerateModel,
+            "AI FARM GENERATE (modelo da rede — experimental)",
+            GenerateEntry.MaximumOutputUnits),
     ];
 
     public async Task<PriceEstimate> EstimateAsync(
@@ -88,7 +101,7 @@ public sealed class FarmNetworkAiCatalog(
         AiRoute route,
         CancellationToken cancellationToken)
     {
-        if (route == Route) return Estimate(prompt.Length);
+        if (route == Route || route == GenerateRoute) return Estimate(prompt.Length);
         return await primary.Estimator.EstimateAsync(prompt, route, cancellationToken);
     }
 
@@ -96,7 +109,8 @@ public sealed class FarmNetworkAiCatalog(
         AiProviderRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.Route == Route) return Estimate(request.Prompt.Length);
+        if (request.Route == Route || request.Route == GenerateRoute)
+            return Estimate(request.Prompt.Length);
         if (primary.Estimator is IAiRequestPriceEstimator requestEstimator)
             return await requestEstimator.EstimateAsync(request, cancellationToken);
         return await primary.Estimator.EstimateAsync(
@@ -106,6 +120,7 @@ public sealed class FarmNetworkAiCatalog(
     public AiPriceCatalogEntry Get(AiRoute route)
     {
         if (route == Route) return Entry;
+        if (route == GenerateRoute) return GenerateEntry;
         if (primary.Catalog is not null) return primary.Catalog.Get(route);
         throw new InvalidOperationException("A rota não pertence ao catálogo ativo.");
     }
@@ -128,7 +143,8 @@ public sealed class FarmNetworkAiCatalog(
 public sealed class FarmNetworkChatProvider(
     IFarmDemandQueueService demands,
     IFarmKnowledgeSearchService knowledge,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    FarmNetworkOptions networkOptions)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -143,6 +159,8 @@ public sealed class FarmNetworkChatProvider(
         if (request.Attachments is { Count: > 0 })
             throw new InvalidOperationException(
                 "A rota AI Farm Network ainda não aceita anexos. Envie sem anexos ou use a rota externa.");
+        if (request.Route == FarmNetworkAiCatalog.GenerateRoute)
+            return await GenerateAsync(request, cancellationToken);
 
         var search = await knowledge.SearchAsync(
             request.Prompt, maximumHits: 6, cancellationToken: cancellationToken);
@@ -192,6 +210,81 @@ public sealed class FarmNetworkChatProvider(
             if (timeProvider.GetUtcNow() >= deadline)
                 throw new InvalidOperationException(
                     "A rede não respondeu a tempo. Verifique na pool se algum computador está FARMANDO e tente de novo.");
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// ADR 0043: a mensagem vira demanda IRIS_GENERATE; um node com o runtime
+    /// local executa o modelo da plataforma; a resposta volta rotulada como
+    /// não verificada (CP=0 até o quórum).
+    /// </summary>
+    private async Task<AiProviderResult> GenerateAsync(
+        AiProviderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var context = new List<string>();
+        var budget = 22 * 1024;
+        foreach (var message in (request.Context ?? []).TakeLast(8))
+        {
+            var line = $"{message.Role}: {message.Content}";
+            if (line.Length > 2_000) line = line[..2_000];
+            if (budget - line.Length < 0) break;
+            budget -= line.Length;
+            context.Add(line);
+        }
+        var input = JsonSerializer.Serialize(
+            new FarmGenerateInput(
+                FarmWorkloadCatalog.GenerateInputSchema,
+                networkOptions.NetworkModel,
+                request.Prompt,
+                request.SystemInstruction,
+                context),
+            JsonOptions);
+        var demand = await demands.SubmitAsync(
+            new FarmDemandRequest(
+                FarmWorkloadCatalog.GenerateId,
+                DemandLabel(request.Prompt),
+                input,
+                FarmDemandPriority.High,
+                LifetimeMinutes: 5,
+                TargetShards: 1,
+                MaxAttemptsPerShard: 3),
+            cancellationToken);
+
+        var deadline = timeProvider.GetUtcNow().AddSeconds(110);
+        var polls = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var output = await demands.DownloadOutputAsync(demand.Id, cancellationToken);
+            if (output is not null)
+            {
+                var payload = Encoding.UTF8.GetString(output.Content);
+                var result = JsonSerializer.Deserialize<FarmGenerateResult>(payload, JsonOptions)
+                    ?? throw new InvalidOperationException("A rede devolveu uma geração vazia.");
+                var content = result.Answer +
+                    $"\n\n[gerado pela rede // modelo {result.Model} // não verificado — CP=0 até o quórum]";
+                var inputUnits = result.PromptUnits ?? Math.Max(1, request.Prompt.Length / 4);
+                var outputUnits = result.CompletionUnits ?? Math.Max(1, result.Answer.Length / 4);
+                var entry = FarmNetworkAiCatalog.GenerateEntry;
+                var cost = Math.Max(1,
+                    (inputUnits * entry.InputCostPerMillionMinor +
+                     outputUnits * entry.OutputCostPerMillionMinor) / 1_000_000);
+                return new AiProviderResult(content, inputUnits, outputUnits, cost);
+            }
+            if (++polls % 5 == 0)
+            {
+                var state = (await demands.GetDashboardAsync(cancellationToken))
+                    .Demands.SingleOrDefault(x => x.Id == demand.Id);
+                if (state is { Status: FarmDemandStatus.Failed or FarmDemandStatus.Expired })
+                    throw new InvalidOperationException(
+                        "A rede não conseguiu gerar: nenhuma máquina com o runtime local respondeu. " +
+                        $"Instale o Ollama e baixe o modelo {networkOptions.NetworkModel} em um computador da pool. ({state.Detail})");
+            }
+            if (timeProvider.GetUtcNow() >= deadline)
+                throw new InvalidOperationException(
+                    "A rede não gerou a tempo. Verifique se um computador com o runtime local está FARMANDO.");
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
     }

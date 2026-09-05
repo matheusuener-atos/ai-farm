@@ -622,28 +622,46 @@ internal sealed class PostgresFarmAgentService(
             cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
+        // Geração da plataforma (ADR 0043): sem reexecução possível, o
+        // resultado é aceito sem verificação e vale CP=0 até o quórum.
+        var unverifiedGeneration = string.Equals(
+            definition.VerificationPolicy,
+            FarmWorkloadCatalog.UnverifiedGenerationPolicy,
+            StringComparison.Ordinal);
+
         job.Status = FarmJobStatus.Verifying.ToString();
         await AddJobEventAsync(
             db,
             job,
             FarmJobStatus.Verifying,
-            "Servidor iniciou reexecução determinística independente.",
+            unverifiedGeneration
+                ? "Geração aceita sem reexecução (UNVERIFIED_GENERATION_V1)."
+                : "Servidor iniciou reexecução determinística independente.",
             cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        var expected = await Task.Run(
-            () => FarmDeterministicWorkloads.Execute(
-                manifest.Workload,
-                manifest.Nonce,
-                manifest.Iterations,
-                job.InputPayload,
-                cancellationToken),
-            cancellationToken);
-        job.ExpectedDigest = expected.Digest;
-        var verified = CryptographicOperations.FixedTimeEquals(
-            suppliedDigest,
-            Convert.FromHexString(expected.Digest)) &&
-            string.Equals(result.OutputPayload, expected.OutputPayload, StringComparison.Ordinal);
+        bool verified;
+        if (unverifiedGeneration)
+        {
+            job.ExpectedDigest = result.ResultDigest.ToLowerInvariant();
+            verified = result.OutputPayload is not null;
+        }
+        else
+        {
+            var expected = await Task.Run(
+                () => FarmDeterministicWorkloads.Execute(
+                    manifest.Workload,
+                    manifest.Nonce,
+                    manifest.Iterations,
+                    job.InputPayload,
+                    cancellationToken),
+                cancellationToken);
+            job.ExpectedDigest = expected.Digest;
+            verified = CryptographicOperations.FixedTimeEquals(
+                suppliedDigest,
+                Convert.FromHexString(expected.Digest)) &&
+                string.Equals(result.OutputPayload, expected.OutputPayload, StringComparison.Ordinal);
+        }
         job.FinishedAtUtc = timeProvider.GetUtcNow();
         if (!verified)
         {
@@ -659,15 +677,20 @@ internal sealed class PostgresFarmAgentService(
         else
         {
             job.Status = FarmJobStatus.Completed.ToString();
-            job.ComputeUnitsMilli = definition.ProcessingPointsMilli;
-            node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
-            node.VerifiedProfileHash = manifest.NodeProfileHash;
-            node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
+            job.ComputeUnitsMilli = unverifiedGeneration ? 0 : definition.ProcessingPointsMilli;
+            if (!unverifiedGeneration)
+            {
+                node.VerificationLevel = FarmVerificationLevel.Verified.ToString();
+                node.VerifiedProfileHash = manifest.NodeProfileHash;
+                node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
+            }
             await AddJobEventAsync(
                 db,
                 job,
                 FarmJobStatus.Completed,
-                $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; AIC via resgate de recompensas.",
+                unverifiedGeneration
+                    ? "Geração concluída pela rede; CP=0 até a verificação por quórum (ADR 0043)."
+                    : $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; AIC via resgate de recompensas.",
                 cancellationToken,
                 job.FinishedAtUtc.Value);
         }

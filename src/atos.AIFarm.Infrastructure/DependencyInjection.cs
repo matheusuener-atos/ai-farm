@@ -21,8 +21,10 @@ public static class DependencyInjection
         OpenAiProviderOptions? openAi = null,
         ChatContextLimits? contextLimits = null,
         AiUsageSafetyCapPolicy? safetyCap = null,
-        OpenAiCompatibleOptions? compatible = null)
+        OpenAiCompatibleOptions? compatible = null,
+        FarmNetworkOptions? farmNetwork = null)
     {
+        services.TryAddSingleton((farmNetwork ?? FarmNetworkOptions.Default).Validate());
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         services.TryAddSingleton(executionLimits ?? ChatExecutionLimits.Default);
         services.TryAddSingleton(providerProtection ?? AiProviderProtectionOptions.Default);
