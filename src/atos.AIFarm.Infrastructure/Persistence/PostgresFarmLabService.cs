@@ -25,7 +25,8 @@ internal sealed class PostgresFarmLabService(
     IAIFarmIdentityAccessor identityAccessor,
     TimeProvider timeProvider,
     FarmManifestSigningOptions signingOptions,
-    FarmNodeReliabilityPolicy nodeReliabilityPolicy) : IFarmLabService, IFarmContinuousDispatcher
+    FarmNodeReliabilityPolicy nodeReliabilityPolicy,
+    FarmRewardAutoProposer rewardAutoProposer) : IFarmLabService, IFarmContinuousDispatcher
 {
     private const string ManifestVersion = FarmManifestSecurity.EmbeddedVersion;
     internal const string RemoteManifestVersion = FarmManifestSecurity.AgentProfileVersion;
@@ -531,10 +532,12 @@ internal sealed class PostgresFarmLabService(
                 node.AgentVersion);
             node.ProfileVerifiedAtUtc = job.FinishedAtUtc;
             node.LastSeenAtUtc = job.FinishedAtUtc.Value;
-            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, $"{definition.ProcessingPointsMilli / 1_000m:N3} CP verificado; nenhum AIC emitido.");
+            AddEvent(db, job, FarmJobStatus.Completed, job.FinishedAtUtc.Value, $"{definition.ProcessingPointsMilli / 1_000m:N3} CP verificado; AIC via resgate de recompensas.");
             await db.SaveChangesAsync(cancellationToken);
             await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
+            // Auto-proposta (ADR 0042) — depois do selo da evidência.
+            await rewardAutoProposer.TryProposeAsync(accountId, job.Id, cancellationToken);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

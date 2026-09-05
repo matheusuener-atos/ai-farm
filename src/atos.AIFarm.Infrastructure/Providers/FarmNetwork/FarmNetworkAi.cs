@@ -21,11 +21,17 @@ public sealed record PrimaryAiCatalogHandles(
 /// rota "AI Farm Network" entra como modelo selecionável que transforma a
 /// mensagem numa demanda útil executada pelos nodes da própria conta.
 /// </summary>
-public sealed class FarmNetworkAiCatalog(PrimaryAiCatalogHandles primary) :
+public sealed class FarmNetworkAiCatalog(
+    PrimaryAiCatalogHandles primary,
+    IFarmKnowledgeSearchService? knowledge = null) :
     IAiRouteSelector, IAiModelCatalog, IPriceEstimator, IAiRequestPriceEstimator, IAiPriceCatalog
 {
     public const string Model = "iris-answer-extractive";
     public const string PriceCatalogVersion = "farm-network-aic-v1";
+
+    // Orquestrador do "auto" (ADR 0041): score mínimo da biblioteca para a
+    // rede assumir a resposta; abaixo disso a rota externa responde melhor.
+    public const decimal AutoRouteScoreThreshold = 3m;
 
     public static AiRoute Route { get; } = new(AiProviderNames.FarmNetwork, Model, PriceCatalogVersion);
 
@@ -42,8 +48,29 @@ public sealed class FarmNetworkAiCatalog(PrimaryAiCatalogHandles primary) :
         string? modelPreference,
         CancellationToken cancellationToken)
     {
-        if (string.Equals(modelPreference?.Trim(), Model, StringComparison.OrdinalIgnoreCase))
+        var preference = modelPreference?.Trim();
+        if (string.Equals(preference, Model, StringComparison.OrdinalIgnoreCase))
             return Route;
+        // "Auto" orquestra: se a biblioteca cobre bem a pergunta, a rede
+        // responde; senão, a rota externa. Preferência explícita nunca é
+        // sobrescrita, e o preflight sempre mostra a rota escolhida.
+        var automatic = string.IsNullOrWhiteSpace(preference) ||
+            string.Equals(preference, ConversationAiSettings.AutomaticModel, StringComparison.OrdinalIgnoreCase);
+        if (automatic && knowledge is not null)
+        {
+            try
+            {
+                var probe = await knowledge.SearchAsync(
+                    prompt, maximumHits: 1, cancellationToken: cancellationToken);
+                if (probe.HasHits && probe.Hits[0].Score >= AutoRouteScoreThreshold)
+                    return Route;
+            }
+            catch (Exception exception) when (exception is
+                ArgumentException or InvalidOperationException)
+            {
+                // A sonda da biblioteca nunca derruba o chat: cai no externo.
+            }
+        }
         return await primary.Selector.SelectAsync(prompt, modelPreference, cancellationToken);
     }
 

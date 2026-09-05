@@ -62,6 +62,51 @@ public sealed class PostgresFarmRewardSettlementService : IFarmRewardSettlementS
             records.Select(ToSnapshot).ToArray());
     }
 
+    public async Task<FarmRewardBatchSettlement> SettleAllAsync(
+        int maximumProposals = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = await _identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        var bounded = Math.Clamp(maximumProposals, 1, 500);
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var pending = await db.FarmRewardProposals.AsNoTracking()
+            .Where(x => x.AccountId == identity.AccountId &&
+                        !db.FarmRewardSettlements.Any(settled => settled.ProposalId == x.Id))
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => x.Id)
+            .Take(bounded + 1)
+            .ToArrayAsync(cancellationToken);
+        var queue = pending.Take(bounded).ToArray();
+        var settledCount = 0;
+        long totalRewardMinor = 0;
+        string? stoppedReason = null;
+        foreach (var proposalId in queue)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var settlement = await SettleAsync(proposalId, cancellationToken);
+                settledCount++;
+                totalRewardMinor += settlement.RewardAmountMinor;
+            }
+            catch (FarmRewardPoolUnavailableException exception)
+            {
+                // Politica desligada ou orcamento do periodo esgotado: parar
+                // aqui preserva a ordem e deixa o motivo explicito.
+                stoppedReason = exception.Message;
+                break;
+            }
+            catch (InvalidOperationException)
+            {
+                // Proposta individual invalida (integridade divergiu): pula e
+                // segue - o resgate manual dela continua possivel para exame.
+            }
+        }
+        var remaining = pending.Length - settledCount;
+        return new FarmRewardBatchSettlement(
+            settledCount, totalRewardMinor, Math.Max(0, remaining), stoppedReason);
+    }
+
     public async Task<FarmRewardSettlementSnapshot> SettleAsync(
         Guid proposalId,
         CancellationToken cancellationToken = default)

@@ -96,14 +96,15 @@ public static class DependencyInjection
         }
         // Rota AI Farm Network (ADR 0040): catálogo composto por cima do
         // primário e despachante por rota; o breaker protege só o externo.
-        services.AddSingleton<FarmNetworkAiCatalog>();
-        services.AddSingleton<IAiPriceCatalog>(provider =>
+        // Scoped: o orquestrador do "auto" sonda a biblioteca da conta.
+        services.AddScoped<FarmNetworkAiCatalog>();
+        services.AddScoped<IAiPriceCatalog>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
-        services.AddSingleton<IPriceEstimator>(provider =>
+        services.AddScoped<IPriceEstimator>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
-        services.AddSingleton<IAiRouteSelector>(provider =>
+        services.AddScoped<IAiRouteSelector>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
-        services.AddSingleton<IAiModelCatalog>(provider =>
+        services.AddScoped<IAiModelCatalog>(provider =>
             provider.GetRequiredService<FarmNetworkAiCatalog>());
         services.AddSingleton<ProtectedAiProvider>();
         services.AddScoped<FarmNetworkChatProvider>();
@@ -188,9 +189,14 @@ public static class DependencyInjection
         services.AddScoped<IFarmApiJobService, PostgresFarmApiJobService>();
         services.AddScoped<IFarmUsefulJobService, PostgresFarmUsefulJobService>();
         services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();
-        services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
+        services.AddScoped<PostgresFarmEconomicsScenarioStore>();
+        services.AddScoped<IFarmEconomicsScenarioStore>(provider =>
+            provider.GetRequiredService<PostgresFarmEconomicsScenarioStore>());
         services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
-        services.AddScoped<IFarmRewardProposalStore, PostgresFarmRewardProposalStore>();
+        services.AddScoped<PostgresFarmRewardProposalStore>();
+        services.AddScoped<IFarmRewardProposalStore>(provider =>
+            provider.GetRequiredService<PostgresFarmRewardProposalStore>());
+        services.AddScoped<FarmRewardAutoProposer>();
         services.AddScoped<IFarmRewardSettlementService, PostgresFarmRewardSettlementService>();
         services.AddScoped<IFarmAnalyticsQuery, PostgresFarmAnalyticsQuery>();
         services.AddScoped<IFarmJobHistoryService, PostgresFarmJobHistoryService>();

@@ -19,6 +19,9 @@
     {
         <strong>Reward Pool financiado</strong>
         <span>Política @_pool.Policy.Version: @Aic.Format(_pool.Policy.AicMinorPerThousandCp) por 1.000 CP, com orçamento mensal rígido e liquidação auditável.</span>
+        <button class="btn primary" type="button" @onclick="SettleAllAsync" disabled="@_working">
+            @(_working ? "Resgatando…" : "Resgatar tudo")
+        </button>
     }
     else
     {
@@ -206,6 +209,32 @@ else if (_pool is not null)
             var proposal = await ProposalStore.CreateAsync(source.Job.Id, source.Scenario.Id);
             await ReloadAsync();
             _notice = $"PROPOSTA {ShortId(proposal.Id)} REGISTRADA // NENHUM AIC EMITIDO";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private async Task SettleAllAsync()
+    {
+        if (_working) return;
+        _working = true;
+        _error = null;
+        _notice = null;
+        try
+        {
+            var batch = await SettlementService.SettleAllAsync();
+            await ReloadAsync();
+            _notice = batch.SettledCount == 0
+                ? (batch.StoppedReason ?? "Nenhuma proposta pendente para resgatar. As auto-propostas nascem quando um job completa com fotografia econômica salva.")
+                : $"{batch.SettledCount} RESGATE(S) // {Aic.Format(batch.TotalRewardMinor)} // EARNED" +
+                  (batch.StoppedReason is not null ? $" // PAROU: {batch.StoppedReason}" : string.Empty) +
+                  (batch.RemainingCount > 0 ? $" // {batch.RemainingCount} pendente(s)" : string.Empty);
         }
         catch (InvalidOperationException exception)
         {

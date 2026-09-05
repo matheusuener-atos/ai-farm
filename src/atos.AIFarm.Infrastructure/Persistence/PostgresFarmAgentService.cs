@@ -13,7 +13,8 @@ internal sealed class PostgresFarmAgentService(
     FarmManifestSigningOptions signingOptions,
     FarmRewardPolicy rewardPolicy,
     IFarmContinuousDispatcher continuousDispatcher,
-    FarmContinuousOptions continuousOptions) : IFarmAgentService
+    FarmContinuousOptions continuousOptions,
+    FarmRewardAutoProposer rewardAutoProposer) : IFarmAgentService
 {
     internal const int HeartbeatIntervalSeconds = 30;
     internal const int ActiveHeartbeatIntervalSeconds = 2;
@@ -666,7 +667,7 @@ internal sealed class PostgresFarmAgentService(
                 db,
                 job,
                 FarmJobStatus.Completed,
-                $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; nenhum AIC emitido.",
+                $"{definition.ProcessingPointsMilli / 1_000m:N3} CP remoto verificado; AIC via resgate de recompensas.",
                 cancellationToken,
                 job.FinishedAtUtc.Value);
         }
@@ -675,6 +676,10 @@ internal sealed class PostgresFarmAgentService(
         {
             await FarmEvidenceSecurity.SealAsync(db, job, signingOptions, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
+            // Auto-proposta (ADR 0042) — só depois da evidência selada, que a
+            // fotografia econômica exige íntegra.
+            await rewardAutoProposer.TryProposeAsync(
+                job.AccountId, job.Id, cancellationToken);
         }
         return new FarmRemoteJobAcknowledgement(
             job.Id,
