@@ -11,7 +11,7 @@
 <div class="page-head">
     <p class="eyebrow amber">atos:/FARM/COMPUTE_LAB</p>
     <h1>Compute controlado</h1>
-    <p>Workloads determinísticos em host conhecido. CP técnico experimental, sem emissão de AIC.</p>
+    <p>Workloads determinísticos em host conhecido. CP verificado vira AIC pelo resgate de recompensas (ADRs 0022/0033).</p>
     <a class="farm-economics-link" href="/farm/jobs">Abrir centro de jobs →</a>
     <a class="farm-economics-link" href="/farm/demands">Enviar demanda útil →</a>
     <a class="farm-economics-link" href="/farm/schedules">Automatizar workloads →</a>
@@ -192,10 +192,9 @@ else
             Gerar código para novo/re-vínculo
         </button>
         <ol class="farm-agent-steps">
-            <li>Salve o arquivo em uma pasta própria, por exemplo <code>C:\atos-agent</code>.</li>
-            <li>Gere o código único abaixo.</li>
-            <li>No PowerShell, execute <code>.\atos-compute-agent-win-x64.exe enroll @FarmUrl</code> e cole o código quando solicitado.</li>
-            <li>Depois execute <code>.\atos-compute-agent-win-x64.exe run</code> para a máquina começar a buscar jobs permitidos.</li>
+            <li>O vínculo é um handshake de mão dupla (ADR 0038): o caminho recomendado é o card-assento em <a href="/meu-computador">Meu computador</a> — código gerado no assento, e-mail + código na janela do programa, chave de confirmação de volta no card.</li>
+            <li>Por terminal: <code>.\atos-compute-agent-win-x64.exe enroll @FarmUrl</code> pede o e-mail da conta e o código, e imprime a chave de confirmação (exibida uma única vez) para digitar no card.</li>
+            <li><code>run</code> mantém o modo headless; sem argumentos, o programa abre o painel.</li>
         </ol>
         @if (_enrollment is not null)
         {

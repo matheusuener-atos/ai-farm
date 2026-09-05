@@ -38,7 +38,7 @@
                     <b>@(_farm.Node.Status == FarmNodeStatus.Online ? "Pronto para trabalhar" : "Parado agora")</b>
                     <span class="muted">· @_farm.Node.Name</span>
                     <button class="btn" type="button" @onclick="RunTaskAsync" disabled="@(_working || _farm.Node.Status != FarmNodeStatus.Online)">
-                        @(_working ? "Trabalhando…" : "Fazer uma tarefa agora")
+                        @(_working ? "Testando…" : "Testar esta máquina agora")
                     </button>
                 </div>
                 <div class="home-stats">

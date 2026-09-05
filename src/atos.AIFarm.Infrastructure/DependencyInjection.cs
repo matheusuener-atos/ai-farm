@@ -189,9 +189,14 @@ public static class DependencyInjection
         services.AddScoped<IFarmApiJobService, PostgresFarmApiJobService>();
         services.AddScoped<IFarmUsefulJobService, PostgresFarmUsefulJobService>();
         services.AddScoped<IFarmAgentService, PostgresFarmAgentService>();
-        services.AddScoped<IFarmEconomicsScenarioStore, PostgresFarmEconomicsScenarioStore>();
+        services.AddScoped<PostgresFarmEconomicsScenarioStore>();
+        services.AddScoped<IFarmEconomicsScenarioStore>(provider =>
+            provider.GetRequiredService<PostgresFarmEconomicsScenarioStore>());
         services.AddScoped<IFarmBalanceQuery, PostgresFarmBalanceQuery>();
-        services.AddScoped<IFarmRewardProposalStore, PostgresFarmRewardProposalStore>();
+        services.AddScoped<PostgresFarmRewardProposalStore>();
+        services.AddScoped<IFarmRewardProposalStore>(provider =>
+            provider.GetRequiredService<PostgresFarmRewardProposalStore>());
+        services.AddScoped<FarmRewardAutoProposer>();
         services.AddScoped<IFarmRewardSettlementService, PostgresFarmRewardSettlementService>();
         services.AddScoped<IFarmAnalyticsQuery, PostgresFarmAnalyticsQuery>();
         services.AddScoped<IFarmJobHistoryService, PostgresFarmJobHistoryService>();

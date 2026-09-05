@@ -80,6 +80,12 @@ public sealed record FarmRewardPoolSnapshot(
     public long RemainingMinor => Math.Max(0, BudgetMinor - SpentMinor);
 }
 
+public sealed record FarmRewardBatchSettlement(
+    int SettledCount,
+    long TotalRewardMinor,
+    int RemainingCount,
+    string? StoppedReason);
+
 public interface IFarmRewardSettlementService
 {
     Task<FarmRewardPoolSnapshot> GetPoolAsync(
@@ -88,6 +94,15 @@ public interface IFarmRewardSettlementService
 
     Task<FarmRewardSettlementSnapshot> SettleAsync(
         Guid proposalId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resgata em sequencia todas as propostas ainda nao liquidadas da conta
+    /// (ADR 0042), parando com motivo claro quando a politica ou o orcamento
+    /// bloqueiam. Cada settlement individual continua atomico e idempotente.
+    /// </summary>
+    Task<FarmRewardBatchSettlement> SettleAllAsync(
+        int maximumProposals = 200,
         CancellationToken cancellationToken = default);
 }
 

@@ -35,6 +35,18 @@ public sealed class PostgresFarmRewardProposalStore(
         CancellationToken cancellationToken = default)
     {
         var identity = await identityAccessor.GetRequiredIdentityAsync(cancellationToken);
+        return await CreateForAccountAsync(
+            identity.AccountId, jobId, scenarioId, cancellationToken);
+    }
+
+    /// <summary>Caminho por conta explicita (auto-propostas, ADR 0042).</summary>
+    internal async Task<FarmRewardProposalSnapshot> CreateForAccountAsync(
+        Guid accountId,
+        Guid jobId,
+        Guid scenarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var identity = new { AccountId = accountId };
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
         var existing = await db.FarmRewardProposals.AsNoTracking().SingleOrDefaultAsync(
