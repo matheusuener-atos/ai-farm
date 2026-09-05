@@ -58,6 +58,11 @@ internal sealed class AgentUiServer(AgentUiHost host) : IDisposable
             }));
         app.MapPost(root + "/api/identity/refresh", () =>
             ExecuteAsync(host.RefreshIdentityAsync));
+        app.MapPost(root + "/api/generation/enable", () =>
+        {
+            host.EnableGeneration();
+            return Results.Json(new { ok = true }, JsonOptions);
+        });
         app.MapPost(root + "/api/exit", () =>
         {
             host.RequestExit();

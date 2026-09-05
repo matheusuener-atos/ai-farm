@@ -46,7 +46,9 @@ internal sealed record AgentTelemetrySnapshot(
     IReadOnlyList<AgentTelemetryActiveJob> ActiveJobs,
     IReadOnlyList<AgentTelemetryLogEntry> Log,
     IReadOnlyList<AgentUtilizationSample> Utilization,
-    string? PendingConfirmationKey);
+    string? PendingConfirmationKey,
+    string GenerationSetupPhase,
+    string? GenerationSetupDetail);
 
 /// <summary>
 /// Estado observável da sessão do Agent, compartilhado entre o loop de
@@ -82,6 +84,10 @@ internal sealed class AgentTelemetry
     private long _peakWorkerMemoryBytes;
     private FarmAgentIdentity? _identity;
     private string? _pendingConfirmationKey;
+    // Estado da ativação de geração (ADR 0046): OCIOSO / INSTALANDO / BAIXANDO
+    // / PRONTO / ERRO — o painel acompanha o progresso do clique único.
+    private string _generationSetupPhase = "OCIOSO";
+    private string? _generationSetupDetail;
 
     private sealed record WorkerSample(
         long WorkingSetBytes,
@@ -144,6 +150,15 @@ internal sealed class AgentTelemetry
     public void SetPendingConfirmationKey(string? key)
     {
         lock (_gate) _pendingConfirmationKey = key;
+    }
+
+    public void SetGenerationSetup(string phase, string? detail = null)
+    {
+        lock (_gate)
+        {
+            _generationSetupPhase = phase;
+            _generationSetupDetail = detail;
+        }
     }
 
     public void JobStarted(Guid jobId, string workloadVersion, int logicalProcessors, long memoryBytes)
@@ -277,7 +292,9 @@ internal sealed class AgentTelemetry
                 [.. _activeJobs.Values.OrderBy(x => x.StartedAtUtc)],
                 [.. _log],
                 [.. _utilization],
-                _pendingConfirmationKey);
+                _pendingConfirmationKey,
+                _generationSetupPhase,
+                _generationSetupDetail);
         }
     }
 
@@ -306,6 +323,8 @@ internal sealed class AgentTelemetry
             _peakWorkerMemoryBytes = 0;
             _identity = null;
             _pendingConfirmationKey = null;
+            _generationSetupPhase = "OCIOSO";
+            _generationSetupDetail = null;
         }
     }
 }

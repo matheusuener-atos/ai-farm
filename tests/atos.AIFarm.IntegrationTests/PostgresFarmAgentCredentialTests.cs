@@ -33,6 +33,8 @@ public sealed class PostgresFarmAgentCredentialTests
             Assert.Equal(linked.NodeId, before.NodeId);
             Assert.Equal("ROTATION-PC", before.NodeName);
             Assert.Equal("credential rotation test", before.AccountDisplayName);
+            // Identidade carrega o modelo da plataforma para o Agent baixar (ADR 0046).
+            Assert.Equal(FarmNetworkOptions.Default.NetworkModel, before.NetworkModel);
             Assert.False(before.SharePlatformWork);
             Assert.NotNull(before.CredentialIssuedAtUtc);
 
