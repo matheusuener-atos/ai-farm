@@ -106,10 +106,12 @@ public sealed class PostgresFarmNodeReliabilityTests
         ConfirmedAtUtc = now,
         AgentAcceptJobs = true,
         AgentMaxLogicalProcessors = 1,
-        AgentMaxMemoryBytes = 256L * 1024 * 1024,
+        // 4 GiB autorizados: um node saudável roda todos os workloads,
+        // inclusive IRIS_GENERATE (2 GiB), como o teste afirma.
+        AgentMaxMemoryBytes = 4L * 1024 * 1024 * 1024,
         Runtime = ".NET 10 // reliability test",
         LogicalProcessors = 2,
-        MemoryBytes = 512L * 1024 * 1024,
+        MemoryBytes = 8L * 1024 * 1024 * 1024,
         CreatedAtUtc = now.AddHours(-1),
         LastSeenAtUtc = now
     };
