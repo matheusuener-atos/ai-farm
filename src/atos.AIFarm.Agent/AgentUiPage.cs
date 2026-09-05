@@ -244,13 +244,13 @@ label b { color:var(--ink); font-variant-numeric:tabular-nums; }
   </div>
 
   <section class="win">
-    <div class="win-title"><span>GERAÇÃO DE IA (OPCIONAL)</span></div>
+    <div class="win-title"><span>FARMAR NO MODO FORTE</span></div>
     <div class="win-body">
       <div class="gen-row">
-        <span id="gen-status">Este computador ainda não gera respostas de IA.</span>
-        <button id="gen-enable" class="primary" disabled>Ativar geração neste computador</button>
+        <span id="gen-status">Modo forte desligado — esta máquina ainda não roda a IA da rede.</span>
+        <button id="gen-enable" class="primary" disabled>Ativar o modo forte</button>
       </div>
-      <p class="note">Farmar não exige isto. Ative só se quiser que a rede use esta máquina para <b>pensar</b> as respostas do chat — um clique instala o runtime e baixa o modelo (alguns GB; o Windows pode pedir confirmação).</p>
+      <p class="note">É o mesmo Farmar, no grau mais forte: além de emprestar poder para tarefas conferidas, esta máquina passa a <b>rodar a IA</b> da rede. Um clique instala o runtime e baixa o modelo (alguns GB; o Windows pode pedir confirmação). Por enquanto o modo forte <b>ainda não paga CP</b> — a verificação que vai permitir pagar com segurança está em construção (ADR 0047).</p>
       <p id="gen-detail" class="note" hidden></p>
     </div>
   </section>
@@ -500,18 +500,18 @@ function render(s) {
   const generating = s.identity && s.identity.networkModel && setup === 'PRONTO';
   const busy = setup === 'INSTALANDO' || setup === 'BAIXANDO';
   const genStatus = {
-    OCIOSO: 'Este computador ainda não gera respostas de IA.',
+    OCIOSO: 'Modo forte desligado — esta máquina ainda não roda a IA da rede.',
     INSTALANDO: 'Instalando o runtime de IA…',
     BAIXANDO: 'Baixando o modelo da rede…',
-    PRONTO: 'Gerando respostas de IA para a rede ✓',
-    ERRO: 'Não foi possível ativar a geração.'
+    PRONTO: 'Modo forte ativo — rodando a IA da rede ✓',
+    ERRO: 'Não foi possível ativar o modo forte.'
   };
   $('gen-status').textContent = genStatus[setup] || genStatus.OCIOSO;
   $('gen-detail').hidden = !s.generationSetupDetail;
   $('gen-detail').textContent = s.generationSetupDetail || '';
   const genBtn = $('gen-enable');
   genBtn.disabled = !bound || busy || generating;
-  genBtn.textContent = busy ? 'Ativando…' : generating ? 'Geração ativa' : 'Ativar geração neste computador';
+  genBtn.textContent = busy ? 'Ativando…' : generating ? 'Modo forte ativo' : 'Ativar o modo forte';
 
   $('cpu-max').textContent = s.hardwareLogicalProcessors;
   $('mem-max').textContent = Math.floor(s.hardwareMemoryBytes / 1048576).toLocaleString('pt-BR');

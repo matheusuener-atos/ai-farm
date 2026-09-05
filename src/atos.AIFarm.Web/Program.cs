@@ -332,6 +332,22 @@ var continuousOptions = new FarmContinuousOptions(
     builder.Configuration.GetValue(
         "AIFarm:Farm:Continuous:MaxJobsPerWindow",
         FarmContinuousOptions.Default.MaxJobsPerWindow)).Validate();
+// Fundação do pagamento de geração (ADR 0047): DESLIGADA por padrão. Não ligar
+// (Enabled=true) antes das camadas anti-fraude (auditoria + escrow + orçamento).
+var verificationOptions = new FarmVerificationOptions(
+    builder.Configuration.GetValue("AIFarm:Farm:Verification:Enabled", false),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Verification:CpPerSecondMilli",
+        FarmVerificationOptions.Disabled.CpPerSecondMilli),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Verification:MinGenerationCpMilli",
+        FarmVerificationOptions.Disabled.MinGenerationCpMilli),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Verification:MaxGenerationCpMilli",
+        FarmVerificationOptions.Disabled.MaxGenerationCpMilli),
+    builder.Configuration.GetValue(
+        "AIFarm:Farm:Verification:RequiredVerifiedFreshnessSeconds",
+        FarmVerificationOptions.Disabled.RequiredVerifiedFreshnessSeconds)).Validate();
 builder.Services.AddAIFarmPostgres(
     postgresConnection,
     objectStorage: objectStorage,
@@ -339,7 +355,8 @@ builder.Services.AddAIFarmPostgres(
     nodeReliabilityPolicy: nodeReliabilityPolicy,
     rewardPolicy: rewardPolicy,
     platformPool: platformPool,
-    continuousOptions: continuousOptions);
+    continuousOptions: continuousOptions,
+    verificationOptions: verificationOptions);
 builder.Services.AddIdentityCore<AIFarmUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
