@@ -7,7 +7,7 @@ public sealed class FarmWorkloadCatalogTests
     [Fact]
     public void CatalogHasUniqueImmutableIdentifiersAndSafePolicies()
     {
-        Assert.Equal(4, FarmWorkloadCatalog.Definitions.Count);
+        Assert.Equal(5, FarmWorkloadCatalog.Definitions.Count);
         Assert.Equal(
             FarmWorkloadCatalog.Definitions.Count,
             FarmWorkloadCatalog.Definitions.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count());

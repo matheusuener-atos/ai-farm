@@ -368,20 +368,38 @@ internal sealed class PostgresFarmDemandQueueService(
             }
         }
         var bySequence = jobs.ToDictionary(x => x.DemandShardIndex!.Value);
-        var aggregate = FarmDistributedTextIndex.Aggregate(demand.InputDigest,
-            shards.Select(shard =>
-            {
-                var job = bySequence[shard.Sequence];
-                return (shard.Sequence, shard.InputDigest, job.OutputDigest!, job.OutputPayload!);
-            }).ToArray());
+        string outputVersion;
+        string outputPayload;
+        string outputDigest;
+        if (string.Equals(demand.WorkloadId, FarmWorkloadCatalog.AnswerId, StringComparison.Ordinal))
+        {
+            // Resposta do chat (ADR 0040): shard único, saída passa adiante
+            // com o próprio digest verificado — nada a consolidar.
+            var answerJob = bySequence[shards.Single().Sequence];
+            outputVersion = FarmWorkloadCatalog.AnswerOutputSchema;
+            outputPayload = answerJob.OutputPayload!;
+            outputDigest = answerJob.OutputDigest!;
+        }
+        else
+        {
+            var aggregate = FarmDistributedTextIndex.Aggregate(demand.InputDigest,
+                shards.Select(shard =>
+                {
+                    var job = bySequence[shard.Sequence];
+                    return (shard.Sequence, shard.InputDigest, job.OutputDigest!, job.OutputPayload!);
+                }).ToArray());
+            outputVersion = FarmDistributedTextIndex.Version;
+            outputPayload = aggregate.Payload;
+            outputDigest = aggregate.Digest;
+        }
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await db.FarmDemands.Where(x => x.Id == demand.Id && x.Status == FarmDemandStatus.Dispatching.ToString())
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(x => x.Status, FarmDemandStatus.Completed.ToString())
-                .SetProperty(x => x.OutputVersion, FarmDistributedTextIndex.Version)
-                .SetProperty(x => x.OutputPayload, aggregate.Payload)
-                .SetProperty(x => x.OutputSizeBytes, Encoding.UTF8.GetByteCount(aggregate.Payload))
-                .SetProperty(x => x.OutputDigest, aggregate.Digest)
+                .SetProperty(x => x.OutputVersion, outputVersion)
+                .SetProperty(x => x.OutputPayload, outputPayload)
+                .SetProperty(x => x.OutputSizeBytes, Encoding.UTF8.GetByteCount(outputPayload))
+                .SetProperty(x => x.OutputDigest, outputDigest)
                 .SetProperty(x => x.FinishedAtUtc, timeProvider.GetUtcNow())
                 .SetProperty(x => x.ClaimedAtUtc, (DateTimeOffset?)null)
                 .SetProperty(x => x.Detail, $"{demand.TargetShards} shards verificados e consolidados.")

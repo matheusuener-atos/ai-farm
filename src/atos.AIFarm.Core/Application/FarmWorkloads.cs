@@ -47,6 +47,13 @@ public static class FarmWorkloadCatalog
     public const string ContinuousId = "sha256-chain-marathon-v1";
     public const string ContinuousVersion = "atos-sha256-chain-marathon-v1";
 
+    // Rota "AI Farm Network" (ADR 0040): o chat vira demanda; um node compõe
+    // a resposta extrativa sobre a biblioteca indexada, verificável 1:1.
+    public const string AnswerId = "iris-answer-v1";
+    public const string AnswerVersion = "atos-iris-answer-v1";
+    public const string AnswerInputSchema = "atos-answer-input-v1";
+    public const string AnswerOutputSchema = "atos-answer-output-v1";
+
     public static IReadOnlyList<FarmWorkloadDefinition> Definitions { get; } =
     [
         new(
@@ -110,6 +117,23 @@ public static class FarmWorkloadCatalog
             "STANDARD",
             "atos-text-input-v1",
             "atos-text-index-v1",
+            RequiredMemoryBytes: 128L * 1024 * 1024),
+        new(
+            AnswerId,
+            "IRIS_ANSWER",
+            AnswerVersion,
+            "IRIS ANSWER",
+            "Compõe uma resposta extrativa determinística sobre trechos da biblioteca da conta.",
+            "DETERMINISTIC_OUTPUT_V1",
+            1,
+            30,
+            1,
+            256L * 1024 * 1024,
+            5_000,
+            "DENY_ALL",
+            "STANDARD",
+            AnswerInputSchema,
+            AnswerOutputSchema,
             RequiredMemoryBytes: 128L * 1024 * 1024)
     ];
 
@@ -148,6 +172,7 @@ public static class FarmDeterministicWorkloads
             "SHA256_CHAIN" => DigestOnly(ComputeSha256Chain(nonce, iterations, cancellationToken)),
             "MERKLE_ROOT_SHA256" => DigestOnly(ComputeMerkleRoot(nonce, iterations, cancellationToken)),
             "IRIS_TEXT_INDEX" => ComputeTextIndex(inputPayload, cancellationToken),
+            "IRIS_ANSWER" => ComputeAnswer(inputPayload, cancellationToken),
             _ => throw new ArgumentException("Workload não autorizado.", nameof(workload))
         };
 
@@ -267,6 +292,97 @@ public static class FarmDeterministicWorkloads
             output);
     }
 
+    private static Execution ComputeAnswer(
+        string? inputPayload,
+        CancellationToken cancellationToken)
+    {
+        ValidateTextInput(inputPayload);
+        cancellationToken.ThrowIfCancellationRequested();
+        FarmAnswerInput? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<FarmAnswerInput>(
+                inputPayload!, TextIndexJsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException("A entrada da resposta não é um JSON válido.", nameof(inputPayload), exception);
+        }
+        if (request is null ||
+            request.Version != FarmWorkloadCatalog.AnswerInputSchema ||
+            string.IsNullOrWhiteSpace(request.Question))
+            throw new ArgumentException("A entrada da resposta viola o esquema tipado.", nameof(inputPayload));
+
+        // Extração determinística: cada sentença dos trechos recebe o score
+        // lexical da busca da Farm; as melhores compõem a resposta em ordem
+        // estável (score desc, trecho, posição). Sem acaso, sem rede.
+        var question = request.Question.Trim();
+        var candidates = new List<(decimal Score, int ExcerptIndex, int SentenceIndex, string Sentence, FarmAnswerExcerpt Excerpt)>();
+        var excerpts = request.Excerpts ?? [];
+        for (var excerptIndex = 0; excerptIndex < excerpts.Count; excerptIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var excerpt = excerpts[excerptIndex];
+            if (string.IsNullOrWhiteSpace(excerpt?.Excerpt)) continue;
+            var sentences = Regex.Split(excerpt.Excerpt.Trim(), @"(?<=[\.\!\?])\s+");
+            for (var sentenceIndex = 0; sentenceIndex < sentences.Length; sentenceIndex++)
+            {
+                var sentence = sentences[sentenceIndex].Trim();
+                if (sentence.Length < 12) continue;
+                var (score, matched) = FarmKnowledgeRetrieval.Score(question, sentence);
+                if (score <= 0 || matched.Count == 0) continue;
+                candidates.Add((score, excerptIndex, sentenceIndex, sentence, excerpt));
+            }
+        }
+
+        string answer;
+        FarmAnswerSource[] sources;
+        if (candidates.Count == 0)
+        {
+            answer = "A rede ainda não tem esse conhecimento indexado. " +
+                "Alimente a biblioteca em Farm → Demandas úteis, ou use a rota externa para perguntas gerais.";
+            sources = [];
+        }
+        else
+        {
+            var selected = candidates
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => x.ExcerptIndex)
+                .ThenBy(x => x.SentenceIndex)
+                .ToArray();
+            var composed = new List<(int ExcerptIndex, int SentenceIndex, string Sentence, FarmAnswerExcerpt Excerpt)>();
+            var length = 0;
+            foreach (var candidate in selected)
+            {
+                if (composed.Count > 0 && length + candidate.Sentence.Length > 900) continue;
+                composed.Add((candidate.ExcerptIndex, candidate.SentenceIndex, candidate.Sentence, candidate.Excerpt));
+                length += candidate.Sentence.Length + 1;
+                if (composed.Count == 6) break;
+            }
+            answer = string.Join(" ", composed
+                .OrderBy(x => x.ExcerptIndex)
+                .ThenBy(x => x.SentenceIndex)
+                .Select(x => x.Sentence));
+            sources = composed
+                .GroupBy(x => x.Excerpt.Reference, StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .Select(group => new FarmAnswerSource(group.Key, group.First().Excerpt.Label))
+                .ToArray();
+        }
+
+        var result = new FarmAnswerResult(
+            FarmWorkloadCatalog.AnswerOutputSchema,
+            ComputeInputDigest(inputPayload!),
+            answer,
+            sources,
+            candidates.Count);
+        var output = JsonSerializer.Serialize(result, TextIndexJsonOptions);
+        return new Execution(
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(output)))
+                .ToLowerInvariant(),
+            output);
+    }
+
     private static void ValidateTextInput(string? input)
     {
         if (string.IsNullOrWhiteSpace(input))
@@ -303,3 +419,19 @@ public sealed record FarmTextIndexResult(
     int UniqueTokenCount,
     IReadOnlyList<FarmTextIndexTerm> TopTerms,
     IReadOnlyList<FarmTextIndexChunk> Chunks);
+
+public sealed record FarmAnswerExcerpt(string Reference, string Label, string Excerpt);
+
+public sealed record FarmAnswerInput(
+    string Version,
+    string Question,
+    IReadOnlyList<FarmAnswerExcerpt>? Excerpts);
+
+public sealed record FarmAnswerSource(string Reference, string Label);
+
+public sealed record FarmAnswerResult(
+    string Version,
+    string InputDigest,
+    string Answer,
+    IReadOnlyList<FarmAnswerSource> Sources,
+    int ScoredSentences);
