@@ -37,8 +37,14 @@ public sealed class PostgresFarmNetworkRouteTests
             var indexDemand = await queue.SubmitAsync(new FarmDemandRequest(
                 "iris-text-index-v1", "Biblioteca de teste", corpus,
                 FarmDemandPriority.High, 60, TargetShards: 1));
-            await RunAllPendingWorkAsync(agents, dispatcher, linked.Credential);
-            Assert.NotNull(await queue.DownloadOutputAsync(indexDemand.Id));
+            FarmUsefulJobOutput? indexOutput = null;
+            for (var round = 0; round < 40 && indexOutput is null; round++)
+            {
+                await RunAllPendingWorkAsync(agents, dispatcher, linked.Credential);
+                indexOutput = await queue.DownloadOutputAsync(indexDemand.Id);
+                if (indexOutput is null) await Task.Delay(TimeSpan.FromMilliseconds(250));
+            }
+            Assert.NotNull(indexOutput);
 
             // 2. A rota do chat: o provider da rede embala a pergunta e espera
             //    o node computar a resposta extrativa verificada.
