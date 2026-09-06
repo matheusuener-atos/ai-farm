@@ -560,6 +560,9 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .farm-knowledge-toggle input { width: auto; accent-color: var(--orange); }
 .farm-knowledge-toggle small { grid-column: 2; color: var(--muted); font-size: 9px; letter-spacing: 0; text-transform: none; }
 .farm-knowledge-consent { margin-top: 4px; border: 1.5px solid var(--orange); background: var(--orange-soft); }
+/* "Avançado": revela os controles de power-user; padrão é o chat simples */
+.advanced-toggle { margin-left: auto; background: transparent; border: 0; box-shadow: none; color: var(--muted); font-size: 11px; letter-spacing: 0.04em; cursor: pointer; padding: 4px 2px; }
+.advanced-toggle:hover { color: var(--ink); }
 
 /* ---------- pool de computadores: cards-assento (ADR 0039) ---------- */
 .pool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
