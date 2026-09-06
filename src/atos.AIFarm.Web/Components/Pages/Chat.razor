@@ -176,7 +176,7 @@
                             class="configuration-button"
                             @onclick="ToggleConfiguration"
                             disabled="@(_working || _conversationId == Guid.Empty)">
-                        @(_showConfiguration ? "Fechar config" : "Configurar")
+                        @(_showConfiguration ? "Ocultar avançado" : "Avançado")
                     </button>
                     <button type="button"
                             class="archive-button"
@@ -291,8 +291,8 @@
     {
         <div class="empty-state">
             <span class="purple">IRIS&gt;</span>
-            <p>Envie uma mensagem para executar o ciclo completo de reserva e liquidação.</p>
-            <p class="muted">ESTIMATIVA: 20 AIC // CUSTO FAKE: 12 AIC // DIFERENÇA LIBERADA: 8 AIC</p>
+            <p>Comece a conversa: escreva sua pergunta abaixo e envie.</p>
+            <p class="muted">A Iris escolhe sozinha o melhor caminho para responder.</p>
         </div>
     }
 
@@ -460,6 +460,12 @@
             <label for="prompt">MENSAGEM</label>
             @if (!IsLite)
             {
+                <button type="button" class="advanced-toggle" @onclick="ToggleConfiguration">
+                    @(_showConfiguration ? "⚙ Ocultar avançado" : "⚙ Avançado")
+                </button>
+            }
+            @if (!IsLite && _showConfiguration)
+            {
                 <label class="context-selector" for="context-message-limit">
                     CONTEXTO
                     <select id="context-message-limit"
@@ -504,7 +510,7 @@
             </section>
         }
         <div class="attachment-composer">
-            @if (!IsLite)
+            @if (!IsLite && _showConfiguration)
             {
                 <label>
                     CLASSIFICAÇÃO DOS DADOS
@@ -530,7 +536,7 @@
                 <small class="muted">ANEXOS INDISPONÍVEIS // OBJECT STORAGE NÃO CONFIGURADO</small>
             }
         </div>
-        @if (!IsLite)
+        @if (!IsLite && _showConfiguration)
         {
             <small class="classification-note">
                 PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida no preflight. PADRÃO é indicado para conteúdo não sensível.
