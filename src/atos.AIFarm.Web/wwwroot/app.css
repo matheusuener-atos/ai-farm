@@ -153,8 +153,10 @@
 .farm-workload-catalog { margin-bottom: 1rem; }
 .farm-workload-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); }
 .farm-workload-card { position: relative; display: grid; gap: .55rem; padding: 1rem; background: var(--black); cursor: pointer; }
-.farm-workload-card.selected { color: var(--amber-bright); background: var(--amber-deep); box-shadow: inset 3px 0 var(--amber); }
-.farm-workload-card input { position: absolute; top: 1rem; right: 1rem; accent-color: var(--amber); }
+/* Card "monopoly" selecionado: fundo laranja, conteúdo legível por cima (spec §5). */
+.farm-workload-card.selected { color: var(--ink); background: var(--orange); box-shadow: inset 3px 0 var(--ink); }
+.farm-workload-card.selected span, .farm-workload-card.selected strong, .farm-workload-card.selected small { color: var(--ink); }
+.farm-workload-card input { position: absolute; top: 1rem; right: 1rem; accent-color: var(--orange); }
 .farm-workload-card span { font-weight: 700; }
 .farm-workload-card strong, .farm-workload-card small { padding-right: 1.5rem; overflow-wrap: anywhere; }
 .farm-workload-card small { color: var(--muted); line-height: 1.5; }
@@ -179,8 +181,8 @@
     /* linhas */
     --line: #E6E4DE; --line-soft: #E6E4DE; --line-strong: #111111; --line-hard: #111111;
     /* acentos: o laranja assume o papel que o roxo tinha */
-    --orange: #FF4F1F; --orange-soft: #FFF1EB;
-    --purple: #FF4F1F; --purple-bright: #FF4F1F; --purple-deep: #FFF1EB; --purple-soft: #FF4F1F;
+    --orange: #FF4D00; --orange-soft: #FFF0EA;
+    --purple: #FF4D00; --purple-bright: #FF4D00; --purple-deep: #FFF0EA; --purple-soft: #FF4D00;
     --amber: #F2C94C; --amber-bright: #8A5A00; --amber-deep: #FFF8E1; --amber-line: #111111;
     --green: #1C7A36; --green-deep: #EEF7EE; --green-line: #111111;
     --red: #C6281C; --red-soft: #C6281C; --red-line: #111111;
@@ -367,6 +369,9 @@ label > strong, label > span:not(.label):not(.lbl), label > small, label > p, la
 .kpi-green > span::before { background: var(--ink); }
 .kpi-red > span::before { background: var(--red); }
 .purple-border, .amber-border, .green-border { border-color: var(--ink); }
+/* Célula vazia de grid de KPI pintada de preto para manter o formato fixo (spec §4). */
+.kpi.blackout, .kpi-empty, .metric.blackout, .metric.kpi-empty { background: #111111; border-color: #111111; }
+.kpi.blackout *, .metric.blackout *, .kpi-empty * { visibility: hidden; }
 
 /* ---------- tabelas e listas ---------- */
 .table-wrap { overflow-x: auto; border: 0; }
@@ -672,7 +677,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 /* páginas da Farm com grades próprias */
 .farm-pool-grid, .farm-workload-grid { gap: 0; background: transparent; }
 .farm-pool-grid > article, .farm-workload-card { background: #FFFFFF; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.farm-workload-card.selected { background: var(--orange-soft); box-shadow: inset 3px 0 var(--orange); color: var(--ink); }
+.farm-workload-card.selected { background: var(--orange); box-shadow: inset 3px 0 var(--ink); color: var(--ink); }
 .farm-analytics-node-grid > div { border-right: 1px solid var(--line); }
 .farm-economics-link { margin: 0 8px 0 0; }
 .token-secret { border: 1.5px dashed var(--ink); border-radius: 0; background: #FFFFFF; color: var(--ink); margin: 0; }
