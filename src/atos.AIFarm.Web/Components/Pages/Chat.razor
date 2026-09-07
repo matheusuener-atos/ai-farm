@@ -27,7 +27,6 @@
     <aside class="conversation-panel" aria-label="Histórico de conversas">
         <div class="conversation-panel-header">
             <span>CONVERSAS</span>
-            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">Nova</button>
         </div>
         <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
             <input aria-label="Buscar no histórico"
@@ -35,6 +34,7 @@
                    placeholder="Buscar título ou mensagem"
                    @bind="_conversationSearchDraft" />
             <button type="submit" disabled="@_working">Buscar</button>
+            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">Nova</button>
             @if (!string.IsNullOrWhiteSpace(_conversationSearch))
             {
                 <button type="button"
@@ -227,7 +227,7 @@
                     </select>
                 </label>
                 <label>
-                    CRIATIVIDADE // @_temperature.ToString("0.00")
+                    CRIATIVIDADE DO MODELO // @_temperature.ToString("0.00")
                     <input type="range" min="0" max="2" step="0.1" @bind="_temperature" @bind:event="oninput" disabled="@_working" />
                 </label>
                 <label>
@@ -298,8 +298,8 @@
 
     @foreach (var message in _messages)
     {
-        <article class="message">
-            <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@RoleLabel(message.Role)&gt;</span>
+        <article class="message @(message.Role == ChatMessageRole.User ? "message-user" : "message-iris")">
+            <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@(message.Role == ChatMessageRole.User ? $"{RoleLabel(message.Role)}>" : $"<{RoleLabel(message.Role)}")</span>
             <p>@message.Content</p>
             @if (message.Attachments is { Count: > 0 })
             {
@@ -410,8 +410,8 @@
 
     @if (_streaming)
     {
-        <article class="message streaming-message" aria-live="polite" aria-label="Resposta em geração">
-            <span class="purple">IRIS&gt;</span>
+        <article class="message message-iris streaming-message" aria-live="polite" aria-label="Resposta em geração">
+            <span class="purple">&lt;IRIS</span>
             <p>@(_streamingResponse.Length == 0 ? "AGUARDANDO PRIMEIRO TOKEN" : _streamingResponse.ToString())<span class="stream-cursor" aria-hidden="true"></span></p>
             <small>@_executionStatus // @_pendingPlan?.Route.Provider // @_pendingPlan?.Route.Model</small>
         </article>
