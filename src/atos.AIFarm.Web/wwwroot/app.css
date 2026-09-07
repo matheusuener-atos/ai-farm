@@ -677,7 +677,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 /* páginas da Farm com grades próprias */
 .farm-pool-grid, .farm-workload-grid { gap: 0; background: transparent; }
 .farm-pool-grid > article, .farm-workload-card { background: #FFFFFF; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.farm-workload-card.selected { background: var(--orange-soft); box-shadow: inset 3px 0 var(--orange); color: var(--ink); }
+.farm-workload-card.selected { background: var(--orange); box-shadow: inset 3px 0 var(--ink); color: var(--ink); }
 .farm-analytics-node-grid > div { border-right: 1px solid var(--line); }
 .farm-economics-link { margin: 0 8px 0 0; }
 .token-secret { border: 1.5px dashed var(--ink); border-radius: 0; background: #FFFFFF; color: var(--ink); margin: 0; }
