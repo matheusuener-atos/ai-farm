@@ -215,6 +215,7 @@
                 {
                     <span class="configuration-notice">@_configurationNotice</span>
                 }
+                <button type="button" class="config-close button-secondary" @onclick="ToggleConfiguration" aria-label="Fechar avançado">Fechar ×</button>
             </div>
             <div class="configuration-grid">
                 <label>
@@ -287,6 +288,7 @@
         </section>
     }
 
+    <div class="chat-scroll">
     @if (_messages.Count == 0)
     {
         <div class="empty-state">
@@ -416,6 +418,7 @@
             <small>@_executionStatus // @_pendingPlan?.Route.Provider // @_pendingPlan?.Route.Model</small>
         </article>
     }
+    </div>
 
     @if (!string.IsNullOrWhiteSpace(_error))
     {
