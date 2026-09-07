@@ -30,6 +30,11 @@
                                     <input type="hidden" name="mode" value="Pro" />
                                     <button class="nav-button" type="submit">Ativar modo completo</button>
                                 </form>
+                                <form method="post" action="/account/logout">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="returnUrl" value="" />
+                                    <button class="nav-button" type="submit">Sair</button>
+                                </form>
                             </div>
                         </details>
                     }
@@ -75,6 +80,11 @@
                                     <input type="hidden" name="mode" value="Lite" />
                                     <button class="nav-button" type="submit">Ativar modo simples</button>
                                 </form>
+                                <form method="post" action="/account/logout">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="returnUrl" value="" />
+                                    <button class="nav-button" type="submit">Sair</button>
+                                </form>
                             </div>
                         </details>
                     }
@@ -86,11 +96,6 @@
                     <span class="menubar-account">
                         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="7" r="3.5" /><path d="M3.5 17c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5" /></svg>
                         <span title="@auth.User.Identity?.Name">@AccountLabel(auth.User.Identity?.Name)</span>
-                        <form method="post" action="/account/logout">
-                            <AntiforgeryToken />
-                            <input type="hidden" name="returnUrl" value="" />
-                            <button class="nav-button" type="submit" title="Sair">Sair</button>
-                        </form>
                     </span>
                 </div>
             </header>
