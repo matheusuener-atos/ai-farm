@@ -8,12 +8,6 @@
 
 <PageTitle>Meu computador // atos AI Farm</PageTitle>
 
-<div class="page-head">
-    <p class="eyebrow">atos:/MEU_COMPUTADOR</p>
-    <h1>Meu computador</h1>
-    <p>ELE TRABALHA // O SISTEMA CONFERE // VOCÊ ACOMPANHA</p>
-</div>
-
 @if (_error is not null)
 {
     <p class="error">@_error</p>
@@ -37,7 +31,7 @@
                     <span class="dot @(_farm.Node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
                     <b>@(_farm.Node.Status == FarmNodeStatus.Online ? "Pronto para trabalhar" : "Parado agora")</b>
                     <span class="muted">· @_farm.Node.Name</span>
-                    <button class="btn" type="button" @onclick="RunTaskAsync" disabled="@(_working || _farm.Node.Status != FarmNodeStatus.Online)">
+                    <button class="btn" type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="RunTaskAsync" disabled="@(_working || _farm.Node.Status != FarmNodeStatus.Online)">
                         @(_working ? "Testando…" : "Testar esta máquina agora")
                     </button>
                 </div>
@@ -68,22 +62,16 @@
                     <span class="dot @(_continuousEnabled ? "orange" : "hollow")" aria-hidden="true"></span>
                     <b>Farm contínua</b>
                     <span class="muted">· @(_continuousEnabled ? "consumindo o poder autorizado sempre que houver máquina ociosa" : "só trabalha quando alguém pede")</span>
-                    <button class="btn @(_continuousEnabled ? null : "primary")" type="button" @onclick="ToggleContinuousAsync" disabled="@_working">
+                    <button class="btn @(_continuousEnabled ? null : "primary")" type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="ToggleContinuousAsync" disabled="@_working">
                         @(_continuousEnabled ? "Desativar" : "Ativar consumo contínuo")
                     </button>
                 </div>
-                <p class="muted">
-                    Com a farm contínua, um computador ocioso recebe na hora uma tarefa
-                    de consumo (SHA-256 Marathon, 20 pontos) — no ritmo definido pela
-                    plataforma — e o gráfico de desempenho da janela do programa mostra
-                    o poder sendo entregue.
-                </p>
             }
         </div>
     </section>
 
     <section class="win" aria-label="Pool de computadores">
-        <div class="win-title"><span>Pool de computadores</span><span>um assento por máquina</span></div>
+        <div class="win-title"><span>Pool de computadores</span></div>
         <div class="win-body">
             <div class="pool-grid">
                 @if (_farm is not null)

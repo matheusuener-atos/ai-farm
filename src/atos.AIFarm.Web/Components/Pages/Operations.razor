@@ -3,13 +3,7 @@
 @attribute [Authorize]
 @inject IAiUsageQuery Usage
 
-<PageTitle>Operações // atos AI Farm</PageTitle>
-
-<div class="page-head">
-    <p class="eyebrow">atos:/AI/OPERATIONS</p>
-    <h1>Operações</h1>
-    <p>USO MEDIDO // CUSTO AUDITÁVEL // ISOLADO POR CONTA</p>
-</div>
+<PageTitle>Uso da IA // atos AI Farm</PageTitle>
 
 @if (_error is not null)
 {
@@ -17,58 +11,52 @@
 }
 else if (_dashboard is null)
 {
-    <p>CARREGANDO TELEMETRIA...</p>
+    <p class="muted">Carregando…</p>
 }
 else
 {
     <div class="kpi-grid cols-5">
         <section class="kpi kpi-purple">
-            <span>EXECUÇÕES</span>
+            <span>Respostas</span>
             <strong>@_dashboard.Totals.ExecutionCount</strong>
-            <small>@_dashboard.Totals.ConversationCount conversa(s)</small>
+            <small>em @_dashboard.Totals.ConversationCount conversa(s)</small>
         </section>
         <section class="kpi">
-            <span>UNIDADES MEDIDAS</span>
-            <strong>@(_dashboard.Totals.InputUnits + _dashboard.Totals.OutputUnits)</strong>
-            <small>IN @_dashboard.Totals.InputUnits // OUT @_dashboard.Totals.OutputUnits</small>
+            <span>Texto processado</span>
+            <strong>@((_dashboard.Totals.InputUnits + _dashboard.Totals.OutputUnits).ToString("N0"))</strong>
+            <small>@_dashboard.Totals.InputUnits.ToString("N0") enviado · @_dashboard.Totals.OutputUnits.ToString("N0") recebido</small>
         </section>
         <section class="kpi kpi-amber">
-            <span>CUSTO LIQUIDADO</span>
+            <span>Custo real</span>
             <strong>@Aic.Format(_dashboard.Totals.ActualCostMinor)</strong>
-            <small>ESTIMADO @Aic.Format(_dashboard.Totals.EstimatedCostMinor)</small>
+            <small>estimado antes: @Aic.Format(_dashboard.Totals.EstimatedCostMinor)</small>
         </section>
         <section class="kpi kpi-green">
-            <span>AIC LIBERADO</span>
+            <span>Devolvido ao saldo</span>
             <strong>@Aic.Format(_dashboard.Totals.ReleasedCostMinor)</strong>
-            <small>ESTIMATIVA NÃO CONSUMIDA</small>
+            <small>estimativa que não foi usada</small>
         </section>
         <section class="kpi kpi-purple">
-            <span>SATISFAÇÃO</span>
+            <span>Satisfação</span>
             <strong>@(_dashboard.Totals.SatisfactionPercent is decimal satisfaction ? $"{satisfaction:0.0}%" : "---")</strong>
-            <small>@_dashboard.Totals.PositiveFeedbackCount ÚTIL // @_dashboard.Totals.NegativeFeedbackCount NÃO ÚTIL</small>
+            <small>@_dashboard.Totals.PositiveFeedbackCount úteis · @_dashboard.Totals.NegativeFeedbackCount não úteis</small>
         </section>
     </div>
 
     <section class="panel ledger operations-ledger">
-        <div class="panel-head section-heading">
-            <div>
-                <h2>Execuções recentes</h2>
-                <p class="muted">ATÉ 50 OPERAÇÕES // PROMPTS E RESPOSTAS NÃO SÃO EXIBIDOS</p>
-            </div>
-            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">
-                @(_loading ? "Atualizando..." : "Atualizar")
-            </button>
+        <div class="panel-head">
+            <h2>Respostas recentes</h2>
         </div>
 
         <div class="filters operations-filters">
             <label>
-                BUSCAR
-                <input type="search" @bind="_search" @bind:event="oninput" placeholder="conversa, modelo ou operação" />
+                Buscar
+                <input type="search" @bind="_search" @bind:event="oninput" placeholder="conversa, modelo ou código" />
             </label>
             <label>
-                PROVIDER
+                Serviço de IA
                 <select @bind="_provider">
-                    <option value="">TODOS</option>
+                    <option value="">Todos</option>
                     @foreach (var provider in Providers)
                     {
                         <option value="@provider">@provider</option>
@@ -80,7 +68,7 @@ else
         @if (FilteredExecutions.Count == 0)
         {
             <div class="terminal empty-operations">
-                <p>NENHUMA EXECUÇÃO ENCONTRADA.</p>
+                <p>Nenhuma resposta encontrada.</p>
                 <a class="text-link" href="/chat">Iniciar conversa</a>
             </div>
         }
@@ -90,14 +78,14 @@ else
                 <table class="operations-table">
                     <thead>
                         <tr>
-                            <th>UTC</th>
-                            <th>CONVERSA</th>
-                            <th>ROTA</th>
-                            <th>UNIDADES</th>
-                            <th>ESTIMADO</th>
-                            <th>REAL</th>
-                            <th>DURAÇÃO</th>
-                            <th>OPERAÇÃO</th>
+                            <th>Quando (UTC)</th>
+                            <th>Conversa</th>
+                            <th>Serviço / modelo</th>
+                            <th>Texto</th>
+                            <th>Estimado</th>
+                            <th>Real</th>
+                            <th>Tempo</th>
+                            <th>Código</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -107,21 +95,27 @@ else
                                 <td>@execution.StartedAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
                                 <td>
                                     <a href="@($"/chat/{execution.ConversationId}")">
-                                        @(execution.ConversationTitle ?? "CONVERSA SEM TÍTULO")
+                                        @(execution.ConversationTitle ?? "Conversa sem título")
                                     </a>
                                 </td>
-                                <td><span class="purple">@execution.Provider</span><br /><small>@execution.Model // @execution.PriceCatalogVersion</small></td>
-                                <td>@execution.InputUnits IN<br />@execution.OutputUnits OUT</td>
+                                <td><span class="purple">@execution.Provider</span><br /><small>@execution.Model · catálogo @execution.PriceCatalogVersion</small></td>
+                                <td>@execution.InputUnits.ToString("N0") enviado<br />@execution.OutputUnits.ToString("N0") recebido</td>
                                 <td>@Aic.Format(execution.EstimatedCostMinor)</td>
                                 <td class="amber">@Aic.Format(execution.ActualCostMinor)</td>
                                 <td>@FormatDuration(execution)</td>
-                                <td><code>@execution.OperationId.ToString()[..8]</code><br /><small class="@StatusClass(execution.Status)">@execution.Status.ToUpperInvariant()</small></td>
+                                <td><code>@execution.OperationId.ToString()[..8]</code><br /><small class="@StatusClass(execution.Status)">@StatusLabel(execution.Status)</small></td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
         }
+        <footer class="home-ledger-foot" style="border-top: 1.5px solid #111111">
+            <span class="muted">Até 50 respostas · os textos das conversas não aparecem aqui.</span>
+            <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="LoadAsync" disabled="@_loading">
+                @(_loading ? "Atualizando..." : "Atualizar")
+            </button>
+        </footer>
     </section>
 }
 
@@ -157,7 +151,7 @@ else
         }
         catch (Exception)
         {
-            _error = "Não foi possível carregar a telemetria de uso.";
+            _error = "Não foi possível carregar o uso da IA.";
         }
         finally
         {
@@ -186,4 +180,14 @@ else
 
     private static string StatusClass(string status) =>
         status == "Completed" ? "green" : "amber";
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Completed" => "CONCLUÍDA",
+        "Running" => "EM CURSO",
+        "Failed" => "FALHOU",
+        "Cancelled" => "CANCELADA",
+        "TimedOut" => "TEMPO ESGOTADO",
+        _ => status.ToUpperInvariant()
+    };
 }

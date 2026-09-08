@@ -17,709 +17,602 @@
 
 <PageTitle>Iris // atos AI Farm</PageTitle>
 
-<div class="page-head">
-    <p class="eyebrow">atos:/USAR/CHAT</p>
-    <h1>Conversar</h1>
-    <p>ROTA // MELHOR DISPONÍVEL</p>
-</div>
-
 <div class="chat-workspace">
-    <aside class="conversation-panel" aria-label="Histórico de conversas">
-        <div class="conversation-panel-header">
-            <span>CONVERSAS</span>
-        </div>
-        <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
-            <input aria-label="Buscar no histórico"
-                   maxlength="120"
-                   placeholder="Buscar título ou mensagem"
-                   @bind="_conversationSearchDraft" />
-            <button type="submit" disabled="@_working">Buscar</button>
-            <button type="button" @onclick="CreateConversationAsync" disabled="@_working">Nova</button>
-            @if (!string.IsNullOrWhiteSpace(_conversationSearch))
-            {
-                <button type="button"
-                        class="button-secondary"
-                        @onclick="ClearConversationSearchAsync"
-                        disabled="@_working">
-                    Limpar
-                </button>
-            }
-        </form>
-        <div class="conversation-list">
-            @if (_conversations.Count == 0)
-            {
-                <p class="muted">NENHUMA CONVERSA ENCONTRADA</p>
-            }
-            @foreach (var conversation in _conversations)
-            {
-                <button type="button"
-                        class="@ConversationClass(conversation.Id)"
-                        @onclick="() => SelectConversation(conversation.Id)"
-                        disabled="@_working">
-                    <strong>@ConversationLabel(conversation)</strong>
-                    <span>@ConversationPreview(conversation)</span>
-                    <small>@(conversation.ParentConversationId.HasValue ? "RAMO // " : null)@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm") // @conversation.MessageCount MSG</small>
-                </button>
-            }
-        </div>
-        @if (_conversationPage is not null)
-        {
-            <div class="conversation-pagination" aria-label="Paginação das conversas">
-                <button type="button"
-                        @onclick="PreviousConversationPageAsync"
-                        disabled="@(_working || !_conversationPage.HasPreviousPage)">
-                    ‹
-                </button>
-                <span>PÁG @_conversationPage.Page / @_conversationPage.TotalPages // @_conversationPage.TotalCount</span>
-                <button type="button"
-                        @onclick="NextConversationPageAsync"
-                        disabled="@(_working || !_conversationPage.HasNextPage)">
-                    ›
-                </button>
+    <div class="chat-side">
+        <aside class="conversation-panel" aria-label="Histórico de conversas">
+            <div class="conversation-panel-header">
+                <span>Conversas</span>
             </div>
-        }
-        <button type="button"
-                class="archive-toggle"
-                @onclick="ToggleArchivedAsync"
-                disabled="@_working">
-            @(_showArchived ? "Ocultar arquivadas" : "Ver arquivadas")
-        </button>
-        @if (_showArchived)
-        {
-            <div class="archived-list" aria-label="Conversas arquivadas">
-                @if (_archivedConversations.Count == 0)
+            <form class="conversation-search" @onsubmit="ApplyConversationSearchAsync" @onsubmit:preventDefault>
+                <input aria-label="Buscar no histórico"
+                       maxlength="120"
+                       placeholder="Buscar título ou mensagem"
+                       @bind="_conversationSearchDraft" />
+                <button type="submit" disabled="@_working">Buscar</button>
+                <button type="button" @onclick="CreateConversationAsync" disabled="@_working">Nova</button>
+                @if (!string.IsNullOrWhiteSpace(_conversationSearch))
                 {
-                    <p class="muted">NENHUMA CONVERSA ARQUIVADA</p>
-                }
-                @foreach (var conversation in _archivedConversations)
-                {
-                    <article class="archived-item">
-                        <strong>@ConversationLabel(conversation)</strong>
-                        <span>@ConversationPreview(conversation)</span>
-                        <small>@conversation.MessageCount MSG</small>
-                        <button type="button"
-                                @onclick="() => RestoreConversationAsync(conversation.Id)"
-                                disabled="@_working">
-                            Restaurar
-                        </button>
-                        <button type="button"
-                                class="danger-button"
-                                @onclick="() => RequestDeleteConversation(conversation.Id)"
-                                disabled="@_working">
-                            Excluir
-                        </button>
-                    </article>
-                }
-            </div>
-        }
-        @if (_deleteCandidateId is Guid deleteCandidateId)
-        {
-            <section class="delete-confirmation" role="alert">
-                <strong>Confirmar exclusão</strong>
-                <p>@DeleteCandidateLabel(deleteCandidateId)</p>
-                <small>O histórico sairá da interface, mas a auditoria financeira será preservada.</small>
-                <div>
-                    <button type="button"
-                            class="danger-button"
-                            @onclick="ConfirmDeleteConversationAsync"
-                            disabled="@_working">
-                        Sim, excluir
-                    </button>
                     <button type="button"
                             class="button-secondary"
-                            @onclick="CancelDeleteConversation"
+                            @onclick="ClearConversationSearchAsync"
                             disabled="@_working">
-                        Cancelar
+                        Limpar
                     </button>
-                </div>
-            </section>
-        }
-    </aside>
-
-    <section class="terminal chat-terminal" aria-label="Conversa com Iris">
-    <div class="terminal-title">
-        @if (_renaming)
-        {
-            <div class="title-editor">
-                <input aria-label="Título da conversa"
-                       maxlength="@ConversationTitle.MaximumLength"
-                       @bind="_titleDraft" />
-                <button type="button" @onclick="SaveTitleAsync" disabled="@_working">
-                    Salvar
-                </button>
-                <button type="button" class="button-secondary" @onclick="CancelRename" disabled="@_working">
-                    Cancelar
-                </button>
-            </div>
-        }
-        else
-        {
-            <span>@CurrentConversationLabel @(_currentConversationParentId.HasValue ? "· ramo" : null)</span>
-        }
-        <div class="terminal-actions">
-            <span class="@(_streaming ? "status streaming-status" : "status")">
-                ● @(_streaming ? _executionStatus : "ONLINE")
-            </span>
-            <details class="title-actions-menu">
-                <summary>Ações ▾</summary>
-                <div>
-                    @if (!_renaming)
-                    {
-                        <button type="button"
-                                class="rename-button"
-                                @onclick="StartRename"
-                                disabled="@(_working || _conversationId == Guid.Empty)">
-                            Renomear
-                        </button>
-                    }
-                    <button type="button"
-                            class="configuration-button"
-                            @onclick="ToggleConfiguration"
-                            disabled="@(_working || _conversationId == Guid.Empty)">
-                        @(_showConfiguration ? "Ocultar avançado" : "Avançado")
-                    </button>
-                    <button type="button"
-                            class="archive-button"
-                            @onclick="ArchiveCurrentConversationAsync"
-                            disabled="@(_working || _conversationId == Guid.Empty)">
-                        Arquivar
-                    </button>
-                    <button type="button"
-                            class="danger-button"
-                            @onclick="() => RequestDeleteConversation(_conversationId)"
-                            disabled="@(_working || _conversationId == Guid.Empty)">
-                        Excluir
-                    </button>
-                    @if (_conversationId != Guid.Empty)
-                    {
-                        <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">Exportar MD</a>
-                        @if (!IsLite)
-                        {
-                            <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
-                        }
-                    }
-                </div>
-            </details>
-        </div>
-    </div>
-
-    @if (_showConfiguration)
-    {
-        <section class="chat-configuration" aria-label="Configuração desta conversa">
-            <div class="configuration-heading">
-                <div>
-                    <strong>Perfil de execução desta conversa</strong>
-                    <small>Alterações afetam apenas as próximas execuções. Ramos herdam este perfil.</small>
-                </div>
-                @if (!string.IsNullOrWhiteSpace(_configurationNotice))
-                {
-                    <span class="configuration-notice">@_configurationNotice</span>
                 }
-                <button type="button" class="config-close button-secondary" @onclick="ToggleConfiguration" aria-label="Fechar avançado">Fechar ×</button>
+            </form>
+            <div class="conversation-list">
+                @if (_conversations.Count == 0)
+                {
+                    <p class="muted">Nenhuma conversa encontrada</p>
+                }
+                @foreach (var conversation in _conversations)
+                {
+                    <button type="button"
+                            class="@ConversationClass(conversation.Id)"
+                            @onclick="() => SelectConversation(conversation.Id)"
+                            disabled="@_working">
+                        <strong>@ConversationLabel(conversation)</strong>
+                        <span>@ConversationPreview(conversation)</span>
+                        <small>@(conversation.ParentConversationId.HasValue ? "Ramo · " : null)@conversation.UpdatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm") · @conversation.MessageCount mensagens</small>
+                    </button>
+                }
             </div>
-            <div class="configuration-grid">
-                <label>
-                    MODELO
-                    <select @bind="_modelPreference" disabled="@_working">
-                        @foreach (var option in ModelOptions)
-                        {
-                            <option value="@option.Value">@option.Label</option>
-                        }
-                    </select>
-                </label>
-                <label>
-                    CRIATIVIDADE DO MODELO // @_temperature.ToString("0.00")
-                    <input type="range" min="0" max="2" step="0.1" @bind="_temperature" @bind:event="oninput" disabled="@_working" />
-                </label>
-                <label>
-                    LIMITE DE RESPOSTA // @_maximumOutputTokens.ToString("N0") TOKENS
-                    <input type="range"
-                           min="@ConversationAiSettings.MinimumOutputTokens"
-                           max="@SelectedModelMaximumOutputTokens"
-                           step="64"
-                           @bind="_maximumOutputTokens"
-                           @bind:event="oninput"
-                           disabled="@_working" />
-                </label>
-                <label class="system-instruction-field">
-                    INSTRUÇÃO DO SISTEMA
-                    <textarea rows="4"
-                              maxlength="@ConversationAiSettings.MaximumInstructionLength"
-                              placeholder="Ex.: Responda em português, com objetividade e exemplos práticos."
-                              @bind="_systemInstruction"
-                              disabled="@_working"></textarea>
-                    <small>@((_systemInstruction?.Length ?? 0).ToString("N0")) / @ConversationAiSettings.MaximumInstructionLength.ToString("N0") CARACTERES</small>
-                </label>
-            </div>
-            <div class="configuration-actions">
-                <button type="button" @onclick="SaveConversationSettingsAsync" disabled="@_working">
-                    Salvar nesta conversa
-                </button>
-                <button type="button" class="button-secondary" @onclick="ResetSettingsDraft" disabled="@_working">
-                    Restaurar salvo
-                </button>
-            </div>
-            <div class="preset-panel">
-                <div class="preset-create">
-                    <label>
-                        SALVAR CONFIGURAÇÃO COMO PRESET
-                        <input maxlength="80" placeholder="NOME DO PRESET" @bind="_presetName" disabled="@_working" />
-                    </label>
-                    <button type="button" @onclick="SavePresetAsync" disabled="@_working">Salvar preset</button>
+            @if (_conversationPage is not null)
+            {
+                <div class="conversation-pagination" aria-label="Paginação das conversas">
+                    <button type="button"
+                            @onclick="PreviousConversationPageAsync"
+                            disabled="@(_working || !_conversationPage.HasPreviousPage)">
+                        ‹
+                    </button>
+                    <span>Página @_conversationPage.Page de @_conversationPage.TotalPages · @_conversationPage.TotalCount conversas</span>
+                    <button type="button"
+                            @onclick="NextConversationPageAsync"
+                            disabled="@(_working || !_conversationPage.HasNextPage)">
+                        ›
+                    </button>
                 </div>
-                <div class="preset-list">
-                    @if (_presets.Count == 0)
+            }
+            <button type="button"
+                    class="archive-toggle"
+                    @onclick="ToggleArchivedAsync"
+                    disabled="@_working">
+                @(_showArchived ? "Ocultar arquivadas" : "Ver arquivadas")
+            </button>
+            @if (_showArchived)
+            {
+                <div class="archived-list" aria-label="Conversas arquivadas">
+                    @if (_archivedConversations.Count == 0)
                     {
-                        <span class="muted">NENHUM PRESET SALVO</span>
+                        <p class="muted">Nenhuma conversa arquivada</p>
                     }
-                    @foreach (var preset in _presets)
+                    @foreach (var conversation in _archivedConversations)
                     {
-                        <article>
-                            <div>
-                                <strong>@preset.Name</strong>
-                                <small>@PresetDescription(preset)</small>
-                            </div>
-                            <button type="button" @onclick="() => ApplyPresetAsync(preset)" disabled="@_working">Aplicar</button>
-                            <button type="button" class="danger-button" @onclick="() => DeletePresetAsync(preset.Id)" disabled="@_working">Remover</button>
+                        <article class="archived-item">
+                            <strong>@ConversationLabel(conversation)</strong>
+                            <span>@ConversationPreview(conversation)</span>
+                            <small>@conversation.MessageCount mensagens</small>
+                            <button type="button"
+                                    @onclick="() => RestoreConversationAsync(conversation.Id)"
+                                    disabled="@_working">
+                                Restaurar
+                            </button>
+                            <button type="button"
+                                    class="danger-button"
+                                    @onclick="() => RequestDeleteConversation(conversation.Id)"
+                                    disabled="@_working">
+                                Excluir
+                            </button>
                         </article>
                     }
                 </div>
-            </div>
-        </section>
-    }
-
-    <div class="chat-scroll">
-    @if (_messages.Count == 0)
-    {
-        <div class="empty-state">
-            <span class="purple">IRIS&gt;</span>
-            <p>Comece a conversa: escreva sua pergunta abaixo e envie.</p>
-            <p class="muted">A Iris escolhe sozinha o melhor caminho para responder.</p>
-        </div>
-    }
-
-    @foreach (var message in _messages)
-    {
-        <article class="message @(message.Role == ChatMessageRole.User ? "message-user" : "message-iris")">
-            <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@(message.Role == ChatMessageRole.User ? $"{RoleLabel(message.Role)}>" : $"<{RoleLabel(message.Role)}")</span>
-            <p>@message.Content</p>
-            @if (message.Attachments is { Count: > 0 })
-            {
-                <div class="message-attachments">
-                    @foreach (var attachment in message.Attachments)
-                    {
-                        @if (IsImageAttachment(attachment))
-                        {
-                            <a class="attachment-preview"
-                               href="@AttachmentUrl(attachment.Id)"
-                               download="@attachment.FileName"
-                               aria-label="Baixar @attachment.FileName">
-                                <img src="@AttachmentUrl(attachment.Id, preview: true)"
-                                     alt="@attachment.FileName"
-                                     loading="lazy" />
-                                <span>Baixar · @attachment.FileName · @FormatBytes(attachment.SizeBytes)</span>
-                            </a>
-                        }
-                        else
-                        {
-                            <a href="@AttachmentUrl(attachment.Id)" download="@attachment.FileName">
-                                Baixar · @attachment.FileName · @FormatBytes(attachment.SizeBytes)
-                            </a>
-                        }
-                    }
-                </div>
             }
-            @if (MessageMeta(message) is string meta)
+            @if (_deleteCandidateId is Guid deleteCandidateId)
             {
-                <small>@meta</small>
-            }
-            @if (message.Feedback is not null)
-            {
-                <small class="feedback-state">
-                    FEEDBACK // @(message.Feedback.Rating == ChatFeedbackRating.Positive ? "ÚTIL" : "NÃO ÚTIL")
-                    @if (!string.IsNullOrWhiteSpace(message.Feedback.Reason))
-                    {
-                        <span> // @message.Feedback.Reason</span>
-                    }
-                </small>
-            }
-            <div class="message-actions">
-                <button type="button"
-                        class="message-action"
-                        @onclick="() => CopyMessageAsync(message)"
-                        disabled="@_working">
-                    @(_copiedMessageId == message.Id ? "Copiado" : "Copiar")
-                </button>
-                @if (message.Role == ChatMessageRole.User)
-                {
-                    <button type="button"
-                            class="message-action"
-                            @onclick="() => StartEditBranch(message)"
-                            disabled="@_working">
-                        Editar / ramificar
-                    </button>
-                }
-                @if (CanRegenerate(message))
-                {
-                <button type="button"
-                        class="message-action"
-                        @onclick="() => PrepareRegenerationAsync(message.OperationId)"
-                        disabled="@_working">
-                    Gerar outra resposta
-                </button>
-                }
-                @if (message.Role == ChatMessageRole.Assistant)
-                {
-                    <button type="button"
-                            class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Positive ? "active-feedback" : null)"
-                            @onclick="() => SetPositiveFeedbackAsync(message)"
-                            disabled="@_working">
-                        Útil
-                    </button>
-                    <button type="button"
-                            class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Negative ? "active-feedback" : null)"
-                            @onclick="() => StartNegativeFeedback(message)"
-                            disabled="@_working">
-                        Não útil
-                    </button>
-                    <button type="button"
-                            class="message-action"
-                            @onclick="() => SaveToLibraryAsync(message)"
-                            disabled="@_working">
-                        @(_savedToLibraryMessageId == message.Id ? "Na fila da Biblioteca" : "Guardar na Biblioteca")
-                    </button>
-                }
-            </div>
-            @if (_feedbackMessageId == message.Id)
-            {
-                <section class="feedback-editor" aria-label="Motivo do feedback">
-                    <label>
-                        O QUE PODERIA MELHORAR? // OPCIONAL
-                        <textarea rows="2" maxlength="500" @bind="_feedbackReason" disabled="@_working"></textarea>
-                    </label>
+                <section class="delete-confirmation" role="alert">
+                    <strong>Confirmar exclusão</strong>
+                    <p>@DeleteCandidateLabel(deleteCandidateId)</p>
+                    <small>O histórico sai da interface, mas o registro financeiro é preservado.</small>
                     <div>
-                        <button type="button" @onclick="() => SaveNegativeFeedbackAsync(message.Id)" disabled="@_working">Salvar feedback</button>
-                        @if (message.Feedback is not null)
-                        {
-                            <button type="button" class="button-secondary" @onclick="() => ClearFeedbackAsync(message.Id)" disabled="@_working">Remover</button>
-                        }
-                        <button type="button" class="button-secondary" @onclick="CancelFeedback" disabled="@_working">Cancelar</button>
+                        <button type="button"
+                                class="danger-button"
+                                @onclick="ConfirmDeleteConversationAsync"
+                                disabled="@_working">
+                            Sim, excluir
+                        </button>
+                        <button type="button"
+                                class="button-secondary"
+                                @onclick="CancelDeleteConversation"
+                                disabled="@_working">
+                            Cancelar
+                        </button>
                     </div>
                 </section>
             }
-        </article>
-    }
-
-    @if (_streaming)
-    {
-        <article class="message message-iris streaming-message" aria-live="polite" aria-label="Resposta em geração">
-            <span class="purple">&lt;IRIS</span>
-            <p>@(_streamingResponse.Length == 0 ? "AGUARDANDO PRIMEIRO TOKEN" : _streamingResponse.ToString())<span class="stream-cursor" aria-hidden="true"></span></p>
-            <small>@_executionStatus // @_pendingPlan?.Route.Provider // @_pendingPlan?.Route.Model</small>
-        </article>
-    }
-    </div>
-
-    @if (!string.IsNullOrWhiteSpace(_error))
-    {
-        <p class="error" role="alert">Erro @_error</p>
-    }
-
-    @if (_lastFailure is not null)
-    {
-        <section class="recovery-panel" role="alert" aria-label="Recuperação da execução">
-            <div>
-                <strong>Execução não concluída</strong>
-                <p>@_lastFailure.Message</p>
-                <small>
-                    CÓDIGO // @_lastFailure.Code
-                    @if (!string.IsNullOrWhiteSpace(_lastFailure.DiagnosticId))
+        </aside>
+        <section class="win" aria-live="polite" aria-label="Confirmação antes de gastar">
+            <div class="win-title"><span>Confira antes de enviar</span></div>
+            <div class="win-body execution-plan" style="border:0;box-shadow:none;margin:0">
+                @if (_pendingPlan is not null)
+                {
+                    <table class="plan-table">
+                        <tbody>
+                            <tr><th scope="row">Rota</th><td>@_pendingPlan.Route.Provider / @_pendingPlan.Route.Model</td></tr>
+                            <tr><th scope="row">Custo máximo</th><td>@Aic.Format(_pendingPlan.MaximumCostMinor)</td></tr>
+                            <tr><th scope="row">Saldo depois</th><td>@ProjectedBalance</td></tr>
+                            @if (_pendingPlan.Context is { } planContext)
+                            {
+                                <tr><th scope="row">Contexto enviado</th><td>@planContext.EstimatedInputTokens.ToString("N0") / @planContext.MaximumInputTokens.ToString("N0") tokens</td></tr>
+                            }
+                            @if (_pendingPlan.Attachments is { Count: > 0 } plannedAttachments)
+                            {
+                                <tr><th scope="row">Anexos</th><td>@plannedAttachments.Count arquivo(s) · @FormatBytes(plannedAttachments.Sum(x => x.SizeBytes))</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (!CanAffordPendingPlan)
                     {
-                        <span> // DIAGNÓSTICO @_lastFailure.DiagnosticId</span>
+                        <p class="plan-warning">Saldo insuficiente A execução não pode ser confirmada.</p>
                     }
-                </small>
-            </div>
-            <div class="recovery-actions">
-                @if (_lastFailure.IsRetryable)
-                {
-                    <button type="button"
-                            @onclick="RetryAsync"
-                            disabled="@(_working || !CanAffordPendingPlan)">
-                        Tentar novamente
-                    </button>
-                }
-                <button type="button"
-                        class="button-secondary"
-                        @onclick="CancelPlan"
-                        disabled="@_working">
-                    Alterar mensagem
-                </button>
-            </div>
-        </section>
-    }
-
-    <div class="composer">
-        <div class="composer-heading">
-            <label for="prompt">MENSAGEM</label>
-            @if (!IsLite)
-            {
-                <button type="button" class="advanced-toggle" @onclick="ToggleConfiguration">
-                    @(_showConfiguration ? "⚙ Ocultar avançado" : "⚙ Avançado")
-                </button>
-            }
-            @if (!IsLite && _showConfiguration)
-            {
-                <label class="context-selector" for="context-message-limit">
-                    CONTEXTO
-                    <select id="context-message-limit"
-                            @bind="_contextMessageLimit"
-                            disabled="@(_working || _pendingPlan is not null)">
-                        @foreach (var option in ContextMessageOptions)
-                        {
-                            <option value="@option">@(option == 0 ? "Só esta mensagem" : $"Últimas {option} msg")</option>
-                        }
-                    </select>
-                </label>
-                <label class="farm-knowledge-toggle">
-                    <input type="checkbox" @bind="_useFarmKnowledge"
-                           disabled="@(_working || _pendingPlan is not null)" />
-                    MEMÓRIA DA FARM
-                    <small>Usar índices computados · local, ou externo com a sua autorização</small>
-                </label>
-                @if (_useFarmKnowledge)
-                {
-                    <label class="farm-knowledge-toggle farm-knowledge-consent">
-                        <input type="checkbox" @bind="_authorizeFarmExternal"
-                               disabled="@(_working || _pendingPlan is not null)" />
-                        AUTORIZAR ENVIO DOS ÍNDICES AO PROVIDER EXTERNO
-                        <small>Vale para esta execução · o destino aparece no preflight (ADR 0035)</small>
-                    </label>
-                }
-            }
-        </div>
-        @if (_editingBranch || _regenerating)
-        {
-            <section class="branch-draft" aria-live="polite">
-                <div>
-                    <strong>@(_regenerating ? "Nova resposta em um ramo" : "Edição em um ramo")</strong>
-                    <small>A conversa original será preservada integralmente.</small>
-                </div>
-                @if (_pendingPlan is null)
-                {
-                    <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
-                        Cancelar ramo
-                    </button>
-                }
-            </section>
-        }
-        <div class="attachment-composer">
-            @if (!IsLite && _showConfiguration)
-            {
-                <label>
-                    CLASSIFICAÇÃO DOS DADOS
-                    <select @bind="_dataClassification" disabled="@(_working || _pendingPlan is not null)">
-                        <option value="@AiDataClassification.Standard">PADRÃO</option>
-                        <option value="@AiDataClassification.Trusted">CONFIÁVEL</option>
-                        <option value="@AiDataClassification.Private">PRIVADO</option>
-                    </select>
-                </label>
-            }
-            @if (AttachmentService.IsAvailable)
-            {
-                <label class="attachment-picker">
-                    ANEXOS // MÁX. @AttachmentService.Limits.MaximumCount ARQUIVOS, @FormatBytes(AttachmentService.Limits.MaximumFileBytes) CADA
-                    <InputFile OnChange="UploadAttachmentsAsync"
-                               multiple
-                               accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.csv,.json,.log,.cs,.js,.ts,.py,.sql,.xml,.html,.css"
-                               disabled="@(_working || _pendingPlan is not null)" />
-                </label>
-            }
-            else
-            {
-                <small class="muted">ANEXOS INDISPONÍVEIS // OBJECT STORAGE NÃO CONFIGURADO</small>
-            }
-        </div>
-        @if (!IsLite && _showConfiguration)
-        {
-            <small class="classification-note">
-                PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida no preflight. PADRÃO é indicado para conteúdo não sensível.
-            </small>
-        }
-        @if (_attachments.Count > 0)
-        {
-            <div class="attachment-drafts" aria-label="Anexos desta execução">
-                @foreach (var attachment in _attachments)
-                {
-                    <span>
-                        @attachment.FileName // @FormatBytes(attachment.SizeBytes)
-                        <button type="button" class="message-action" @onclick="() => DeleteAttachmentAsync(attachment.Id)" disabled="@(_working || _pendingPlan is not null)">Remover</button>
-                    </span>
-                }
-            </div>
-        }
-        <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Escreva a próxima mensagem…" rows="3"></textarea>
-
-        @if (_pendingPlan is not null)
-        {
-            <section class="execution-plan" aria-live="polite" aria-label="Confirmação da execução">
-                <div class="execution-plan-header">
-                    <span class="amber">@(_regenerating ? "Prévia da regeneração" : "Prévia da execução")</span>
-                    <span>CATÁLOGO // @_pendingPlan.Route.PriceCatalogVersion</span>
-                </div>
-                <dl>
-                    <div>
-                        <dt>ROTA</dt>
-                        <dd>@_pendingPlan.Route.Provider / @_pendingPlan.Route.Model</dd>
-                    </div>
-                    <div>
-                        <dt>LIMITE DESTA TAREFA</dt>
-                        <dd>@Aic.Format(_pendingPlan.MaximumCostMinor)</dd>
-                    </div>
-                    <div>
-                        <dt>SALDO APÓS RESERVA</dt>
-                        <dd>@ProjectedBalance</dd>
-                    </div>
-                    <div>
-                        <dt>CLASSIFICAÇÃO</dt>
-                        <dd>@ClassificationLabel(_pendingPlan.DataClassification)</dd>
-                    </div>
-                    @if (_pendingPlan.Attachments is { Count: > 0 } plannedAttachments)
+                    else if (_regenerating)
                     {
-                        <div>
-                            <dt>ANEXOS CONGELADOS</dt>
-                            <dd>@plannedAttachments.Count ARQ // @FormatBytes(plannedAttachments.Sum(x => x.SizeBytes))</dd>
-                        </div>
+                        <p class="plan-warning">A regeneração cria uma nova execução e será cobrada somente se for concluída.</p>
                     }
-                    @if (_pendingPlan.Context is { } context)
-                    {
-                        <div>
-                            <dt>CONTEXTO ESTIMADO</dt>
-                            <dd>@context.EstimatedInputTokens.ToString("N0") / @context.MaximumInputTokens.ToString("N0") TOKENS</dd>
-                        </div>
-                    }
-                    @if (_pendingPlan.Knowledge is { } knowledge)
-                    {
-                        <div>
-                            <dt>MEMÓRIA DA FARM</dt>
-                            <dd>@knowledge.Hits.Count TRECHO(S) // @knowledge.SearchedSourceCount FONTE(S) ÍNTEGRA(S)</dd>
-                        </div>
-                    }
-                    @if (_pendingPlan.Settings is { } settings)
-                    {
-                        <div>
-                            <dt>CRIATIVIDADE</dt>
-                            <dd>@settings.Temperature.ToString("0.00")</dd>
-                        </div>
-                        <div>
-                            <dt>LIMITE DE RESPOSTA</dt>
-                            <dd>@settings.MaximumOutputTokens.ToString("N0") TOKENS</dd>
-                        </div>
-                    }
-                </dl>
-                @if (_pendingPlan.Settings?.SystemInstruction is { Length: > 0 } instruction)
-                {
-                    <details class="context-details">
-                        <summary>Ver instrução do sistema</summary>
-                        <article>
-                            <strong>INSTRUÇÃO</strong>
-                            <pre>@instruction</pre>
-                        </article>
-                    </details>
-                }
-                @if (_pendingPlan.Context is { } plannedContext)
-                {
-                    <details class="context-details">
-                        <summary>Ver contexto efetivamente enviado</summary>
-                        <p>
-                            @plannedContext.IncludedMessageCount MSG INTEGRAIS //
-                            @plannedContext.OmittedMessageCount MSG RESUMIDAS
-                        </p>
-                        @foreach (var contextMessage in plannedContext.Messages)
-                        {
-                            <article>
-                                <strong>@ContextRoleLabel(contextMessage)</strong>
-                                <pre>@contextMessage.Content</pre>
-                            </article>
-                        }
-                        <article>
-                            <strong>MENSAGEM ATUAL</strong>
-                            <pre>@_pendingPlan.Prompt</pre>
-                        </article>
-                    </details>
-                    @if (plannedContext.UsesSummary)
-                    {
-                        <p class="context-note">Resumo automático Mensagens antigas foram compactadas de forma extrativa.</p>
-                    }
-                }
-                @if (_pendingPlan.Knowledge is { HasHits: true } farmContext)
-                {
-                    <details class="context-details">
-                        <summary>Ver conhecimento recuperado da Farm</summary>
-                        @foreach (var hit in farmContext.Hits)
-                        {
-                            <article>
-                                <strong>@hit.Label // SCORE @hit.Score.ToString("0.000")</strong>
-                                <pre>@hit.Excerpt</pre>
-                                <small>@hit.Reference</small>
-                            </article>
-                        }
-                    </details>
-                }
-                else if (_pendingPlan.Knowledge is not null)
-                {
-                    <p class="context-note">Memória da Farm ativada, mas nenhum trecho relevante foi encontrado.</p>
-                }
-                @if (!CanAffordPendingPlan)
-                {
-                    <p class="plan-warning">Saldo insuficiente A execução não pode ser confirmada.</p>
-                }
-                else if (_regenerating)
-                {
-                    <p class="plan-warning">A regeneração cria uma nova execução e será cobrada somente se for concluída.</p>
-                }
-            </section>
-        }
-
-        <div class="composer-footer">
-            <span>DISPONÍVEL // @(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</span>
-            <div class="composer-actions">
-                @if (_streaming)
-                {
-                    <button type="button"
-                            class="cancel-generation"
-                            @onclick="CancelExecution"
-                            disabled="@(_executionCancellation?.IsCancellationRequested ?? true)">
-                        @((_executionCancellation?.IsCancellationRequested ?? false)
-                            ? "Interrompendo..."
-                            : "Interromper")
-                    </button>
-                }
-                else if (_lastFailure is not null)
-                {
-                    <span class="muted">ESCOLHA UMA AÇÃO ACIMA</span>
-                }
-                else if (_pendingPlan is null)
-                {
-                    <button type="button" @onclick="PrepareAsync" disabled="@_working">
-                        @(_working ? "Calculando..." : "Calcular custo")
-                    </button>
                 }
                 else
                 {
-                    <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
-                        Alterar
+                    <p class="muted" style="margin: 0">Escreva a mensagem e toque em "Calcular custo" para ver a prévia do gasto.</p>
+                }
+            </div>
+        </section>
+    </div>
+
+    <section class="terminal chat-terminal" aria-label="Conversa com Iris" style="position: relative">
+        <div class="terminal-title">
+            @if (_renaming)
+            {
+                <div class="title-editor">
+                    <input aria-label="Título da conversa"
+                           maxlength="@ConversationTitle.MaximumLength"
+                           @bind="_titleDraft" />
+                    <button type="button" @onclick="SaveTitleAsync" disabled="@_working">
+                        Salvar
                     </button>
-                    <button type="button" @onclick="ConfirmAsync" disabled="@(_working || !CanAffordPendingPlan)">
-                        @(_working
-                            ? "Executando..."
-                            : _regenerating
-                                ? $"Confirmar regeneração {Aic.Format(_pendingPlan.MaximumCostMinor)}"
-                                : $"Confirmar {Aic.Format(_pendingPlan.MaximumCostMinor)}")
+                    <button type="button" class="button-secondary" @onclick="CancelRename" disabled="@_working">
+                        Cancelar
+                    </button>
+                </div>
+            }
+            else
+            {
+                <span>@CurrentConversationLabel @(_currentConversationParentId.HasValue ? "· ramo" : null)</span>
+            }
+        </div>
+
+        <div class="chat-scroll chat-messages">
+            @if (_messages.Count == 0)
+            {
+                <div class="empty-state">
+                    <span class="purple">IRIS&gt;</span>
+                    <p>Comece a conversa: escreva sua pergunta abaixo e envie.</p>
+                    <p class="muted">A Iris escolhe sozinha o melhor caminho para responder.</p>
+                </div>
+            }
+
+            @foreach (var message in _messages)
+            {
+                <article class="message @(message.Role == ChatMessageRole.User ? "message-user" : "message-iris message-right")">
+                    <span class="@(message.Role == ChatMessageRole.User ? "amber" : "purple")">@(message.Role == ChatMessageRole.User ? $"{RoleLabel(message.Role)}>" : $"<{RoleLabel(message.Role)}")</span>
+                    <p>@message.Content</p>
+                    @if (message.Attachments is { Count: > 0 })
+                    {
+                        <div class="message-attachments">
+                            @foreach (var attachment in message.Attachments)
+                            {
+                                @if (IsImageAttachment(attachment))
+                                {
+                                    <a class="attachment-preview"
+                                       href="@AttachmentUrl(attachment.Id)"
+                                       download="@attachment.FileName"
+                                       aria-label="Baixar @attachment.FileName">
+                                        <img src="@AttachmentUrl(attachment.Id, preview: true)"
+                                             alt="@attachment.FileName"
+                                             loading="lazy" />
+                                        <span>Baixar · @attachment.FileName · @FormatBytes(attachment.SizeBytes)</span>
+                                    </a>
+                                }
+                                else
+                                {
+                                    <a href="@AttachmentUrl(attachment.Id)" download="@attachment.FileName">
+                                        Baixar · @attachment.FileName · @FormatBytes(attachment.SizeBytes)
+                                    </a>
+                                }
+                            }
+                        </div>
+                    }
+                    @if (MessageMeta(message) is string meta)
+                    {
+                        <small>@meta</small>
+                    }
+                    @if (message.Feedback is not null)
+                    {
+                        <small class="feedback-state">
+                            Feedback · @(message.Feedback.Rating == ChatFeedbackRating.Positive ? "útil" : "não útil")
+                            @if (!string.IsNullOrWhiteSpace(message.Feedback.Reason))
+                            {
+                                <span> · @message.Feedback.Reason</span>
+                            }
+                        </small>
+                    }
+                    <div class="message-actions">
+                        <button type="button"
+                                class="message-action"
+                                @onclick="() => CopyMessageAsync(message)"
+                                disabled="@_working">
+                            @(_copiedMessageId == message.Id ? "Copiado" : "Copiar")
+                        </button>
+                        @if (message.Role == ChatMessageRole.User)
+                        {
+                            <button type="button"
+                                    class="message-action"
+                                    @onclick="() => StartEditBranch(message)"
+                                    disabled="@_working">
+                                Editar / ramificar
+                            </button>
+                        }
+                        @if (CanRegenerate(message))
+                        {
+                            <button type="button"
+                                    class="message-action"
+                                    @onclick="() => PrepareRegenerationAsync(message.OperationId)"
+                                    disabled="@_working">
+                                Gerar outra resposta
+                            </button>
+                        }
+                        @if (message.Role == ChatMessageRole.Assistant)
+                        {
+                            <button type="button"
+                                    class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Positive ? "active-feedback" : null)"
+                                    @onclick="() => SetPositiveFeedbackAsync(message)"
+                                    disabled="@_working">
+                                Útil
+                            </button>
+                            <button type="button"
+                                    class="message-action @(message.Feedback?.Rating == ChatFeedbackRating.Negative ? "active-feedback" : null)"
+                                    @onclick="() => StartNegativeFeedback(message)"
+                                    disabled="@_working">
+                                Não útil
+                            </button>
+                            <button type="button"
+                                    class="message-action"
+                                    @onclick="() => SaveToLibraryAsync(message)"
+                                    disabled="@_working">
+                                @(_savedToLibraryMessageId == message.Id ? "Na fila da Biblioteca" : "Guardar na Biblioteca")
+                            </button>
+                        }
+                    </div>
+                    @if (_feedbackMessageId == message.Id)
+                    {
+                        <section class="feedback-editor" aria-label="Motivo do feedback">
+                            <label>
+                                O QUE PODERIA MELHORAR? // OPCIONAL
+                                <textarea rows="2" maxlength="500" @bind="_feedbackReason" disabled="@_working"></textarea>
+                            </label>
+                            <div>
+                                <button type="button" @onclick="() => SaveNegativeFeedbackAsync(message.Id)" disabled="@_working">Salvar feedback</button>
+                                @if (message.Feedback is not null)
+                                {
+                                    <button type="button" class="button-secondary" @onclick="() => ClearFeedbackAsync(message.Id)" disabled="@_working">Remover</button>
+                                }
+                                <button type="button" class="button-secondary" @onclick="CancelFeedback" disabled="@_working">Cancelar</button>
+                            </div>
+                        </section>
+                    }
+                </article>
+            }
+
+            @if (_streaming)
+            {
+                <article class="message message-iris message-right streaming-message" aria-live="polite" aria-label="Resposta em geração">
+                    <span class="purple">&lt;IRIS</span>
+                    <p>@(_streamingResponse.Length == 0 ? "Aguardando primeiro token…" : _streamingResponse.ToString())<span class="stream-cursor" aria-hidden="true"></span></p>
+                    <small>@_executionStatus · @_pendingPlan?.Route.Provider · @_pendingPlan?.Route.Model</small>
+                </article>
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <p class="error" role="alert">Erro @_error</p>
+        }
+
+        @if (_lastFailure is not null)
+        {
+            <section class="recovery-panel" role="alert" aria-label="Recuperação da execução">
+                <div>
+                    <strong>Execução não concluída</strong>
+                    <p>@_lastFailure.Message</p>
+                    <small>
+                        Código @_lastFailure.Code
+                        @if (!string.IsNullOrWhiteSpace(_lastFailure.DiagnosticId))
+                        {
+                            <span> · diagnóstico @_lastFailure.DiagnosticId</span>
+                        }
+                    </small>
+                </div>
+                <div class="recovery-actions">
+                    @if (_lastFailure.IsRetryable)
+                    {
+                        <button type="button"
+                                @onclick="RetryAsync"
+                                disabled="@(_working || !CanAffordPendingPlan)">
+                            Tentar novamente
+                        </button>
+                    }
+                    <button type="button"
+                            class="button-secondary"
+                            @onclick="CancelPlan"
+                            disabled="@_working">
+                        Alterar mensagem
+                    </button>
+                </div>
+            </section>
+        }
+
+        <div class="composer">
+            <div class="composer-heading">
+                <label for="prompt">MENSAGEM</label>
+                <details class="title-actions-menu heading-actions-menu">
+                    <summary>Ações ▾</summary>
+                    <div>
+                        @if (!_renaming)
+                        {
+                            <button type="button"
+                                    class="rename-button"
+                                    @onclick="StartRename"
+                                    disabled="@(_working || _conversationId == Guid.Empty)">
+                                Renomear
+                            </button>
+                        }
+                        <button type="button"
+                                class="archive-button"
+                                @onclick="ArchiveCurrentConversationAsync"
+                                disabled="@(_working || _conversationId == Guid.Empty)">
+                            Arquivar
+                        </button>
+                        <button type="button"
+                                class="danger-button"
+                                @onclick="() => RequestDeleteConversation(_conversationId)"
+                                disabled="@(_working || _conversationId == Guid.Empty)">
+                            Excluir
+                        </button>
+                        @if (_conversationId != Guid.Empty)
+                        {
+                            <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/markdown")">Exportar MD</a>
+                            @if (!IsLite)
+                            {
+                                <a class="export-button" href="@($"/api/chat/conversations/{_conversationId}/export/json")">Exportar JSON</a>
+                            }
+                        }
+                    </div>
+                </details>
+                @if (!IsLite)
+                {
+                    <button type="button" class="advanced-toggle" @onclick="ToggleConfiguration">
+                        @(_showConfiguration ? "⚙ Ocultar avançado" : "⚙ Avançado")
                     </button>
                 }
             </div>
+
+            @if (_showConfiguration)
+            {
+                <section class="win config-window" aria-label="Configuração desta conversa" style="position: absolute; top: 40px; right: 24px; z-index: 50; width: min(560px, calc(100% - 48px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; box-shadow: 4px 4px 0 #111111">
+                    <div class="win-title">
+                        <span>Avançado</span>
+                        <button type="button" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600; margin-left: auto" @onclick="ToggleConfiguration">×</button>
+                    </div>
+                    <div class="win-body" style="overflow-y: auto; min-height: 0">
+                        <p class="muted" style="margin: 0 0 12px; font-size: 12px">Vale só para as próximas respostas. Ramificações herdam este perfil.</p>
+                        @if (!string.IsNullOrWhiteSpace(_configurationNotice))
+                        {
+                            <span class="configuration-notice">@_configurationNotice</span>
+                        }
+                        <label style="display: grid; gap: 5px; margin: 0 0 12px">
+                            MODELO
+                            <select @bind="_modelPreference" disabled="@_working">
+                                @foreach (var option in ModelOptions)
+                                {
+                                    <option value="@option.Value">@option.Label</option>
+                                }
+                            </select>
+                        </label>
+                        <div class="configuration-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+                            <label>
+                                CRIATIVIDADE DO MODELO // @_temperature.ToString("0.00")
+                                <input type="range" min="0" max="2" step="0.1" @bind="_temperature" @bind:event="oninput" disabled="@_working" />
+                            </label>
+                            <label>
+                                LIMITE DE RESPOSTA // @_maximumOutputTokens.ToString("N0") TOKENS
+                                <input type="range"
+                                       min="@ConversationAiSettings.MinimumOutputTokens"
+                                       max="@SelectedModelMaximumOutputTokens"
+                                       step="64"
+                                       @bind="_maximumOutputTokens"
+                                       @bind:event="oninput"
+                                       disabled="@_working" />
+                            </label>
+                            <label class="system-instruction-field">
+                                INSTRUÇÃO DO SISTEMA
+                                <textarea rows="4"
+                                          maxlength="@ConversationAiSettings.MaximumInstructionLength"
+                                          placeholder="Ex.: Responda em português, com objetividade e exemplos práticos."
+                                          @bind="_systemInstruction"
+                                          disabled="@_working"></textarea>
+                                <small>@((_systemInstruction?.Length ?? 0).ToString("N0")) / @ConversationAiSettings.MaximumInstructionLength.ToString("N0") CARACTERES</small>
+                            </label>
+                        </div>
+                        <div class="configuration-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+                            <label>
+                                CONTEXTO
+                                <select @bind="_contextMessageLimit" disabled="@(_working || _pendingPlan is not null)">
+                                    @foreach (var option in ContextMessageOptions)
+                                    {
+                                        <option value="@option">@(option == 0 ? "Só esta mensagem" : $"Últimas {option} msg")</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                CLASSIFICAÇÃO DOS DADOS
+                                <select @bind="_dataClassification" disabled="@(_working || _pendingPlan is not null)">
+                                    <option value="@AiDataClassification.Standard">PADRÃO</option>
+                                    <option value="@AiDataClassification.Trusted">CONFIÁVEL</option>
+                                    <option value="@AiDataClassification.Private">PRIVADO</option>
+                                </select>
+                            </label>
+                        </div>
+                        <label class="farm-knowledge-toggle">
+                            <input type="checkbox" @bind="_useFarmKnowledge"
+                                   disabled="@(_working || _pendingPlan is not null)" />
+                            MEMÓRIA DA FARM
+                            <small>Usar índices computados · local, ou externo com a sua autorização</small>
+                        </label>
+                        @if (_useFarmKnowledge)
+                        {
+                            <label class="farm-knowledge-toggle farm-knowledge-consent">
+                                <input type="checkbox" @bind="_authorizeFarmExternal"
+                                       disabled="@(_working || _pendingPlan is not null)" />
+                                AUTORIZAR ENVIO DOS ÍNDICES AO PROVIDER EXTERNO
+                                <small>Vale para esta execução · o destino aparece na prévia</small>
+                            </label>
+                        }
+                        <small class="classification-note">
+                            PRIVADO permanece no ambiente local. CONFIÁVEL autoriza a rota externa exibida na prévia. PADRÃO é indicado para conteúdo não sensível.
+                        </small>
+                        <div class="configuration-actions">
+                            <button type="button" @onclick="SaveConversationSettingsAsync" disabled="@_working">
+                                Salvar nesta conversa
+                            </button>
+                            <button type="button" class="button-secondary" @onclick="ResetSettingsDraft" disabled="@_working">
+                                Restaurar salvo
+                            </button>
+                        </div>
+                        <div class="preset-panel">
+                            <div class="preset-create">
+                                <label>
+                                    SALVAR CONFIGURAÇÃO COMO PRESET
+                                    <input maxlength="80" placeholder="NOME DO PRESET" @bind="_presetName" disabled="@_working" />
+                                </label>
+                                <button type="button" @onclick="SavePresetAsync" disabled="@_working">Salvar preset</button>
+                            </div>
+                            <div class="preset-list">
+                                @if (_presets.Count == 0)
+                                {
+                                    <span class="muted">NENHUM PRESET SALVO</span>
+                                }
+                                @foreach (var preset in _presets)
+                                {
+                                    <article>
+                                        <div>
+                                            <strong>@preset.Name</strong>
+                                            <small>@PresetDescription(preset)</small>
+                                        </div>
+                                        <button type="button" @onclick="() => ApplyPresetAsync(preset)" disabled="@_working">Aplicar</button>
+                                        <button type="button" class="danger-button" @onclick="() => DeletePresetAsync(preset.Id)" disabled="@_working">Remover</button>
+                                    </article>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            }
+
+            @if (_editingBranch || _regenerating)
+            {
+                <section class="branch-draft" aria-live="polite">
+                    <div>
+                        <strong>@(_regenerating ? "Nova resposta em um ramo" : "Edição em um ramo")</strong>
+                        <small>A conversa original será preservada integralmente.</small>
+                    </div>
+                    @if (_pendingPlan is null)
+                    {
+                        <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
+                            Cancelar ramo
+                        </button>
+                    }
+                </section>
+            }
+
+            <div class="attachment-composer">
+                @if (AttachmentService.IsAvailable)
+                {
+                    <label class="attachment-picker attachment-picker-simple">
+                        <span class="attachment-button">+ Anexar</span>
+                        <span class="muted">até @AttachmentService.Limits.MaximumCount arquivos de @FormatBytes(AttachmentService.Limits.MaximumFileBytes)</span>
+                        <InputFile OnChange="UploadAttachmentsAsync"
+                                   multiple
+                                   accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.csv,.json,.log,.cs,.js,.ts,.py,.sql,.xml,.html,.css"
+                                   disabled="@(_working || _pendingPlan is not null)" />
+                    </label>
+                }
+                else
+                {
+                    <small class="muted">Anexos indisponíveis · armazenamento não configurado</small>
+                }
+            </div>
+            @if (_attachments.Count > 0)
+            {
+                <div class="attachment-drafts" aria-label="Anexos desta execução">
+                    @foreach (var attachment in _attachments)
+                    {
+                        <span>
+                            @attachment.FileName · @FormatBytes(attachment.SizeBytes)
+                            <button type="button" class="message-action" @onclick="() => DeleteAttachmentAsync(attachment.Id)" disabled="@(_working || _pendingPlan is not null)">Remover</button>
+                        </span>
+                    }
+                </div>
+            }
+            <textarea id="prompt" @bind="_prompt" disabled="@(_working || _pendingPlan is not null)" placeholder="Escreva a próxima mensagem…" rows="3"></textarea>
+
+            <div class="composer-footer">
+                <span class="muted">Disponível @(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor)) · só o valor realmente usado é cobrado, o resto volta na hora.</span>
+                <div class="composer-actions">
+                    @if (_streaming)
+                    {
+                        <button type="button"
+                                class="cancel-generation"
+                                @onclick="CancelExecution"
+                                disabled="@(_executionCancellation?.IsCancellationRequested ?? true)">
+                            @((_executionCancellation?.IsCancellationRequested ?? false)
+                                ? "Interrompendo..."
+                                : "Interromper")
+                        </button>
+                    }
+                    else if (_lastFailure is not null)
+                    {
+                        <span class="muted">Escolha uma ação acima</span>
+                    }
+                    else if (_pendingPlan is null)
+                    {
+                        <button type="button" @onclick="PrepareAsync" disabled="@_working">
+                            @(_working ? "Calculando..." : "Calcular custo")
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="button-secondary" @onclick="CancelPlan" disabled="@_working">
+                            Cancelar
+                        </button>
+                        <button type="button" @onclick="ConfirmAsync" disabled="@(_working || !CanAffordPendingPlan)">
+                            @(_working
+                                ? "Executando..."
+                                : _regenerating
+                                    ? $"Confirmar regeneração {Aic.Format(_pendingPlan.MaximumCostMinor)}"
+                                    : $"Confirmar e enviar {Aic.Format(_pendingPlan.MaximumCostMinor)}")
+                        </button>
+                    }
+                </div>
+            </div>
         </div>
-    </div>
     </section>
 </div>
 

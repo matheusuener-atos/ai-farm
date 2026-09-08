@@ -7,12 +7,6 @@
 
 <PageTitle>Biblioteca // atos AI Farm</PageTitle>
 
-<div class="page-head">
-    <p class="eyebrow">atos:/BIBLIOTECA</p>
-    <h1>Biblioteca da rede</h1>
-    <p>O QUE VOCÊ ALIMENTA AQUI, A REDE INDEXA — E O CHAT RESPONDE DAQUI</p>
-</div>
-
 @if (_error is not null)
 {
     <p class="error" role="alert">@_error</p>
@@ -23,27 +17,27 @@
 }
 
 <section class="win">
-    <div class="win-title"><span>Adicionar conhecimento</span><span>vira trabalho da rede</span></div>
+    <div class="win-title"><span>Adicionar conhecimento</span></div>
     <div class="win-body">
-        <div class="library-form">
-            <label>TÍTULO
+        <div class="library-form" style="max-width: none">
+            <label>Título
                 <input maxlength="80" @bind="_newLabel" placeholder="Ex.: Anotações sobre gravidade modificada" disabled="@_working" />
             </label>
-            <label>CONTEÚDO // MÁX. 32 KB
+            <label>Conteúdo · até 32 KB
                 <textarea rows="7" maxlength="30000" @bind="_newContent"
                           placeholder="Cole aqui o texto que a rede deve conhecer."
                           disabled="@_working"></textarea>
             </label>
             <button class="btn primary" type="button" @onclick="AddToLibraryAsync" disabled="@_working">
-                @(_working ? "Enviando…" : "Indexar na rede")
+                @(_working ? "Enviando…" : "Guardar na biblioteca")
             </button>
         </div>
-        <p class="muted">Um computador da sua pool executa a indexação (com verificação e CP) e o conteúdo passa a valer para a busca e para a rota AI FARM NETWORK do chat.</p>
+        <p class="muted">Um computador da sua pool organiza o conteúdo (com conferência e pontos de trabalho) e ele passa a valer para a busca e para as respostas do chat.</p>
     </div>
 </section>
 
 <section class="win">
-    <div class="win-title"><span>Conteúdos da biblioteca</span><span>@(_entries?.Count ?? 0) item(ns)</span></div>
+    <div class="win-title"><span>Conteúdos da biblioteca</span></div>
     <div class="win-body">
         @if (_entries is null)
         {
@@ -55,37 +49,39 @@
         }
         else
         {
-            <div class="table-scroll">
+            <div class="table-scroll" style="border: 1.5px solid #111111">
                 <table>
-                    <thead><tr><th>TÍTULO</th><th>SITUAÇÃO</th><th>QUANDO</th></tr></thead>
+                    <thead><tr><th>Título</th><th>Situação</th><th>Quando</th></tr></thead>
                     <tbody>
                         @foreach (var entry in _entries)
                         {
                             <tr>
-                                <td>@entry.Label</td>
-                                <td>@StatusLabel(entry.Status)</td>
-                                <td>@entry.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                                <td><strong>@entry.Label</strong></td>
+                                <td><span class="@StatusClass(entry.Status)" style="font-weight: 600">@StatusLabel(entry.Status)</span></td>
+                                <td class="time">@entry.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
-            <button class="btn" type="button" @onclick="ReloadEntriesAsync" disabled="@_working">Atualizar</button>
+            <div style="display: flex; justify-content: flex-end; margin-top: 10px">
+                <button class="btn primary" type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="ReloadEntriesAsync" disabled="@_working">Atualizar</button>
+            </div>
         }
     </div>
 </section>
 
 <section class="terminal">
     <div class="terminal-title"><span>Buscar na biblioteca</span></div>
-    <form class="knowledge-search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
-        <label for="knowledge-query">PERGUNTA OU TERMOS</label>
-        <div>
-            <input id="knowledge-query" maxlength="4000" @bind="_query"
-                   placeholder="Ex.: como os créditos computacionais são verificados?" />
+    <form class="knowledge-search" style="padding: 14px 16px" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+        <label for="knowledge-query">Pergunta ou palavras-chave</label>
+        <input id="knowledge-query" maxlength="4000" @bind="_query"
+               placeholder="Ex.: como os pontos de trabalho são conferidos?" />
+        <div style="display: flex; align-items: center; gap: 12px; margin-top: 4px">
+            <p class="muted" style="margin: 0 auto 0 0">A busca só olha conteúdos desta conta, já organizados e conferidos.</p>
             <button type="submit" disabled="@_working">@(_working ? "Buscando…" : "Buscar")</button>
         </div>
     </form>
-    <p class="muted">Somente conteúdos indexados, verificados e desta conta são consultados.</p>
 </section>
 
 @if (_result is not null)
@@ -93,7 +89,6 @@
     <section class="panel">
         <div class="panel-head">
             <span>Resultados</span>
-            <span>@_result.SearchedSourceCount FONTE(S) ÍNTEGRA(S) // @_result.Hits.Count TRECHO(S)</span>
         </div>
         @if (!_result.HasHits)
         {
@@ -104,13 +99,13 @@
             <div class="knowledge-results">
                 @foreach (var hit in _result.Hits)
                 {
-                    <article>
-                        <header>
-                            <strong>@hit.Label</strong>
-                            <span class="tag">SCORE @hit.Score.ToString("0.000")</span>
+                    <article style="border: 1.5px solid #111111; background: #FFFFFF; box-shadow: 3px 3px 0 #111111; padding: 0">
+                        <header style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1.5px solid #111111; background: #F4F1EA">
+                            <strong style="font-size: 13px">@hit.Label</strong>
+                            <span class="tag" style="margin-left: auto">RELEVÂNCIA @hit.Score.ToString("0.000")</span>
                         </header>
-                        <p>@hit.Excerpt</p>
-                        <footer>
+                        <p style="margin: 0; padding: 12px 16px">@hit.Excerpt</p>
+                        <footer style="padding: 0 16px 12px">
                             <code>@hit.Reference</code>
                             <span>@hit.IndexedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
                             <span>@string.Join(", ", hit.MatchedTerms)</span>
@@ -168,7 +163,7 @@
                 TargetShards: TargetShardsFor(_newContent)));
             _newLabel = string.Empty;
             _newContent = string.Empty;
-            _notice = $"\"{demand.Label}\" foi para a rede indexar — em instantes entra na biblioteca.";
+            _notice = $"\"{demand.Label}\" foi para a rede organizar — em instantes entra na biblioteca.";
             await ReloadEntriesAsync();
         }
         catch (ArgumentException exception)
@@ -197,7 +192,14 @@
         FarmDemandStatus.Completed => "NA BIBLIOTECA",
         FarmDemandStatus.Failed => "FALHOU",
         FarmDemandStatus.Expired => "EXPIROU",
-        _ => "A REDE ESTÁ INDEXANDO…"
+        _ => "A REDE ESTÁ ORGANIZANDO…"
+    };
+
+    private static string StatusClass(FarmDemandStatus status) => status switch
+    {
+        FarmDemandStatus.Completed => "green",
+        FarmDemandStatus.Failed or FarmDemandStatus.Expired => "error-text",
+        _ => "amber"
     };
 
     private async Task SearchAsync()

@@ -7,9 +7,8 @@
 
 @if (_node is null)
 {
-    <div class="page-head">
-        <p class="eyebrow">atos:/POOL</p>
-        <h1>@(_loaded ? "Computador não encontrado" : "Carregando…")</h1>
+    <div>
+        <h1 style="margin: 0; font-size: 18px">@(_loaded ? "Computador não encontrado" : "Carregando…")</h1>
         @if (_loaded)
         {
             <p class="muted">Este assento não existe mais nesta conta. <a href="/meu-computador">Voltar à pool</a></p>
@@ -18,16 +17,14 @@
 }
 else
 {
-    <div class="page-head">
-        <p class="eyebrow">atos:/POOL/@_node.Name</p>
-        <h1>@_node.Name</h1>
-        <p>
+    <div style="display: flex; align-items: center; gap: 12px; border: 1.5px solid #111111; background: #F4F1EA; box-shadow: 3px 3px 0 #111111; padding: 10px 16px">
+        <strong style="font-size: 13px">@_node.Name</strong>
+        <small class="muted">@(_node.ConnectionKind == FarmNodeConnectionKind.Agent ? "programa instalado" : "embutida no servidor")</small>
+        <span class="@(_node.Status == FarmNodeStatus.Online ? "green" : "amber")" style="margin-left: auto; font-size: 12px; font-weight: 600">
             @(_node.PendingConfirmation
                 ? "AGUARDANDO CONFIRMAÇÃO"
-                : _node.Status == FarmNodeStatus.Online ? "ONLINE" : _node.Status == FarmNodeStatus.Paused ? "PAUSADO" : "DESLIGADA")
-            // @_node.ConnectionKind.ToString().ToUpperInvariant()
-            // <a href="/meu-computador">← voltar à pool</a>
-        </p>
+                : _node.Status == FarmNodeStatus.Online ? "ENTREGANDO PODER" : _node.Status == FarmNodeStatus.Paused ? "PAUSADA" : "DESLIGADA")
+        </span>
     </div>
 
     @if (_error is not null)
@@ -38,22 +35,22 @@ else
     <section class="win">
         <div class="win-title"><span>Identidade técnica</span></div>
         <div class="win-body">
-            <dl class="pool-facts pool-facts-wide">
-                <div><dt>CPU</dt><dd>@_node.LogicalProcessors núcleos (@_node.AuthorizedLogicalProcessors autorizados)</dd></div>
-                <div><dt>MEMÓRIA</dt><dd>@((_node.MemoryBytes / 1024d / 1024 / 1024).ToString("0.0")) GB (@((_node.AuthorizedMemoryBytes / 1024d / 1024).ToString("N0")) MB autorizados)</dd></div>
-                <div><dt>USO AGORA</dt><dd>@(_node.LiveWorkerCpuPercent is double cpu ? $"{cpu:0}% · {(_node.LiveWorkerMemoryBytes ?? 0) / 1024d / 1024:0.0} MB" : "—")</dd></div>
-                <div><dt>CP TOTAL</dt><dd>@((_node.LifetimeComputeUnitsMilli / 1000d).ToString("N0")) CP</dd></div>
-                <div><dt>VERSÃO</dt><dd>@(_node.AgentVersion ?? "—")</dd></div>
-                <div><dt>VERIFICAÇÃO</dt><dd>@_node.VerificationLevel.ToString().ToUpperInvariant()</dd></div>
-                <div><dt>VISTO POR ÚLTIMO</dt><dd>@_node.LastSeenAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</dd></div>
-                <div><dt>PLATAFORMA</dt><dd>@(_node.SharePlatformWork ? "ajudando quando ocioso" : "só esta conta")</dd></div>
-            </dl>
-            <p class="muted">RUNTIME // @_node.Runtime</p>
+            <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1.5px solid #111111">
+                <div style="padding: 8px 10px; border-right: 1.5px solid #111111; border-bottom: 1.5px solid #111111"><span class="label" style="font-size: 9px">CPU</span><br /><strong>@_node.LogicalProcessors núcleos</strong> <small class="muted">(@_node.AuthorizedLogicalProcessors liberados)</small></div>
+                <div style="padding: 8px 10px; border-right: 1.5px solid #111111; border-bottom: 1.5px solid #111111"><span class="label" style="font-size: 9px">MEMÓRIA</span><br /><strong>@((_node.MemoryBytes / 1024d / 1024 / 1024).ToString("0.0")) GB</strong> <small class="muted">(@((_node.AuthorizedMemoryBytes / 1024d / 1024).ToString("N0")) MB liberados)</small></div>
+                <div style="padding: 8px 10px; border-right: 1.5px solid #111111; border-bottom: 1.5px solid #111111"><span class="label" style="font-size: 9px">USO AGORA</span><br /><strong>@(_node.LiveWorkerCpuPercent is double cpu ? $"{cpu:0}% · {(_node.LiveWorkerMemoryBytes ?? 0) / 1024d / 1024:0.0} MB" : "—")</strong></div>
+                <div style="padding: 8px 10px; border-bottom: 1.5px solid #111111"><span class="label" style="font-size: 9px">CP TOTAL</span><br /><strong>@((_node.LifetimeComputeUnitsMilli / 1000d).ToString("N0")) CP</strong></div>
+                <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">VERSÃO</span><br /><strong>@(_node.AgentVersion ?? "—")</strong></div>
+                <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">PERFIL</span><br /><strong>@(_node.VerificationLevel == FarmVerificationLevel.Verified ? "VERIFICADO" : "DETECTADO")</strong></div>
+                <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">VISTO POR ÚLTIMO</span><br /><strong>@_node.LastSeenAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</strong></div>
+                <div style="padding: 8px 10px"><span class="label" style="font-size: 9px">PLATAFORMA</span><br /><strong>@(_node.SharePlatformWork ? "ajudando quando ociosa" : "só esta conta")</strong></div>
+            </div>
+            <p class="muted" style="margin: 10px 0 0">Sistema: @_node.Runtime</p>
         </div>
     </section>
 
     <section class="win">
-        <div class="win-title"><span>Últimos trabalhos desta máquina</span><span>@_jobs.Count exibidos</span></div>
+        <div class="win-title"><span>Últimos trabalhos desta máquina</span></div>
         <div class="win-body">
             @if (_jobs.Count == 0)
             {
@@ -72,7 +69,7 @@ else
                                 <tr>
                                     <td>@job.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</td>
                                     <td>@job.WorkloadVersion</td>
-                                    <td>@job.Status.ToString().ToUpperInvariant()</td>
+                                    <td>@StatusLabel(job.Status)</td>
                                     <td>@((job.ComputeUnitsMilli / 1000d).ToString("0.###"))</td>
                                     <td>@(job.DurationMilliseconds is long duration ? $"{duration} ms" : "—")</td>
                                 </tr>
@@ -81,6 +78,9 @@ else
                     </table>
                 </div>
             }
+            <div style="display: flex; justify-content: flex-end; margin-top: 10px">
+                <a class="btn" href="/meu-computador" style="box-shadow: 2px 2px 0 #111111">← Voltar à pool</a>
+            </div>
         </div>
     </section>
 }
@@ -92,6 +92,18 @@ else
     private IReadOnlyList<FarmJobSnapshot> _jobs = [];
     private bool _loaded;
     private string? _error;
+
+    private static string StatusLabel(FarmJobStatus status) => status switch
+    {
+        FarmJobStatus.Queued => "NA FILA",
+        FarmJobStatus.Running => "EXECUTANDO",
+        FarmJobStatus.Verifying => "VERIFICANDO",
+        FarmJobStatus.Completed => "CONCLUÍDA",
+        FarmJobStatus.Failed => "FALHOU",
+        FarmJobStatus.Cancelled => "CANCELADA",
+        FarmJobStatus.TimedOut => "TEMPO ESGOTADO",
+        _ => status.ToString().ToUpperInvariant()
+    };
 
     protected override async Task OnParametersSetAsync()
     {
