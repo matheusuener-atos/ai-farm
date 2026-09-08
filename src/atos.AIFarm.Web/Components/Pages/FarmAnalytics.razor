@@ -30,26 +30,27 @@ else if (_analytics is null)
 }
 else
 {
-    <div class="analytics-kpis farm-analytics-kpis">
+    <div class="farm-analytics-kpis">
         <section class="kpi kpi-amber"><span>JOBS</span><strong>@_analytics.JobCount</strong><small>@_analytics.ActiveJobCount ATIVO(S)</small></section>
         <section class="kpi kpi-green"><span>CONCLUSÃO</span><strong>@_analytics.SuccessRatePercent.ToString("0.0")%</strong><small>@_analytics.CompletedJobCount OK // @_analytics.FailedJobCount FALHA</small></section>
         <section class="kpi @(_analytics.IntegrityFailureCount == 0 ? "kpi-green" : "kpi-amber")"><span>INTEGRIDADE</span><strong>@_analytics.IntegrityFailureCount</strong><small>BUNDLES DIVERGENTES</small></section>
         <section class="kpi kpi-amber"><span>CP VERIFICADO</span><strong>@FormatCp(_analytics.VerifiedProcessingPointsMilli)</strong><small>SOMENTE JOBS CONCLUÍDOS</small></section>
-        <section class="kpi"><span>VAZÃO</span><strong>@_analytics.ProcessingPointsPerHour.ToString("N3") CP/H</strong><small>POR TEMPO DE EXECUÇÃO</small></section>
+        <section class="kpi"><span>RITMO</span><strong>@_analytics.ProcessingPointsPerHour.ToString("N3") CP/H</strong><small>POR TEMPO DE EXECUÇÃO</small></section>
         <section class="kpi"><span>DURAÇÃO MÉDIA</span><strong>@FormatDuration(_analytics.AverageDurationMilliseconds)</strong><small>PICO MEM. @FormatBytes(_analytics.PeakMemoryBytes)</small></section>
         <section class="kpi @TrendClass"><span>VARIAÇÃO DE CP</span><strong>@FormatChange(_analytics.ProcessingPointsChangePercent)</strong><small>ANTERIOR @FormatCp(_analytics.PreviousPeriodProcessingPointsMilli)</small></section>
+        <section class="kpi blackout" aria-hidden="true"></section>
     </div>
 
     <section class="panel farm-analytics-node">
-        <div class="panel-head"><h2>Node e agent</h2><button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "Atualizando..." : "Atualizar")</button></div>
+        <div class="panel-head"><h2>Máquina e programa</h2><button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">@(_loading ? "Atualizando..." : "Atualizar")</button></div>
         @if (_analytics.Node is null)
         {
-            <p class="analytics-empty muted">NODE AINDA NÃO INICIALIZADO NESTA CONTA.</p>
+            <p class="analytics-empty muted">MÁQUINA AINDA NÃO INICIALIZADA NESTA CONTA.</p>
         }
         else
         {
             <div class="farm-analytics-node-grid">
-                <div><span>NODE</span><strong>@_analytics.Node.Name</strong><small>@_analytics.Node.ConnectionKind</small></div>
+                <div><span>MÁQUINA</span><strong>@_analytics.Node.Name</strong><small>@_analytics.Node.ConnectionKind</small></div>
                 <div><span>STATUS</span><strong class="@NodeStatusClass">@_analytics.Node.Status</strong><small>@(_analytics.Node.HeartbeatFresh ? "HEARTBEAT VÁLIDO" : "HEARTBEAT EXPIRADO")</small></div>
                 <div><span>VERIFICAÇÃO</span><strong>@_analytics.Node.VerificationLevel</strong><small>@(_analytics.Node.AcceptJobs ? "ACEITANDO JOBS" : "NÃO ACEITA JOBS")</small></div>
                 <div><span>CAPACIDADE</span><strong>@_analytics.Node.LogicalProcessors CPU</strong><small>@FormatBytes(_analytics.Node.MemoryBytes)</small></div>

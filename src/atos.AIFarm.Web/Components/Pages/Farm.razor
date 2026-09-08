@@ -33,7 +33,7 @@
 else
 {
     <section class="terminal farm-workload-catalog">
-        <div class="terminal-title"><span>Catálogo de workloads</span><small>@FarmWorkloadCatalog.Version</small></div>
+        <div class="terminal-title"><span>Catálogo de workloads</span><code>@FarmWorkloadCatalog.Version</code></div>
         <div class="farm-workload-grid">
             @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is null))
             {
