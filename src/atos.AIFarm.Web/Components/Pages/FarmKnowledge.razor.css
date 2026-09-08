@@ -1,9 +1,2 @@
-.knowledge-search { display: grid; gap: .45rem; }
-.knowledge-search > div { display: grid; grid-template-columns: 1fr auto; gap: .65rem; }
-.knowledge-search input { min-width: 0; }
-.knowledge-results { display: grid; gap: .75rem; padding: .9rem; }
-.knowledge-results article { border: 1px solid var(--line, #111); padding: .9rem; background: var(--surface, #fff); }
-.knowledge-results header, .knowledge-results footer { display: flex; flex-wrap: wrap; gap: .65rem; justify-content: space-between; align-items: center; }
-.knowledge-results p { white-space: pre-wrap; line-height: 1.55; }
-.knowledge-results footer { color: var(--muted, #6b6b66); font-size: .75rem; justify-content: flex-start; }
-@media (max-width: 700px) { .knowledge-search > div { grid-template-columns: 1fr; } }
+/* Estilos migrados para wwwroot/app.css nesta rodada de padronização de UI.
+   Manter este arquivo vazio (ou removê-lo) para não conflitar com o CSS global. */

@@ -4,23 +4,17 @@
 @inject IWalletService WalletService
 @inject IInterfaceModeService InterfaceMode
 
-<PageTitle>Wallet // atos AI Farm</PageTitle>
+<PageTitle>Créditos // atos AI Farm</PageTitle>
 
 @if (IsLite)
 {
-    <div class="page-head">
-        <p class="eyebrow">atos:/CREDITOS</p>
-        <h1>Meus créditos</h1>
-        <p>TUDO REGISTRADO // NADA MUDA SOZINHO</p>
-    </div>
-
     @if (_error is not null)
     {
         <p class="error">@_error</p>
     }
     else if (_snapshot is null)
     {
-        <p class="muted">CARREGANDO...</p>
+        <p class="muted">Carregando…</p>
     }
     else
     {
@@ -78,79 +72,73 @@
 }
 else
 {
-<div class="page-head">
-    <p class="eyebrow">atos:/WALLET</p>
-    <h1>AI wallet</h1>
-    <p>LEDGER IMUTÁVEL // PARTIDAS DOBRADAS // VALORES EM mAIC</p>
-</div>
-
 @if (_error is not null)
 {
     <p class="error">@_error</p>
 }
 else if (_snapshot is null)
 {
-    <p class="muted">CARREGANDO...</p>
+    <p class="muted">Carregando…</p>
 }
 else
 {
     <div class="kpi-grid cols-5">
         <section class="kpi kpi-purple">
-            <span>DISPONÍVEL TOTAL</span>
+            <span>Disponível agora</span>
             <strong>@Aic.Format(_snapshot.Balance.AvailableMinor)</strong>
         </section>
         <section class="kpi kpi-amber">
-            <span>RESERVADO</span>
+            <span>Separado para conversas</span>
             <strong>@Aic.Format(_snapshot.Balance.ReservedMinor)</strong>
+            <small>volta sozinho se não for usado</small>
         </section>
         <section class="kpi">
-            <span>PURCHASED</span>
+            <span>Comprados</span>
             <strong>@BucketBalance(CreditBucket.Purchased)</strong>
-            <small>CRÉDITO ADMINISTRATIVO // CONSUMO AGUARDA ADR 0026</small>
+            <small>ainda não podem ser gastos nesta versão</small>
         </section>
         <section class="kpi kpi-green">
-            <span>EARNED</span>
+            <span>Ganhos do computador</span>
             <strong>@BucketBalance(CreditBucket.Earned)</strong>
-            <small>SETTLEMENT DA FARM // ADR 0022</small>
+            <small>pagos quando a política de recompensas está ativa</small>
         </section>
         <section class="kpi">
-            <span>PROMOTIONAL</span>
+            <span>Bônus de boas-vindas</span>
             <strong>@BucketBalance(CreditBucket.Promotional)</strong>
-            <small>ÚNICO BUCKET CONSUMÍVEL HOJE</small>
+            <small>o único tipo que pode ser gasto hoje</small>
         </section>
     </div>
 
     <section class="panel">
         <header class="panel-head">
-            <h2>Invariantes do ledger</h2>
+            <h2>Conferência do extrato</h2>
             <span class="tag @(InvariantsHold ? "green" : "error-text")">
-                @(InvariantsHold ? "VÁLIDO" : "VIOLADO")
+                @(InvariantsHold ? "TUDO CERTO" : "COM ERRO")
             </span>
         </header>
         <div class="kv-list">
-            <div><span>TRANSAÇÕES</span><strong>@_snapshot.Transactions.Count</strong></div>
-            <div><span>LANÇAMENTOS</span><strong>@AllEntries.Count</strong></div>
-            <div><span>TRANSAÇÕES DESBALANCEADAS</span><strong>@UnbalancedCount</strong></div>
-            <div><span>TOTAL DÉBITOS</span><strong>@Aic.Format(TotalDebits)</strong></div>
-            <div><span>TOTAL CRÉDITOS</span><strong>@Aic.Format(TotalCredits)</strong></div>
-            <div class="total"><span>DIFERENÇA</span><strong>@Aic.Format(TotalDebits - TotalCredits)</strong></div>
+            <div><span>Movimentações</span><strong>@_snapshot.Transactions.Count</strong></div>
+            <div><span>Registros</span><strong>@AllEntries.Count</strong></div>
+            <div><span>Movimentações com erro</span><strong>@UnbalancedCount</strong></div>
+            <div><span>Total de saídas</span><strong>@Aic.Format(TotalDebits)</strong></div>
+            <div><span>Total de entradas</span><strong>@Aic.Format(TotalCredits)</strong></div>
+            <div class="total"><span>Diferença</span><strong>@Aic.Format(TotalDebits - TotalCredits)</strong></div>
         </div>
         <p class="panel-note">
-            Cada transação deve somar zero (débitos = créditos) e o saldo é sempre
-            projeção dos lançamentos — nunca uma coluna mutável.
+            Toda movimentação soma zero: o que sai de um lado entra do outro. O saldo é
+            sempre calculado a partir desses registros — nunca é um número editado à mão.
         </p>
     </section>
 
     <section class="panel">
         <header class="panel-head">
-            <h2>Reservas abertas</h2>
-            <span class="tag amber">EXPIRAM AUTOMATICAMENTE</span>
+            <h2>Valores separados agora</h2>
         </header>
         @if (_snapshot.OpenReservations.Count == 0)
         {
             <p class="panel-empty">
-                NENHUMA RESERVA ATIVA // RESERVAS NÃO CAPTURADAS SÃO LIBERADAS NO
-                LEDGER APÓS A EXPIRAÇÃO
+                Nenhum valor separado no momento. Quando você inicia uma conversa, uma estimativa
+                fica separada aqui até a resposta terminar.
             </p>
         }
         else
@@ -158,7 +146,7 @@ else
             <div class="table-wrap">
                 <table>
                     <thead>
-                        <tr><th>RESERVA</th><th>BUCKET</th><th class="num">VALOR</th><th>EXPIRA (UTC)</th></tr>
+                        <tr><th>Reserva</th><th>Tipo</th><th class="num">Valor</th><th>Expira (UTC)</th></tr>
                     </thead>
                     <tbody>
                         @foreach (var reservation in _snapshot.OpenReservations)
@@ -177,18 +165,18 @@ else
     </section>
 
     <section class="panel">
-        <header class="panel-head"><h2>Atividade do ledger</h2><span class="tag">IMUTÁVEL</span></header>
+        <header class="panel-head"><h2>Extrato completo</h2></header>
         <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
-                        <th>UTC</th>
-                        <th>OPERAÇÃO</th>
-                        <th>CONTA CONTÁBIL</th>
-                        <th>BUCKET</th>
-                        <th class="num">DÉBITO</th>
-                        <th class="num">CRÉDITO</th>
-                        <th>CORRELAÇÃO</th>
+                        <th>Quando (UTC)</th>
+                        <th>O que aconteceu</th>
+                        <th>Conta</th>
+                        <th>Tipo</th>
+                        <th class="num">Saída</th>
+                        <th class="num">Entrada</th>
+                        <th>Código</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -196,7 +184,7 @@ else
                     {
                         <tr>
                             <td class="time">@transaction.CreatedAtUtc.ToString("dd/MM HH:mm:ss")</td>
-                            <td class="@TypeClass(transaction.Type)">@transaction.Type.ToString().ToUpperInvariant()</td>
+                            <td class="@TypeClass(transaction.Type)">@TypeLabelPro(transaction.Type)</td>
                             <td colspan="4"><small>@transaction.Description</small></td>
                             <td><code>@transaction.CorrelationId.ToString("N")[..8]</code></td>
                         </tr>
@@ -206,7 +194,7 @@ else
                                 <td></td>
                                 <td></td>
                                 <td><code>@AccountLabel(entry.AccountCode)</code></td>
-                                <td>@entry.Bucket.ToString().ToUpperInvariant()</td>
+                                <td>@BucketLabel(entry.Bucket)</td>
                                 <td class="num">@(entry.Direction == LedgerDirection.Debit ? Aic.Format(entry.AmountMinor) : "—")</td>
                                 <td class="num">@(entry.Direction == LedgerDirection.Credit ? Aic.Format(entry.AmountMinor) : "—")</td>
                                 <td></td>
@@ -239,6 +227,25 @@ else
         _ => "Correção"
     };
 
+    private static string TypeLabelPro(LedgerTransactionType type) => type switch
+    {
+        LedgerTransactionType.Grant => "BÔNUS RECEBIDO",
+        LedgerTransactionType.Reserve => "RESERVA",
+        LedgerTransactionType.Capture => "USO",
+        LedgerTransactionType.Release => "DEVOLUÇÃO",
+        LedgerTransactionType.Reward => "GANHO DA FARM",
+        LedgerTransactionType.Refund => "REEMBOLSO",
+        _ => type.ToString().ToUpperInvariant()
+    };
+
+    private static string BucketLabel(CreditBucket bucket) => bucket switch
+    {
+        CreditBucket.Promotional => "BÔNUS",
+        CreditBucket.Earned => "GANHOS",
+        CreditBucket.Purchased => "COMPRADOS",
+        _ => bucket.ToString().ToUpperInvariant()
+    };
+
     private WalletSnapshot? _snapshot;
     private string? _error;
 
@@ -251,7 +258,7 @@ else
         }
         catch (Exception)
         {
-            _error = "Não foi possível carregar a wallet. Tente novamente.";
+            _error = "Não foi possível carregar os créditos. Tente novamente.";
         }
     }
 

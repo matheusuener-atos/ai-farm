@@ -3,19 +3,14 @@
 @attribute [Authorize]
 @inject IAiUsageQuery Usage
 
-<PageTitle>Análise da Iris // atos AI Farm</PageTitle>
+<PageTitle>Resumo de uso // atos AI Farm</PageTitle>
 
-<div class="page-head analytics-head">
-    <div>
-        <p class="eyebrow">atos:/IRIS/ANALYTICS</p>
-        <h1>Centro analítico</h1>
-        <p>TELEMETRIA AGREGADA // SEM PROMPTS // ISOLADA POR CONTA</p>
-    </div>
-    <label class="analytics-period">PERÍODO UTC
+<div style="display: flex; justify-content: flex-end">
+    <label class="analytics-period">Período (UTC)
         <select value="@_days" @onchange="ChangePeriodAsync" disabled="@_loading">
-            <option value="7">7 DIAS</option>
-            <option value="30">30 DIAS</option>
-            <option value="90">90 DIAS</option>
+            <option value="7">7 dias</option>
+            <option value="30">30 dias</option>
+            <option value="90">90 dias</option>
         </select>
     </label>
 </div>
@@ -26,54 +21,48 @@
 }
 else if (_analytics is null)
 {
-    <p>CALCULANDO TELEMETRIA...</p>
+    <p class="muted">Calculando…</p>
 }
 else
 {
-    <div class="analytics-kpis">
+    <div class="analytics-kpis" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr))">
         <section class="kpi kpi-purple">
-            <span>EXECUÇÕES</span>
+            <span>Respostas</span>
             <strong>@_analytics.Totals.ExecutionCount</strong>
-            <small>@_analytics.Totals.ConversationCount CONVERSA(S)</small>
+            <small>@_analytics.Totals.ConversationCount conversa(s)</small>
         </section>
         <section class="kpi kpi-green">
-            <span>TAXA DE SUCESSO</span>
+            <span>Deram certo</span>
             <strong>@_analytics.SuccessRatePercent.ToString("0.0")%</strong>
-            <small>@SuccessfulCount CONCLUÍDA(S)</small>
+            <small>@SuccessfulCount concluída(s)</small>
         </section>
         <section class="kpi kpi-amber">
-            <span>CUSTO REAL</span>
+            <span>Custo real</span>
             <strong>@Aic.Format(_analytics.Totals.ActualCostMinor)</strong>
-            <small>ESTIMADO @Aic.Format(_analytics.Totals.EstimatedCostMinor)</small>
+            <small>estimado antes: @Aic.Format(_analytics.Totals.EstimatedCostMinor)</small>
         </section>
         <section class="kpi kpi-green">
-            <span>AIC LIBERADO</span>
+            <span>Devolvido ao saldo</span>
             <strong>@Aic.Format(_analytics.Totals.ReleasedCostMinor)</strong>
-            <small>RESERVA NÃO CONSUMIDA</small>
+            <small>estimativa não usada</small>
         </section>
         <section class="kpi">
-            <span>LATÊNCIA MÉDIA</span>
+            <span>Tempo médio de resposta</span>
             <strong>@FormatDuration(_analytics.AverageDurationMilliseconds)</strong>
-            <small>EXECUÇÕES FINALIZADAS</small>
+            <small>respostas finalizadas</small>
         </section>
         <section class="kpi @CostTrendClass">
-            <span>VARIAÇÃO DE CUSTO</span>
+            <span>Variação de custo</span>
             <strong>@FormatChange(_analytics.ActualCostChangePercent)</strong>
-            <small>PERÍODO ANTERIOR @Aic.Format(_analytics.PreviousPeriodActualCostMinor)</small>
+            <small>período anterior: @Aic.Format(_analytics.PreviousPeriodActualCostMinor)</small>
         </section>
     </div>
 
     <section class="panel analytics-timeline">
-        <div class="panel-head section-heading">
-            <div>
-                <h2>Custo diário</h2>
-                <p class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</p>
-            </div>
-            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_loading">
-                @(_loading ? "Atualizando..." : "Atualizar")
-            </button>
+        <div class="panel-head">
+            <h2>Gasto por dia</h2>
         </div>
-        <div class="analytics-bars" role="img" aria-label="Custo real diário da Iris">
+        <div class="analytics-bars" role="img" aria-label="Gasto real diário com a Iris">
             @foreach (var day in _analytics.Daily)
             {
                 <div class="analytics-bar-row">
@@ -82,32 +71,38 @@ else
                         <span style="width: @BarWidth(day.ActualCostMinor)"></span>
                     </div>
                     <strong>@Aic.Format(day.ActualCostMinor)</strong>
-                    <small>@day.ExecutionCount EXEC // @day.FailureCount FALHA(S)</small>
+                    <small>@day.ExecutionCount resposta(s) · @day.FailureCount falha(s)</small>
                 </div>
             }
         </div>
+        <footer class="home-ledger-foot" style="border-top: 1.5px solid #111111">
+            <span class="muted">@_analytics.FromUtc.ToString("dd/MM/yyyy") — @_analytics.ToUtc.ToString("dd/MM/yyyy") UTC</span>
+            <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="LoadAsync" disabled="@_loading">
+                @(_loading ? "Atualizando..." : "Atualizar")
+            </button>
+        </footer>
     </section>
 
     <div class="analytics-detail-grid">
         <section class="panel">
-            <div class="panel-head"><h2>Provedores e modelos</h2></div>
+            <div class="panel-head"><h2>Serviços e modelos</h2></div>
             @if (_analytics.Routes.Count == 0)
             {
-                <p class="analytics-empty muted">SEM EXECUÇÕES NO PERÍODO.</p>
+                <p class="analytics-empty muted">Sem respostas no período.</p>
             }
             else
             {
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>ROTA</th><th>EXEC</th><th>UNIDADES</th><th>CUSTO</th><th>LATÊNCIA</th></tr></thead>
+                        <thead><tr><th>Rota</th><th>Respostas</th><th>Texto</th><th>Custo</th><th>Tempo</th></tr></thead>
                         <tbody>
                             @foreach (var route in _analytics.Routes)
                             {
                                 <tr>
                                     <td><span class="purple">@route.Provider</span><br /><small>@route.Model</small></td>
-                                    <td>@route.ExecutionCount<br /><small class="green">@route.SuccessCount OK</small> // <small class="amber">@route.FailureCount FALHA</small></td>
-                                    <td>@route.InputUnits IN<br />@route.OutputUnits OUT</td>
-                                    <td>@Aic.Format(route.ActualCostMinor)<br /><small>EST. @Aic.Format(route.EstimatedCostMinor)</small></td>
+                                    <td>@route.ExecutionCount<br /><small class="green">@route.SuccessCount ok</small> · <small class="amber">@route.FailureCount falha(s)</small></td>
+                                    <td>@route.InputUnits.ToString("N0") enviado<br />@route.OutputUnits.ToString("N0") recebido</td>
+                                    <td>@Aic.Format(route.ActualCostMinor)<br /><small>est. @Aic.Format(route.EstimatedCostMinor)</small></td>
                                     <td>@FormatDuration(route.AverageDurationMilliseconds)</td>
                                 </tr>
                             }
@@ -121,14 +116,14 @@ else
             <div class="panel-head"><h2>Resultados</h2></div>
             @if (_analytics.Statuses.Count == 0)
             {
-                <p class="analytics-empty muted">SEM RESULTADOS NO PERÍODO.</p>
+                <p class="analytics-empty muted">Sem resultados no período.</p>
             }
             else
             {
                 @foreach (var status in _analytics.Statuses)
                 {
                     <div>
-                        <span class="@StatusClass(status.Status)">@status.Status.ToUpperInvariant()</span>
+                        <span class="@StatusClass(status.Status)">@StatusLabel(status.Status)</span>
                         <strong>@status.ExecutionCount</strong>
                         <small>@status.Percentage.ToString("0.0")%</small>
                     </div>
@@ -169,7 +164,7 @@ else
         _loading = true;
         _error = null;
         try { _analytics = await Usage.GetAnalyticsAsync(_days); }
-        catch (Exception) { _error = "Não foi possível calcular a telemetria analítica."; }
+        catch (Exception) { _error = "Não foi possível calcular o resumo de uso."; }
         finally { _loading = false; }
     }
 
@@ -177,9 +172,18 @@ else
     private static string FormatChange(decimal? value) => value is null ? "SEM BASE" : $"{value:+0.0;-0.0;0.0}%";
     private static string FormatDuration(decimal? milliseconds) => milliseconds switch
     {
-        null => "---",
+        null => "—",
         < 1_000 => $"{milliseconds:0} ms",
         _ => $"{milliseconds / 1_000:0.00} s"
+    };
+    private static string StatusLabel(string status) => status switch
+    {
+        "Completed" => "CONCLUÍDA",
+        "Running" => "EM CURSO",
+        "Failed" => "FALHOU",
+        "Cancelled" => "CANCELADA",
+        "TimedOut" => "TEMPO ESGOTADO",
+        _ => status.ToUpperInvariant()
     };
     private static string StatusClass(string status) =>
         status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ? "green" : "amber";

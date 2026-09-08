@@ -73,175 +73,248 @@
 else
 {
 <div class="home-modular" data-account="@_accountKey">
-    <div class="home-fixed">
-        <section class="win home-card-credits" aria-label="Seus créditos">
-            <div class="win-title"><span>Seus créditos</span></div>
-            <div class="win-body home-balance">
-                <div class="home-balance-head">
-                    <div>
-                        <span class="label">Créditos disponíveis</span>
-                        <strong class="home-balance-value">@BalanceValue</strong>
-                        <span class="muted">Separado @Format(_snapshot?.Balance.ReservedMinor) · Já gasto @Format(ConsumedMinor) · @(_usage?.Totals.ExecutionCount.ToString() ?? "—") respostas nesta conta</span>
-                    </div>
-                    <div class="page-actions">
-                        <a class="btn" href="/farm">Testar meu computador</a>
-                        <a class="btn primary" href="/chat">Nova conversa</a>
-                    </div>
-                </div>
-                <div class="home-month">
-                    <b>Movimento deste mês</b>
-                    <div class="cycle-row"><span>Bônus recebido</span><div class="cycle-bar cycle-green"><i style="width: @MonthPct(GrantMinor)%"></i></div><span class="num">@Format(GrantMinor)</span></div>
-                    <div class="cycle-row"><span>Ganhos da farm</span><div class="cycle-bar cycle-green"><i style="width: @MonthPct(EarnedMinor)%"></i></div><span class="num">@Format(EarnedMinor)</span></div>
-                    <div class="cycle-row"><span>Gasto com respostas</span><div class="cycle-bar cycle-purple"><i style="width: @MonthPct(ConsumedMinor)%"></i></div><span class="num">@Format(ConsumedMinor)</span></div>
-                    <div class="cycle-row"><span>Devolvido ao saldo</span><div class="cycle-bar cycle-amber"><i style="width: @MonthPct(ReleasedMinor)%"></i></div><span class="num">@Format(ReleasedMinor)</span></div>
-                </div>
-            </div>
-        </section>
+    <div style="display: flex; gap: 24px; align-items: flex-start">
+        <div style="flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; align-items: stretch" data-mod-grid="true">
 
-        <section class="win home-card-extract" aria-label="Extrato">
-            <div class="win-title"><span>Extrato</span></div>
-            <div class="home-ledger">
-                @if (_snapshot is null)
-                {
-                    <p class="muted">Carregando…</p>
-                }
-                else if (_snapshot.Transactions.Count == 0)
-                {
-                    <p class="muted">Nenhuma movimentação ainda.</p>
-                }
-                else
-                {
-                    @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc).Take(8))
-                    {
-                        <div class="home-ledger-row">
-                            <span class="mono muted">@transaction.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
-                            <span class="tag @TypeClass(transaction.Type)">@TypeLabel(transaction.Type)</span>
-                            <span class="mono num">@Aic.Format(transaction.Entries.Max(x => x.AmountMinor))</span>
+            <section class="win" data-mod="creditos" style="grid-column: span 2; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Seus créditos">
+                <div class="win-title mod-title"><span style="flex: none; overflow: visible">Seus créditos</span></div>
+                <div class="win-body home-balance">
+                    <div class="home-balance-head">
+                        <div>
+                            <span class="label">Créditos disponíveis</span>
+                            <strong class="home-balance-value">@BalanceValue</strong>
+                            <span class="muted">Separado para uso @Format(_snapshot?.Balance.ReservedMinor) · Já gasto @Format(ConsumedMinor) · @(_usage?.Totals.ExecutionCount.ToString() ?? "—") respostas da Iris nesta conta</span>
                         </div>
-                    }
-                }
-                <div class="home-ledger-foot">
-                    <span class="muted">Partidas dobradas · imutável</span>
-                    <a class="btn" href="/wallet">Ver créditos</a>
+                        <div class="page-actions">
+                            <a class="btn" style="box-shadow: 2px 2px 0 #111111" href="/farm">Testar meu computador</a>
+                            <a class="btn primary" href="/chat">Nova conversa</a>
+                        </div>
+                    </div>
+                    <div style="margin-top: 14px; border-top: 1px solid #E6E4DE; padding-top: 12px">
+                        <span class="label" style="display: block; margin-bottom: 8px">Movimento deste mês</span>
+                        <div class="analytics-bars" style="padding: 0; max-height: none" role="img" aria-label="Movimento de créditos do mês">
+                            <div class="analytics-bar-row" style="grid-template-columns: 150px minmax(60px, 1fr) minmax(70px, auto) minmax(110px, auto)"><span style="font-size: 11px; color: #6B6A66">Bônus recebido</span><div class="analytics-bar-track"><span style="width: @MonthPct(GrantMinor)%; background: #111111"></span></div><strong>@Format(GrantMinor)</strong><small>boas-vindas</small></div>
+                            <div class="analytics-bar-row" style="grid-template-columns: 150px minmax(60px, 1fr) minmax(70px, auto) minmax(110px, auto)"><span style="font-size: 11px; color: #6B6A66">Ganhos da farm</span><div class="analytics-bar-track"><span style="width: @MonthPct(EarnedMinor)%; background: #1E7D3C"></span></div><strong>@Format(EarnedMinor)</strong><small>tarefas conferidas</small></div>
+                            <div class="analytics-bar-row" style="grid-template-columns: 150px minmax(60px, 1fr) minmax(70px, auto) minmax(110px, auto)"><span style="font-size: 11px; color: #6B6A66">Gasto com respostas</span><div class="analytics-bar-track"><span style="width: @MonthPct(ConsumedMinor)%; background: #FF4F1F"></span></div><strong>@Format(ConsumedMinor)</strong><small>@(_usage?.Totals.ExecutionCount.ToString() ?? "—") respostas</small></div>
+                            <div class="analytics-bar-row" style="grid-template-columns: 150px minmax(60px, 1fr) minmax(70px, auto) minmax(110px, auto)"><span style="font-size: 11px; color: #6B6A66">Devolvido ao saldo</span><div class="analytics-bar-track"><span style="width: @MonthPct(ReleasedMinor)%; background: #E8A824"></span></div><strong>@Format(ReleasedMinor)</strong><small>estimativa não usada</small></div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </section>
+            </section>
 
-        <section class="win home-card-machines" aria-label="Suas máquinas">
-            <div class="win-title"><span>Suas máquinas</span></div>
-            <div class="win-body">
-                @if (_farm is null)
-                {
-                    <p class="muted">Conectando…</p>
-                }
-                else
-                {
-                    <div class="home-machines-grid">
-                        @foreach (var node in _farm.Nodes.Take(4))
+            <section class="win" data-mod="extrato" style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Extrato">
+                <div class="win-title mod-title"><span style="flex: none; overflow: visible">Extrato</span></div>
+                <div class="home-ledger mod-ledger">
+                    @if (_snapshot is null)
+                    {
+                        <p class="muted">Carregando…</p>
+                    }
+                    else if (_snapshot.Transactions.Count == 0)
+                    {
+                        <p class="muted">Nenhuma movimentação ainda.</p>
+                    }
+                    else
+                    {
+                        @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc).Take(5))
                         {
-                            <article class="home-machine @(node.Status == FarmNodeStatus.Online ? "online" : "offline")">
-                                <header>
-                                    <span class="dot @(node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
-                                    <b>@node.Name</b>
-                                </header>
-                                <p class="home-machine-state @(node.Status == FarmNodeStatus.Online ? "on" : null)">
-                                    @(node.Status == FarmNodeStatus.Online ? "Pronto para trabalhar" : "Desligada")
-                                </p>
-                                <dl class="pool-facts">
-                                    <div><dt>CPU</dt><dd>@node.LogicalProcessors núcleos</dd></div>
-                                    <div><dt>CP total</dt><dd>@((node.LifetimeComputeUnitsMilli / 1000d).ToString("N0"))</dd></div>
-                                </dl>
-                            </article>
+                            <div class="home-ledger-row">
+                                <span class="mono muted">@transaction.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
+                                <span class="tag @TypeClass(transaction.Type)">@TypeLabel(transaction.Type)</span>
+                                <span class="mono num">@Aic.Format(transaction.Entries.Max(x => x.AmountMinor))</span>
+                            </div>
                         }
-                        <a class="home-machine home-machine-add" href="/meu-computador">
-                            <span class="home-machine-plus">+</span>
-                            Adicionar máquina
-                        </a>
-                    </div>
-                    <div class="home-machines-foot">
-                        <span class="muted">@_farm.Nodes.Count máquina(s) nesta conta</span>
-                        <a class="btn primary" href="/meu-computador">Abrir pool</a>
-                    </div>
-                }
-            </div>
-        </section>
-    </div>
-
-    <nav class="desk-icons" aria-label="Módulos">
-        <button type="button" class="desk-icon" data-open="chat"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H8l-4 3v-3H3z" /></svg></span><span>Chat</span></button>
-        <button type="button" class="desk-icon" data-open="credits"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="15" height="11" /><path d="M13 10.5h3.5M2.5 8h12" /></svg></span><span>Créditos</span></button>
-        <button type="button" class="desk-icon" data-open="usage"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l4-6 3 4 3-7 4 9" /></svg></span><span>Uso da IA</span></button>
-        <button type="button" class="desk-icon" data-open="lab"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="14" height="14" /><rect x="7" y="7" width="6" height="6" /></svg></span><span>Laboratório</span></button>
-        <button type="button" class="desk-icon" data-open="earnings"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 16h14M5 13v-4M9 13V5M13 13V8M17 13V3" /></svg></span><span>Ganhos</span></button>
-        <button type="button" class="desk-icon" data-open="records"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2l6 3v5c0 4-2.5 7-6 8-3.5-1-6-4-6-8V5z" /></svg></span><span>Registros</span></button>
-    </nav>
-
-    <div class="home-modules">
-        <section class="home-module" data-module="chat">
-            <div class="home-module-bar"><span>Chat com Iris</span><span class="home-module-btns"><button type="button" data-act="min" aria-label="Minimizar">▢</button><button type="button" data-act="close" aria-label="Fechar">×</button></span></div>
-            <div class="home-module-body">
-                <p><span class="purple">IRIS&gt;</span> Escreva sua pergunta — você confirma o custo antes de enviar.</p>
-                <a class="btn primary" href="/chat">Abrir chat completo</a>
-            </div>
-        </section>
-        <section class="home-module" data-module="credits">
-            <div class="home-module-bar"><span>Créditos</span><span class="home-module-btns"><button type="button" data-act="min" aria-label="Minimizar">▢</button><button type="button" data-act="close" aria-label="Fechar">×</button></span></div>
-            <div class="home-module-body">
-                <div class="kv-list">
-                    <div><span>Total disponível</span><span class="mono num">@BalanceValue</span></div>
-                    <div><span>Separado agora</span><span class="mono num">@Format(_snapshot?.Balance.ReservedMinor)</span></div>
-                </div>
-                <a class="btn" href="/wallet">Ver extrato completo</a>
-            </div>
-        </section>
-        <section class="home-module" data-module="usage">
-            <div class="home-module-bar"><span>Uso da IA</span><span class="home-module-btns"><button type="button" data-act="min" aria-label="Minimizar">▢</button><button type="button" data-act="close" aria-label="Fechar">×</button></span></div>
-            <div class="home-module-body">
-                <div class="kv-list">
-                    <div><span>Respostas</span><span class="mono num">@(_usage?.Totals.ExecutionCount.ToString() ?? "—")</span></div>
-                    <div><span>Conversas</span><span class="mono num">@(_usage?.Totals.ConversationCount.ToString() ?? "—")</span></div>
-                </div>
-                <a class="btn" href="/iris/analytics">Abrir uso da IA</a>
-            </div>
-        </section>
-        <section class="home-module" data-module="lab">
-            <div class="home-module-bar"><span>Laboratório</span><span class="home-module-btns"><button type="button" data-act="min" aria-label="Minimizar">▢</button><button type="button" data-act="close" aria-label="Fechar">×</button></span></div>
-            <div class="home-module-body">
-                <p class="muted">Última tarefa</p>
-                <p class="mono">@LastJobLabel</p>
-                <a class="btn" href="/farm">Testar agora</a>
-            </div>
-        </section>
-        <section class="home-module" data-module="earnings">
-            <div class="home-module-bar"><span>Ganhos</span><span class="home-module-btns"><button type="button" data-act="min" aria-label="Minimizar">▢</button><button type="button" data-act="close" aria-label="Fechar">×</button></span></div>
-            <div class="home-module-body">
-                <div class="kv-list">
-                    <div><span>Trabalho feito</span><span class="mono num">@(_farm is null ? "—" : FormatCp(_farm.VerifiedComputeUnitsMilli))</span></div>
-                    <div><span>Créditos ganhos</span><span class="mono num">@Format(EarnedMinor)</span></div>
-                </div>
-                <a class="btn" href="/farm/rewards">Abrir recompensas</a>
-            </div>
-        </section>
-        <section class="home-module" data-module="records">
-            <div class="home-module-bar"><span>Registros</span><span class="home-module-btns"><button type="button" data-act="min" aria-label="Minimizar">▢</button><button type="button" data-act="close" aria-label="Fechar">×</button></span></div>
-            <div class="home-module-body">
-                @if (_snapshot is { Transactions.Count: > 0 })
-                {
-                    @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc).Take(3))
-                    {
-                        <div class="home-ledger-row">
-                            <span class="mono muted">@transaction.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
-                            <span class="tag @TypeClass(transaction.Type)">@TypeLabel(transaction.Type)</span>
-                        </div>
                     }
-                }
-                else
-                {
-                    <p class="muted">Sem registros ainda.</p>
-                }
-                <a class="btn" href="/audit">Abrir registros</a>
-            </div>
-        </section>
+                    <div class="home-ledger-foot">
+                        <span class="muted">@(_snapshot?.Transactions.Count.ToString() ?? "—") registros</span>
+                        <a class="btn primary" href="/wallet">Ver créditos</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="win" data-mod="maquinas" style="grid-column: span 3; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Suas máquinas">
+                <div class="win-title mod-title"><span style="flex: none; overflow: visible">Suas máquinas</span></div>
+                <div class="win-body">
+                    @if (_farm is null)
+                    {
+                        <p class="muted">Conectando…</p>
+                    }
+                    else
+                    {
+                        <div class="pool-grid">
+                            @foreach (var node in _farm.Nodes.Take(3))
+                            {
+                                <article class="pool-card @(node.Status == FarmNodeStatus.Online ? "online" : "offline")">
+                                    <header>
+                                        <span class="dot @(node.Status == FarmNodeStatus.Online ? "orange blink" : "hollow")" aria-hidden="true"></span>
+                                        <b>@node.Name</b>
+                                    </header>
+                                    @if (node.Status == FarmNodeStatus.Online)
+                                    {
+                                        <p class="pool-state on">ENTREGANDO PODER</p>
+                                        <svg class="pool-spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true">
+                                            <polyline points="0,30 15,28 30,22 45,25 60,12 75,15 90,8 105,10 120,5"></polyline>
+                                        </svg>
+                                        <dl class="pool-facts">
+                                            <div><dt>CPU</dt><dd>@node.LogicalProcessors núcleos</dd></div>
+                                            <div><dt>CP total</dt><dd>@((node.LifetimeComputeUnitsMilli / 1000d).ToString("N0"))</dd></div>
+                                        </dl>
+                                    }
+                                    else
+                                    {
+                                        <p class="pool-state">DESLIGADA</p>
+                                        <div style="display: grid; grid-template-columns: 1fr 1fr; border: 1.5px solid #111111; margin: 4px 0 6px">
+                                            <div style="padding: 6px 8px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">CPU</span><br /><strong>@node.LogicalProcessors</strong> <small class="muted">núcleos</small></div>
+                                            <div style="padding: 6px 8px"><span class="label" style="font-size: 9px">CP TOTAL</span><br /><strong>@((node.LifetimeComputeUnitsMilli / 1000d).ToString("N0"))</strong></div>
+                                        </div>
+                                    }
+                                    <footer>
+                                        <a class="pool-detail-link" href="/meu-computador">Detalhes →</a>
+                                    </footer>
+                                </article>
+                            }
+                            <article class="pool-card pool-seat">
+                                <a class="pool-seat-add" href="/meu-computador">
+                                    <span class="pool-seat-plus" aria-hidden="true">+</span>
+                                    <span>Adicionar máquina</span>
+                                    <small class="muted" style="font-weight: 500">Instale o programa em outro computador</small>
+                                </a>
+                            </article>
+                        </div>
+                        <div class="home-ledger-foot" style="margin: auto -16px -14px"><span class="muted">@_farm.Nodes.Count máquina(s) nesta conta</span><a class="btn primary" href="/meu-computador">Abrir pool</a></div>
+                    }
+                </div>
+            </section>
+
+            <section class="win" data-mod="chat" hidden style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Chat com a Iris">
+                <div class="win-title mod-title no-squares" style="user-select: none; touch-action: none">
+                    <span style="flex: none; overflow: visible">Chat com a Iris</span>
+                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center; flex: none">
+                        <button type="button" data-act="min" title="Minimizar" aria-label="Minimizar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 0"><span style="width: 7px; height: 1.5px; background: #111111"></span></button>
+                        <button type="button" data-act="close" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600">×</button>
+                    </div>
+                </div>
+                <div style="display: flex; flex-direction: column">
+                    <article class="message" style="padding: 10px 12px; grid-template-columns: 48px minmax(0,1fr)">
+                        <span class="purple">IRIS&gt;</span>
+                        <p style="font-size: 12.5px">Oi! Escreva sua pergunta abaixo — você confirma o custo antes de enviar.</p>
+                    </article>
+                    <div class="composer" style="padding: 10px 12px 12px; gap: 8px">
+                        <textarea rows="2" placeholder="Escreva a mensagem…" style="min-height: 40px; font-size: 12.5px"></textarea>
+                        <div class="composer-actions" style="justify-content: flex-end; display: flex; gap: 8px">
+                            <a class="btn" href="/chat">Abrir chat completo</a>
+                            <a class="btn primary" href="/chat">Enviar</a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="win" data-mod="wallet" hidden style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Créditos">
+                <div class="win-title mod-title no-squares" style="user-select: none; touch-action: none">
+                    <span style="flex: none; overflow: visible">Créditos</span>
+                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center; flex: none">
+                        <button type="button" data-act="min" title="Minimizar" aria-label="Minimizar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 0"><span style="width: 7px; height: 1.5px; background: #111111"></span></button>
+                        <button type="button" data-act="close" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600">×</button>
+                    </div>
+                </div>
+                <div>
+                    <div class="kv-list">
+                        <div><span>Total disponível</span><strong>@BalanceValue</strong></div>
+                        <div><span>Separado agora</span><strong>@Format(_snapshot?.Balance.ReservedMinor)</strong></div>
+                        <div><span>Já gasto</span><strong>@Format(ConsumedMinor)</strong></div>
+                    </div>
+                    <div class="home-ledger-foot"><span class="muted">De onde vem seu saldo</span><a class="btn primary" href="/wallet">Ver extrato completo</a></div>
+                </div>
+            </section>
+
+            <section class="win" data-mod="usage" hidden style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Uso da IA">
+                <div class="win-title mod-title no-squares" style="user-select: none; touch-action: none">
+                    <span style="flex: none; overflow: visible">Uso da IA</span>
+                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center; flex: none">
+                        <button type="button" data-act="min" title="Minimizar" aria-label="Minimizar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 0"><span style="width: 7px; height: 1.5px; background: #111111"></span></button>
+                        <button type="button" data-act="close" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600">×</button>
+                    </div>
+                </div>
+                <div>
+                    <div class="kv-list">
+                        <div><span>Respostas</span><strong>@(_usage?.Totals.ExecutionCount.ToString() ?? "—")</strong></div>
+                        <div><span>Conversas</span><strong>@(_usage?.Totals.ConversationCount.ToString() ?? "—")</strong></div>
+                    </div>
+                    <div class="home-ledger-foot"><span class="muted">Últimos 30 dias</span><a class="btn primary" href="/operations">Abrir uso da IA</a></div>
+                </div>
+            </section>
+
+            <section class="win" data-mod="lab" hidden style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Laboratório">
+                <div class="win-title mod-title no-squares" style="user-select: none; touch-action: none">
+                    <span style="flex: none; overflow: visible">Laboratório</span>
+                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center; flex: none">
+                        <button type="button" data-act="min" title="Minimizar" aria-label="Minimizar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 0"><span style="width: 7px; height: 1.5px; background: #111111"></span></button>
+                        <button type="button" data-act="close" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600">×</button>
+                    </div>
+                </div>
+                <div class="win-body home-node" style="padding: 12px 14px">
+                    <p class="muted" style="margin: 0 0 8px">Roda uma tarefa de teste agora e confere o resultado no servidor.</p>
+                    <div class="home-node-last"><span class="muted">Última tarefa</span><span class="mono">@LastJobLabel</span></div>
+                    <div style="display: flex; gap: 8px; margin-top: auto; padding-top: 10px; justify-content: flex-end">
+                        <a class="btn" href="/farm">Abrir laboratório</a>
+                        <a class="btn primary" href="/farm">Testar agora</a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="win" data-mod="rewards" hidden style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Ganhos">
+                <div class="win-title mod-title no-squares" style="user-select: none; touch-action: none">
+                    <span style="flex: none; overflow: visible">Ganhos</span>
+                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center; flex: none">
+                        <button type="button" data-act="min" title="Minimizar" aria-label="Minimizar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 0"><span style="width: 7px; height: 1.5px; background: #111111"></span></button>
+                        <button type="button" data-act="close" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600">×</button>
+                    </div>
+                </div>
+                <div>
+                    <div class="kv-list">
+                        <div><span>Trabalho feito</span><strong>@(_farm is null ? "—" : FormatCp(_farm.VerifiedComputeUnitsMilli))</strong></div>
+                        <div><span>Créditos ganhos</span><strong>@Format(EarnedMinor)</strong></div>
+                    </div>
+                    <div class="home-ledger-foot"><span class="muted">Política ativa</span><a class="btn primary" href="/farm/rewards">Abrir recompensas</a></div>
+                </div>
+            </section>
+
+            <section class="win" data-mod="audit" hidden style="grid-column: span 1; position: relative; display: flex; flex-direction: column; min-height: 0" aria-label="Registros">
+                <div class="win-title mod-title no-squares" style="user-select: none; touch-action: none">
+                    <span style="flex: none; overflow: visible">Registros</span>
+                    <div style="display: flex; gap: 6px; margin-left: auto; align-items: center; flex: none">
+                        <button type="button" data-act="min" title="Minimizar" aria-label="Minimizar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 0"><span style="width: 7px; height: 1.5px; background: #111111"></span></button>
+                        <button type="button" data-act="close" title="Fechar" aria-label="Fechar" style="width: 15px; height: 15px; min-height: 0; padding: 0; box-shadow: none; border: 1.5px solid #111111; background: #ffffff; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 600">×</button>
+                    </div>
+                </div>
+                <div class="home-ledger mod-ledger">
+                    @if (_snapshot is { Transactions.Count: > 0 })
+                    {
+                        @foreach (var transaction in _snapshot.Transactions.OrderByDescending(x => x.CreatedAtUtc).Take(3))
+                        {
+                            <div class="home-ledger-row">
+                                <span class="mono muted">@transaction.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm")</span>
+                                <span class="tag @TypeClass(transaction.Type)">@TypeLabel(transaction.Type)</span>
+                                <span class="mono num">@Aic.Format(transaction.Entries.Max(x => x.AmountMinor))</span>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="muted">Sem registros ainda.</p>
+                    }
+                    <div class="home-ledger-foot"><span class="muted">Eventos fora do extrato</span><a class="btn primary" href="/audit">Abrir registros</a></div>
+                </div>
+            </section>
+        </div>
+
+        <nav class="desk-icons" style="position: static; flex: none" aria-label="Módulos">
+            <button class="desk-icon" type="button" data-open="chat" style="background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111; padding: 10px 8px 8px; min-height: 0; cursor: pointer"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H8l-4 3v-3H3z" /></svg></span><span>Chat</span></button>
+            <button class="desk-icon" type="button" data-open="wallet" style="background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111; padding: 10px 8px 8px; min-height: 0; cursor: pointer"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="15" height="11" /><path d="M13 10.5h3.5M2.5 8h12" /></svg></span><span>Créditos</span></button>
+            <button class="desk-icon" type="button" data-open="usage" style="background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111; padding: 10px 8px 8px; min-height: 0; cursor: pointer"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 15l4-6 3 4 3-7 4 9" /></svg></span><span>Uso da IA</span></button>
+            <button class="desk-icon" type="button" data-open="lab" style="background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111; padding: 10px 8px 8px; min-height: 0; cursor: pointer"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="14" height="14" /><rect x="7" y="7" width="6" height="6" /></svg></span><span>Laboratório</span></button>
+            <button class="desk-icon" type="button" data-open="rewards" style="background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111; padding: 10px 8px 8px; min-height: 0; cursor: pointer"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 16h14M5 13v-4M9 13V5M13 13V8M17 13V3" /></svg></span><span>Ganhos</span></button>
+            <button class="desk-icon" type="button" data-open="audit" style="background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111; padding: 10px 8px 8px; min-height: 0; cursor: pointer"><span class="img"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2l6 3v5c0 4-2.5 7-6 8-3.5-1-6-4-6-8V5z" /><path d="M7.5 10l2 2 3.5-4" /></svg></span><span>Registros</span></button>
+        </nav>
     </div>
 </div>
 }

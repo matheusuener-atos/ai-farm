@@ -28,7 +28,7 @@
                                 <form method="post" action="/account/interface-mode">
                                     <AntiforgeryToken />
                                     <input type="hidden" name="mode" value="Pro" />
-                                    <button class="nav-button" type="submit">Ativar modo completo</button>
+                                    <button class="nav-button" type="submit">Ver modo completo</button>
                                 </form>
                                 <form method="post" action="/account/logout">
                                     <AntiforgeryToken />
@@ -42,12 +42,12 @@
                     {
                         <NavLink href="/" Match="NavLinkMatch.All">Início</NavLink>
                         <NavLink href="/chat">Chat</NavLink>
-                        <NavLink href="/wallet">Wallet</NavLink>
-                        <NavLink href="/operations">Operações</NavLink>
+                        <NavLink href="/wallet">Créditos</NavLink>
+                        <NavLink href="/operations">Uso da IA</NavLink>
                         <details class="@(IsSection("iris") ? "active" : null)">
                             <summary>Iris ▾</summary>
                             <div>
-                                <NavLink href="/iris/analytics">Centro analítico</NavLink>
+                                <NavLink href="/iris/analytics">Resumo de uso</NavLink>
                                 <NavLink href="/iris/budget">Limites de uso</NavLink>
                             </div>
                         </details>
@@ -56,29 +56,29 @@
                             <div>
                                 <NavLink href="/farm" Match="NavLinkMatch.All">Compute Lab</NavLink>
                                 <NavLink href="/meu-computador">Meu computador</NavLink>
-                                <NavLink href="/farm/jobs">Centro de jobs</NavLink>
-                                <NavLink href="/farm/demands">Demandas úteis</NavLink>
+                                <NavLink href="/farm/jobs">Histórico de tarefas</NavLink>
+                                <NavLink href="/farm/demands">Enviar trabalho</NavLink>
                                 <NavLink href="/biblioteca">Biblioteca</NavLink>
                                 <NavLink href="/farm/capacity">Capacidade</NavLink>
                                 <NavLink href="/farm/schedules">Agendamentos</NavLink>
                                 <hr />
-                                <NavLink href="/farm/analytics">Análise da Farm</NavLink>
-                                <NavLink href="/farm/economy">Economia</NavLink>
+                                <NavLink href="/farm/analytics">Resumo da Farm</NavLink>
+                                <NavLink href="/farm/economy">Simulador de ganhos</NavLink>
                                 <NavLink href="/farm/rewards">Recompensas</NavLink>
-                                <NavLink href="/saldo-farm">Saldo Farm</NavLink>
+                                <NavLink href="/saldo-farm">Saldo da Farm</NavLink>
                             </div>
                         </details>
                         <details class="@(IsSection("audit", "incidents", "account") ? "active" : null)">
                             <summary>Conta ▾</summary>
                             <div>
-                                <NavLink href="/audit">Auditoria</NavLink>
+                                <NavLink href="/audit">Registro de tudo</NavLink>
                                 <NavLink href="/incidents">Alertas</NavLink>
-                                <NavLink href="/account/api-tokens">Tokens de API</NavLink>
+                                <NavLink href="/account/api-tokens">Chaves de acesso</NavLink>
                                 <hr />
                                 <form method="post" action="/account/interface-mode">
                                     <AntiforgeryToken />
                                     <input type="hidden" name="mode" value="Lite" />
-                                    <button class="nav-button" type="submit">Ativar modo simples</button>
+                                    <button class="nav-button" type="submit">Ver modo simples</button>
                                 </form>
                                 <form method="post" action="/account/logout">
                                     <AntiforgeryToken />
@@ -90,9 +90,12 @@
                     }
                 </nav>
                 <div class="menubar-right">
-                    <span class="status"><span class="status-dot" aria-hidden="true"></span>Online · Provider @ProviderName</span>
+                    <span class="status"><span class="status-dot" aria-hidden="true"></span>Online</span>
+                    <span class="muted" aria-hidden="true" style="font-size: 11px">//</span>
                     <UtcClock />
-                    <span class="menubar-balance" title="Saldo disponível"><strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong></span>
+                    <span class="muted" aria-hidden="true" style="font-size: 11px">//</span>
+                    <span class="menubar-balance" title="Créditos disponíveis"><strong>@(_snapshot is null ? "---" : Aic.Format(_snapshot.Balance.AvailableMinor))</strong></span>
+                    <span class="muted" aria-hidden="true" style="font-size: 11px">//</span>
                     <span class="menubar-account">
                         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="7" r="3.5" /><path d="M3.5 17c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5" /></svg>
                         <span title="@auth.User.Identity?.Name">@AccountLabel(auth.User.Identity?.Name)</span>
@@ -117,14 +120,14 @@
                     <div class="auth-hero">
                         <div class="brand">
                             <i><svg viewBox="0 0 20 20" fill="none" stroke="#111111" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16c0-7 4-11 12-12-1 8-5 12-12 12z" /><path d="M4 16l7-7" /></svg></i>
-                            <span>AI Farm<small>atos · provider @ProviderName.ToLowerInvariant()</small></span>
+                            <span>AI Farm<small>atos</small></span>
                         </div>
                         <h2>Seu computador.<br /><span>Sua inteligência.</span></h2>
                         <p class="thesis">Eu farmo créditos com o computador que já tenho e gasto esses créditos nas ferramentas de IA que realmente quero usar.</p>
                         <div class="auth-facts">
-                            <div><span class="label">AIC</span><span>Ledger imutável de partidas dobradas</span></div>
-                            <div><span class="label">CP</span><span>Trabalho computacional comprovado</span></div>
-                            <div><span class="label">Evidência</span><span>Manifests, digests e assinaturas HMAC</span></div>
+                            <div><span class="label">Créditos (AIC)</span><span>Extrato permanente, nada muda sozinho</span></div>
+                            <div><span class="label">Pontos (CP)</span><span>Trabalho do computador, conferido um a um</span></div>
+                            <div><span class="label">Comprovantes</span><span>Cada tarefa deixa prova assinada</span></div>
                         </div>
                     </div>
                 </section>

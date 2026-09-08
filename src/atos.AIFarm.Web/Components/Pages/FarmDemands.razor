@@ -4,134 +4,141 @@
 @implements IAsyncDisposable
 @inject IFarmDemandQueueService DemandQueue
 
-<PageTitle>Fila de demandas // atos AI Farm</PageTitle>
-
-<div class="page-head">
-    <p class="eyebrow amber">atos:/FARM/DEMAND_QUEUE</p>
-    <h1>Fila de trabalho</h1>
-    <p>A Iris retém, prioriza e despacha cada demanda quando um Compute Agent compatível estiver disponível.</p>
-    <a class="text-link" href="/farm/jobs">Abrir centro de jobs →</a>
-</div>
+<PageTitle>Enviar trabalho // atos AI Farm</PageTitle>
 
 @if (_message is not null)
 {
     <p class="@(_error ? "error" : "green")" role="status">@_message</p>
 }
 
-<section class="queue-metrics">
-    <div><small>AGUARDANDO</small><strong>@_dashboard.QueuedCount</strong></div>
-    <div><small>DESPACHANDO</small><strong>@_dashboard.InFlightCount</strong></div>
-    <div><small>SUBMETIDAS</small><strong>@_dashboard.SubmittedCount</strong></div>
-    <div><small>CONCLUÍDAS</small><strong>@_dashboard.CompletedCount</strong></div>
-</section>
+<div class="jobs-kpis">
+    <section class="kpi"><span>Na fila</span><strong>@_dashboard.QueuedCount</strong></section>
+    <section class="kpi"><span>Sendo entregues</span><strong>@_dashboard.InFlightCount</strong></section>
+    <section class="kpi kpi-amber"><span>Em andamento</span><strong>@_dashboard.SubmittedCount</strong></section>
+    <section class="kpi kpi-green"><span>Concluídas</span><strong>@_dashboard.CompletedCount</strong></section>
+</div>
 
 <section class="panel">
-    <div class="panel-head"><h2>Nova demanda</h2><span>STANDARD // MÁX. 32 KiB // SEM REDE</span></div>
+    <div class="panel-head"><h2>Novo envio</h2></div>
     <div class="useful-form">
-        <label>RÓTULO
-            <input @bind="_label" maxlength="120" placeholder="indexar documentação do produto" disabled="@_working" />
+        <label>Nome do envio
+            <input @bind="_label" maxlength="120" placeholder="ex.: indexar o manual do produto" disabled="@_working" />
         </label>
         <div class="form-row">
-            <label>WORKLOAD
+            <label>Tipo de tarefa
                 <select @bind="_workloadId" disabled="@_working">
                     @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is not null))
                     {
-                        <option value="@workload.Id">@workload.DisplayName // @workload.Version</option>
+                        <option value="@workload.Id">@workload.DisplayName · @workload.Version</option>
                     }
                 </select>
             </label>
-            <label>PRIORIDADE
+            <label>Prioridade
                 <select @bind="_priority" disabled="@_working">
-                    <option value="@FarmDemandPriority.Low">BAIXA</option>
-                    <option value="@FarmDemandPriority.Normal">NORMAL</option>
-                    <option value="@FarmDemandPriority.High">ALTA</option>
+                    <option value="@FarmDemandPriority.Normal">Normal</option>
+                    <option value="@FarmDemandPriority.Low">Baixa</option>
+                    <option value="@FarmDemandPriority.High">Alta</option>
                 </select>
             </label>
-            <label>VALIDADE
+            <label>Vale por
                 <select @bind="_lifetimeMinutes" disabled="@_working">
-                    <option value="60">1 HORA</option>
-                    <option value="1440">24 HORAS</option>
-                    <option value="10080">7 DIAS</option>
+                    <option value="1440">24 horas</option>
+                    <option value="60">1 hora</option>
+                    <option value="10080">7 dias</option>
                 </select>
             </label>
-            <label>PARALELISMO
+            <label>Dividir entre
                 <select @bind="_targetShards" disabled="@_working">
-                    <option value="1">1 SHARD</option>
-                    <option value="2">2 SHARDS</option>
-                    <option value="4">4 SHARDS</option>
-                    <option value="8">8 SHARDS</option>
+                    <option value="1">1 máquina</option>
+                    <option value="2">2 máquinas</option>
+                    <option value="4">4 máquinas</option>
+                    <option value="8">8 máquinas</option>
                 </select>
             </label>
-            <label>RESILIÊNCIA
+            <label>Se falhar, tentar
                 <select @bind="_maxAttemptsPerShard" disabled="@_working">
-                    <option value="1">1 TENTATIVA</option>
-                    <option value="2">2 TENTATIVAS</option>
-                    <option value="3">3 TENTATIVAS</option>
-                    <option value="5">5 TENTATIVAS</option>
+                    <option value="3">3 vezes</option>
+                    <option value="1">1 vez</option>
+                    <option value="2">2 vezes</option>
+                    <option value="5">5 vezes</option>
                 </select>
             </label>
         </div>
-        <label>TEXTO DA DEMANDA
-            <textarea @bind="_input" rows="12" maxlength="32768" placeholder="Cole aqui o conteúdo STANDARD que será processado..." disabled="@_working"></textarea>
+        <label>Texto a processar
+            <textarea @bind="_input" rows="12" maxlength="32768" placeholder="Cole aqui o texto (conteúdo comum, não sensível)…" disabled="@_working"></textarea>
         </label>
-        <small>O envio confirma a entrada na fila; a execução ocorrerá quando houver capacidade. Não envie conteúdo PRIVATE ou CONFIDENTIAL.</small>
-        <button type="button" @onclick="SubmitAsync" disabled="@_working">
-            @(_working ? "Enfileirando..." : "Enfileirar demanda")
-        </button>
+        <div style="display: flex; align-items: center; gap: 12px">
+            <small class="muted" style="margin-right: auto">O envio garante o lugar na fila; a execução acontece quando houver máquina livre. Não envie conteúdo privado ou confidencial.</small>
+            <button type="button" @onclick="SubmitAsync" disabled="@_working">
+                @(_working ? "Enviando..." : "Entrar na fila")
+            </button>
+        </div>
     </div>
 </section>
 
 <section class="panel">
-    <div class="panel-head"><h2>Demandas recentes</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">Atualizar</button></div>
-    @if (_dashboard.Demands.Count == 0) { <p class="empty">NENHUMA DEMANDA ENFILEIRADA.</p> }
+    <div class="panel-head"><h2>Envios recentes</h2></div>
+    @if (_dashboard.Demands.Count == 0) { <p class="empty">Nenhum envio na fila.</p> }
     @foreach (var demand in _dashboard.Demands)
     {
-        <article class="useful-job">
-            <div><strong>@demand.Label</strong><small>@demand.WorkloadVersion // @demand.Id.ToString("N")[..8]</small></div>
-            <div><span>@demand.InputSizeBytes.ToString("N0") B // @Priority(demand.Priority)</span><small>REQUER @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) // CICLOS @demand.Attempts</small><small>ATÉ @demand.MaxAttemptsPerShard TENTATIVAS/SHARD // INPUT @Short(demand.InputDigest)</small></div>
-            <div><span class="@StatusClass(demand.Status)">@Status(demand.Status)</span><small>SHARDS @demand.CompletedShards/@demand.TargetShards // DESPACHADOS @demand.DispatchedShards // FALHAS @demand.FailedShards</small><small>@demand.Detail</small></div>
-            <div class="queue-actions">
-                @if (demand.Status == FarmDemandStatus.Queued)
-                {
-                    <button class="button-danger" @onclick="() => CancelAsync(demand.Id)" disabled="@_working">Cancelar</button>
-                }
+        <article style="margin: 14px 16px; border: 1.5px solid #111111; background: #FFFFFF; box-shadow: 3px 3px 0 #111111">
+            <header style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1.5px solid #111111; background: #F4F1EA">
+                <strong style="font-size: 13px">@demand.Label</strong>
+                <small class="muted">@demand.WorkloadVersion · @demand.Id.ToString("N")[..8]</small>
+                <span class="@StatusClass(demand.Status)" style="margin-left: auto; font-size: 12px; font-weight: 600">@Status(demand.Status)</span>
+            </header>
+            <div class="useful-job" style="padding: 12px 16px">
+                <div><span>@demand.InputSizeBytes.ToString("N0") B · @Priority(demand.Priority)</span><small>Precisa de @demand.RequiredLogicalProcessors CPU / @FormatBytes(demand.RequiredMemoryBytes) · @demand.Attempts ciclo(s)</small><small>Até @demand.MaxAttemptsPerShard tentativas por parte · entrada @Short(demand.InputDigest)</small></div>
+                <div><small>Partes @demand.CompletedShards/@demand.TargetShards · entregues @demand.DispatchedShards · falhas @demand.FailedShards</small><small>@demand.Detail</small></div>
+            </div>
+            @if (demand.Shards.Count > 1)
+            {
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 0 16px">
+                    @foreach (var shard in demand.Shards)
+                    {
+                        <details class="farm-manifest" open="@shard.RetryPending">
+                            <summary>[ Parte #@shard.Sequence · @(shard.JobStatus?.ToString().ToUpperInvariant() ?? "AGUARDANDO") · @shard.AttemptCount/@shard.MaxAttempts tentativas @(shard.RetryPending ? "· OUTRA MÁQUINA VAI ASSUMIR" : null) ]</summary>
+                            <div style="padding: 10px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted)">
+                                <small style="display: block; margin-bottom: 6px">Entrada @Short(shard.InputDigest)</small>
+                                @if (shard.AttemptHistory.Count == 0)
+                                {
+                                    <span>Aguardando primeira entrega</span>
+                                }
+                                @foreach (var attempt in shard.AttemptHistory)
+                                {
+                                    <span class="attempt-line">
+                                        #@attempt.Attempt · tarefa @attempt.JobId.ToString("N")[..8] · máquina @attempt.NodeId.ToString("N")[..8] · @attempt.Status.ToString().ToUpperInvariant()
+                                        @if (!string.IsNullOrWhiteSpace(attempt.FailureReason))
+                                        {
+                                            <small>@attempt.FailureReason</small>
+                                        }
+                                    </span>
+                                }
+                            </div>
+                        </details>
+                    }
+                </div>
+            }
+            <footer style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px">
                 @if (demand.JobId is Guid jobId)
                 {
-                    <a class="text-link" href="/farm/jobs">[ JOB @jobId.ToString("N")[..8] // @(demand.JobStatus?.ToString().ToUpperInvariant()) ]</a>
+                    <a class="text-link" href="/farm/jobs?jobId=@jobId" style="margin: 0">[ TAREFA @jobId.ToString("N")[..8] · @(demand.JobStatus?.ToString().ToUpperInvariant()) ]</a>
                 }
                 @if (demand.Status == FarmDemandStatus.Completed)
                 {
-                    <a class="text-link" href="@OutputUrl(demand.Id)">Baixar índice distribuído</a>
+                    <a class="text-link" href="@OutputUrl(demand.Id)" style="margin: 0; box-shadow: 2px 2px 0 #111111">Baixar índice</a>
                 }
-            </div>
-        </article>
-        @if (demand.Shards.Count > 1)
-        {
-            <div class="shard-row">
-                @foreach (var shard in demand.Shards)
+                @if (demand.Status == FarmDemandStatus.Queued)
                 {
-                    <details class="shard-attempts" open="@shard.RetryPending">
-                        <summary>#@shard.Sequence // @(shard.JobStatus?.ToString().ToUpperInvariant() ?? "AGUARDANDO") // @shard.AttemptCount/@shard.MaxAttempts TENTATIVAS @(shard.RetryPending ? "// FAILOVER PENDENTE" : null)</summary>
-                        <small>INPUT @Short(shard.InputDigest)</small>
-                        @if (shard.AttemptHistory.Count == 0)
-                        {
-                            <span>AGUARDANDO PRIMEIRO DESPACHO</span>
-                        }
-                        @foreach (var attempt in shard.AttemptHistory)
-                        {
-                            <span class="attempt-line">
-                                #@attempt.Attempt // JOB @attempt.JobId.ToString("N")[..8] // NODE @attempt.NodeId.ToString("N")[..8] // @attempt.Status.ToString().ToUpperInvariant()
-                                @if (!string.IsNullOrWhiteSpace(attempt.FailureReason))
-                                {
-                                    <small>@attempt.FailureReason</small>
-                                }
-                            </span>
-                        }
-                    </details>
+                    <button class="button-danger" style="box-shadow: 2px 2px 0 #111111" @onclick="() => CancelAsync(demand.Id)" disabled="@_working">Cancelar</button>
                 }
-            </div>
-        }
+            </footer>
+        </article>
     }
+    <footer style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line)">
+        <a class="text-link" href="/farm/jobs" style="margin: 0">Ver histórico de tarefas →</a>
+        <button class="btn primary" type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="LoadAsync" disabled="@_working">Atualizar</button>
+    </footer>
 </section>
 
 @code {
@@ -176,7 +183,7 @@
         try
         {
             await DemandQueue.SubmitAsync(new(_workloadId, _label, _input, _priority, _lifetimeMinutes, _targetShards, _maxAttemptsPerShard));
-            _message = "Demanda aceita. A fila fará o despacho automaticamente quando houver capacidade.";
+            _message = "Envio aceito. A fila entrega o trabalho quando houver máquina livre.";
             _label = string.Empty; _input = string.Empty; _error = false;
             await LoadAsync();
         }
@@ -188,16 +195,16 @@
     private async Task CancelAsync(Guid id)
     {
         _working = true; _message = null;
-        try { await DemandQueue.CancelAsync(id); _message = "Demanda cancelada antes do despacho."; _error = false; await LoadAsync(); }
+        try { await DemandQueue.CancelAsync(id); _message = "Envio cancelado antes da entrega."; _error = false; await LoadAsync(); }
         catch (InvalidOperationException exception) { _message = exception.Message; _error = true; }
         finally { _working = false; }
     }
 
     public ValueTask DisposeAsync() { _pollCancellation.Cancel(); _pollCancellation.Dispose(); return ValueTask.CompletedTask; }
-    private static string Short(string? value) => value is { Length: >= 12 } ? value[..12] : "---";
+    private static string Short(string? value) => value is { Length: >= 12 } ? value[..12] : "—";
     private static string Priority(FarmDemandPriority value) => value switch { FarmDemandPriority.High => "ALTA", FarmDemandPriority.Low => "BAIXA", _ => "NORMAL" };
-    private static string Status(FarmDemandStatus value) => value switch { FarmDemandStatus.Queued => "AGUARDANDO", FarmDemandStatus.Dispatching => "DESPACHANDO", FarmDemandStatus.Processing => "FAN-OUT", FarmDemandStatus.Submitted => "PROCESSANDO", FarmDemandStatus.Completed => "CONCLUÍDA", FarmDemandStatus.Cancelled => "CANCELADA", FarmDemandStatus.Expired => "EXPIRADA", _ => "FALHA" };
-    private static string StatusClass(FarmDemandStatus value) => value == FarmDemandStatus.Completed ? "green" : value is FarmDemandStatus.Failed or FarmDemandStatus.Expired ? "error" : "amber";
+    private static string Status(FarmDemandStatus value) => value switch { FarmDemandStatus.Queued => "AGUARDANDO", FarmDemandStatus.Dispatching => "ENTREGANDO", FarmDemandStatus.Processing => "DIVIDINDO", FarmDemandStatus.Submitted => "EM ANDAMENTO", FarmDemandStatus.Completed => "CONCLUÍDA", FarmDemandStatus.Cancelled => "CANCELADA", FarmDemandStatus.Expired => "EXPIRADA", _ => "FALHOU" };
+    private static string StatusClass(FarmDemandStatus value) => value == FarmDemandStatus.Completed ? "green" : value is FarmDemandStatus.Failed or FarmDemandStatus.Expired ? "error-text" : "amber";
     private static string OutputUrl(Guid id) => $"/api/farm/demands/{id}/output";
     private static string FormatBytes(long bytes) => $"{bytes / 1024d / 1024d:N0} MiB";
 }
