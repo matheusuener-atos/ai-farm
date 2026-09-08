@@ -295,6 +295,9 @@ p.error, div.error, .error:not(span):not(small):not(strong) { padding: 10px 12px
 .terminal-title > span + .terminal-actions, .panel-head > h2 + div { margin-left: 0; }
 .win.inactive > .win-title, .terminal.inactive > .terminal-title, .panel.inactive > .panel-head { background: #FFFFFF; }
 .win.inactive > .win-title::before, .win.inactive > .win-title::after, .terminal.inactive > .terminal-title::before, .terminal.inactive > .terminal-title::after, .panel.inactive > .panel-head::before, .panel.inactive > .panel-head::after { visibility: hidden; }
+/* §2: barra de título nunca tem texto auxiliar de contagem/descrição.
+   Rótulos técnicos legítimos usam <code> (ex.: versão do catálogo), que fica. */
+.win-title small, .terminal-title small, .panel-head small { display: none; }
 .win-body, .panel-body { padding: 14px 16px; }
 .panel-note { margin: 0; padding: 10px 16px; border-top: 1.5px solid var(--ink); color: var(--muted); font-size: 12px; line-height: 1.5; }
 .panel-empty, .placeholder, .empty-state, .analytics-empty, .audit-empty, .schedule-empty, .reward-empty, .jobs-empty, .empty-operations, .incident-clear { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
@@ -450,7 +453,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
     .auth-shell { grid-template-columns: 1fr; padding: 24px 16px; gap: 20px; }
     .auth-hero h2 { font-size: 32px; }
     .auth-facts { grid-template-columns: 1fr; }
-    .kpi-grid, .kpi-grid.cols-3, .kpi-grid.cols-5, .analytics-kpis, .wallet-grid, .operations-grid, .economics-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .kpi-grid, .kpi-grid.cols-3, .kpi-grid.cols-5, .analytics-kpis, .farm-analytics-kpis, .wallet-grid, .operations-grid, .economics-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .kpi:nth-child(2n), .metric:nth-child(2n) { border-right: 0; }
     .kpi, .metric { border-bottom: 1.5px solid var(--ink); }
     .filters, .operations-filters, .audit-filters, .incident-filters, .jobs-filter-grid { grid-template-columns: 1fr; }
@@ -459,7 +462,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
     .desk-icons { flex-direction: row; flex-wrap: wrap; }
 }
 @media (max-width: 560px) {
-    .kpi-grid, .kpi-grid.cols-3, .kpi-grid.cols-5, .analytics-kpis, .wallet-grid, .operations-grid, .economics-summary { grid-template-columns: 1fr; }
+    .kpi-grid, .kpi-grid.cols-3, .kpi-grid.cols-5, .analytics-kpis, .farm-analytics-kpis, .wallet-grid, .operations-grid, .economics-summary { grid-template-columns: 1fr; }
     .kpi, .metric { border-right: 0; }
     .cycle-row, .limit-row { grid-template-columns: 70px minmax(0, 1fr) 80px; }
 }

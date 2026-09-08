@@ -8,7 +8,7 @@
 .farm-no-reward { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--amber); background: var(--amber-deep); }
 .farm-no-reward strong { color: var(--amber-bright); }
 .farm-no-reward p { margin: .7rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.6; }
-.farm-balance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.farm-balance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
 .farm-balance-audit { margin-top: 1rem; }
 .farm-balance-audit dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: #111111; }
 .farm-balance-audit dl > div { padding: 1rem; background: var(--black); }

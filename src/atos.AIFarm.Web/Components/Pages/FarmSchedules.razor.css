@@ -5,10 +5,6 @@
 .schedule-form label { display:grid; gap:.35rem; font-size:.72rem; color:var(--muted); }
 .schedule-form input,.schedule-form select { width:100%; }
 .schedule-create > small { display:block; padding:0 1rem 1rem; color:var(--muted); }
-.schedule-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:.75rem; margin:1rem 0; }
-.schedule-kpis section { border:1px solid var(--line); padding:1rem; display:grid; gap:.35rem; }
-.schedule-kpis span { color:var(--muted); font-size:.72rem; }
-.schedule-kpis strong { font-size:1.65rem; }
 .schedule-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; padding:1rem; }
 .schedule-grid article { border:1px solid var(--line); padding:1rem; }
 .schedule-grid header,.schedule-grid footer { display:flex; justify-content:space-between; align-items:center; gap:.6rem; }
