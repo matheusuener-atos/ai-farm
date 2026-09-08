@@ -56,10 +56,14 @@
 else
 {
     <div class="schedule-kpis">
-        <section><span>TOTAL</span><strong>@_dashboard.Schedules.Count</strong></section>
-        <section class="green"><span>ATIVOS</span><strong>@_dashboard.ActiveCount</strong></section>
-        <section class="amber"><span>PAUSADOS</span><strong>@_dashboard.PausedCount</strong></section>
-        <section class="@(_dashboard.FailureCount == 0 ? "green" : "error-text")"><span>ADIADOS/FALHOS</span><strong>@_dashboard.FailureCount</strong></section>
+        <section class="kpi"><span>TOTAL</span><strong>@_dashboard.Schedules.Count</strong></section>
+        <section class="kpi kpi-green"><span>ATIVOS</span><strong>@_dashboard.ActiveCount</strong></section>
+        <section class="kpi kpi-amber"><span>PAUSADOS</span><strong>@_dashboard.PausedCount</strong></section>
+        <section class="kpi @(_dashboard.FailureCount == 0 ? "kpi-green" : "kpi-red")"><span>ADIADOS/FALHOS</span><strong>@_dashboard.FailureCount</strong></section>
+        <section class="kpi blackout" aria-hidden="true"></section>
+        <section class="kpi blackout" aria-hidden="true"></section>
+        <section class="kpi blackout" aria-hidden="true"></section>
+        <section class="kpi blackout" aria-hidden="true"></section>
     </div>
 
     <section class="panel">
