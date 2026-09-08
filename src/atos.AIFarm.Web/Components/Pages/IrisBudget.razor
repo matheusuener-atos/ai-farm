@@ -3,13 +3,7 @@
 @attribute [Authorize]
 @inject IAiUsageBudgetService Budget
 
-<PageTitle>Orçamento da Iris // atos AI Farm</PageTitle>
-
-<div class="page-head">
-    <p class="eyebrow">atos:/IRIS/BUDGET</p>
-    <h1>Limites de uso</h1>
-    <p>CONTROLE PREVENTIVO // RETENÇÕES CONCORRENTES // PERÍODOS EM UTC</p>
-</div>
+<PageTitle>Limites de uso // atos AI Farm</PageTitle>
 
 @if (_error is not null)
 {
@@ -22,75 +16,72 @@
 
 @if (_snapshot is null)
 {
-    <p>CARREGANDO ORÇAMENTO...</p>
+    <p class="muted">Carregando limites…</p>
 }
 else
 {
     <div class="kpi-grid cols-5 budget-kpis">
         <section class="kpi @(_snapshot.Policy.IsEnabled ? "kpi-green" : "kpi-amber")">
-            <span>POLÍTICA</span>
-            <strong>@(_snapshot.Policy.IsEnabled ? "ATIVA" : "DESATIVADA")</strong>
-            <small>ATUALIZADA @_snapshot.UpdatedAtUtc.ToString("dd/MM HH:mm") UTC</small>
+            <span>Proteção</span>
+            <strong>@(_snapshot.Policy.IsEnabled ? "ATIVA" : "DESLIGADA")</strong>
+            <small>atualizada @_snapshot.UpdatedAtUtc.ToString("dd/MM HH:mm") UTC</small>
         </section>
         <section class="kpi kpi-purple">
-            <span>USADO HOJE</span>
+            <span>Usado hoje</span>
             <strong>@Aic.Format(_snapshot.UsedTodayMinor)</strong>
-            <small>DESDE @_snapshot.DayStartedAtUtc.ToString("dd/MM 00:00") UTC</small>
+            <small>desde @_snapshot.DayStartedAtUtc.ToString("dd/MM 00:00") UTC</small>
         </section>
         <section class="kpi">
-            <span>USADO NO MÊS</span>
+            <span>Usado no mês</span>
             <strong>@Aic.Format(_snapshot.UsedThisMonthMinor)</strong>
-            <small>DESDE @_snapshot.MonthStartedAtUtc.ToString("dd/MM 00:00") UTC</small>
+            <small>desde @_snapshot.MonthStartedAtUtc.ToString("dd/MM 00:00") UTC</small>
         </section>
         <section class="kpi kpi-amber">
-            <span>EM EXECUÇÃO</span>
+            <span>Em andamento</span>
             <strong>@Aic.Format(_snapshot.ReservedMinor)</strong>
-            <small>RETENÇÕES ATIVAS</small>
+            <small>valores separados agora</small>
         </section>
         <section class="kpi kpi-green">
-            <span>RESTANTE DIÁRIO</span>
+            <span>Restante do dia</span>
             <strong>@FormatRemaining(_snapshot.DailyRemainingMinor)</strong>
-            <small>MENSAL @FormatRemaining(_snapshot.MonthlyRemainingMinor)</small>
+            <small>mês: @FormatRemaining(_snapshot.MonthlyRemainingMinor)</small>
         </section>
     </div>
 
     <section class="panel budget-panel">
-        <div class="panel-head section-heading">
-            <div>
-                <h2>Política da conta</h2>
-                <p class="muted">A ESTIMATIVA É RETIDA ANTES DO LEDGER E LIBERADA EM FALHAS</p>
-            </div>
+        <div class="panel-head">
+            <h2>Limites desta conta</h2>
             <label class="budget-switch">
                 <input type="checkbox" @bind="_enabled" />
-                <span>@(_enabled ? "Proteção ativa" : "Proteção desativada")</span>
+                <span>@(_enabled ? "Proteção ativa" : "Proteção desligada")</span>
             </label>
         </div>
 
         <div class="budget-form">
             <label>
-                MÁXIMO POR TAREFA // @_perRequestAic AIC
+                MÁXIMO POR RESPOSTA // @_perRequestAic AIC
                 <input type="range" min="1" max="200" step="1" @bind="_perRequestAic" @bind:event="oninput" disabled="@_saving" />
-                <small>Bloqueia a execução antes de qualquer chamada externa.</small>
+                <small>Bloqueia a resposta antes de qualquer gasto.</small>
             </label>
             <label>
-                LIMITE DIÁRIO // @_dailyAic AIC
+                LIMITE POR DIA // @_dailyAic AIC
                 <input type="range" min="1" max="1000" step="1" @bind="_dailyAic" @bind:event="oninput" disabled="@_saving" />
-                <small>Consumo liquidado + retenções ativas no dia UTC.</small>
+                <small>Conta o que foi gasto + o que está separado no dia (UTC).</small>
             </label>
             <label>
-                LIMITE MENSAL // @_monthlyAic AIC
+                LIMITE POR MÊS // @_monthlyAic AIC
                 <input type="range" min="1" max="10000" step="10" @bind="_monthlyAic" @bind:event="oninput" disabled="@_saving" />
-                <small>Consumo liquidado + retenções ativas no mês UTC.</small>
+                <small>Conta o que foi gasto + o que está separado no mês (UTC).</small>
             </label>
         </div>
 
-        <div class="budget-actions">
-            <button type="button" @onclick="SaveAsync" disabled="@_saving">
-                @(_saving ? "Salvando..." : "Salvar política")
+        <div style="display: flex; align-items: center; gap: 12px; padding: 0 16px 14px">
+            <small class="muted" style="margin-right: auto">Desligar a proteção não apaga o histórico. O limite geral de segurança continua valendo.</small>
+            <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="LoadAsync" disabled="@_saving">Atualizar consumo</button>
+            <button type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="SaveAsync" disabled="@_saving">
+                @(_saving ? "Salvando..." : "Salvar limites")
             </button>
-            <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_saving">Atualizar consumo</button>
         </div>
-        <p class="muted budget-help">Desativar a política não apaga histórico. O limite global de segurança da instalação continua válido.</p>
     </section>
 }
 
@@ -124,7 +115,7 @@ else
         }
         catch (Exception)
         {
-            _error = "Não foi possível carregar o orçamento da Iris.";
+            _error = "Não foi possível carregar os limites de uso.";
         }
     }
 
@@ -142,8 +133,8 @@ else
                 Aic.FromAic(_monthlyAic));
             _snapshot = await Budget.UpdatePolicyAsync(policy);
             _notice = _enabled
-                ? "POLÍTICA ATIVA // NOVAS EXECUÇÕES SERÃO BLOQUEADAS ANTES DE ULTRAPASSAR O ORÇAMENTO"
-                : "POLÍTICA DESATIVADA // HISTÓRICO PRESERVADO";
+                ? "Proteção ativa — novas respostas serão bloqueadas antes de passar do limite."
+                : "Proteção desligada — o histórico foi preservado.";
         }
         catch (Exception exception) when (exception is ArgumentException or OverflowException)
         {

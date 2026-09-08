@@ -5,110 +5,108 @@
 
 <PageTitle>Agendamentos // atos AI Farm</PageTitle>
 
-<div class="page-head">
-    <p class="eyebrow amber">atos:/FARM/SCHEDULES</p>
-    <h1>Automação da farm</h1>
-    <p>Diagnóstico e manutenção recorrentes (benchmarks allowlisted). Para consumo contínuo, use a Farm contínua em Meu computador.</p>
-    <a class="schedule-link" href="/farm/jobs">Abrir centro de jobs →</a>
-</div>
-
 @if (_message is not null)
 {
     <p class="@(_isError ? "error" : "schedule-success")" role="status">@_message</p>
 }
 
 <section class="panel schedule-create">
-    <div class="panel-head"><h2>Novo agendamento</h2><span>INTERVALO FIXO // UTC</span></div>
+    <div class="panel-head"><h2>Novo agendamento</h2></div>
     <div class="schedule-form">
-        <label>NOME
-            <input @bind="_name" maxlength="80" placeholder="benchmark periódico" disabled="@_working" />
+        <label>Nome
+            <input @bind="_name" maxlength="80" placeholder="ex.: teste diário da máquina" disabled="@_working" />
         </label>
-        <label>WORKLOAD
+        <label>Tipo de tarefa
             <select @bind="_workloadId" disabled="@_working">
                 @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is null))
                 {
-                    <option value="@workload.Id">@workload.DisplayName // @workload.Version</option>
+                    <option value="@workload.Id">@workload.DisplayName · @workload.Version</option>
                 }
             </select>
         </label>
-        <label>INTERVALO
+        <label>Repetir a cada
             <select @bind="_intervalMinutes" disabled="@_working">
-                <option value="5">5 MINUTOS</option>
-                <option value="15">15 MINUTOS</option>
-                <option value="30">30 MINUTOS</option>
-                <option value="60">1 HORA</option>
-                <option value="360">6 HORAS</option>
-                <option value="1440">1 DIA</option>
-                <option value="10080">7 DIAS</option>
+                <option value="5">5 minutos</option>
+                <option value="15">15 minutos</option>
+                <option value="30">30 minutos</option>
+                <option value="60">1 hora</option>
+                <option value="360">6 horas</option>
+                <option value="1440">1 dia</option>
+                <option value="10080">7 dias</option>
             </select>
         </label>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 0 16px 14px">
+        <small class="muted" style="margin-right: auto">A primeira execução acontece na hora. Pausas e falhas nunca geram pontos nem créditos por engano.</small>
         <button type="button" @onclick="CreateAsync" disabled="@_working">
             @(_working ? "Salvando..." : "Criar e ativar")
         </button>
     </div>
-    <small>O primeiro disparo ocorre imediatamente. Pausa, indisponibilidade e contenção nunca emitem CP ou AIC.</small>
 </section>
 
 @if (_dashboard is null)
 {
-    <p>CARREGANDO AGENDAMENTOS...</p>
+    <p class="muted">Carregando agendamentos…</p>
 }
 else
 {
-    <div class="schedule-kpis">
-        <section class="kpi"><span>TOTAL</span><strong>@_dashboard.Schedules.Count</strong></section>
-        <section class="kpi kpi-green"><span>ATIVOS</span><strong>@_dashboard.ActiveCount</strong></section>
-        <section class="kpi kpi-amber"><span>PAUSADOS</span><strong>@_dashboard.PausedCount</strong></section>
-        <section class="kpi @(_dashboard.FailureCount == 0 ? "kpi-green" : "kpi-red")"><span>ADIADOS/FALHOS</span><strong>@_dashboard.FailureCount</strong></section>
-        <section class="kpi blackout" aria-hidden="true"></section>
-        <section class="kpi blackout" aria-hidden="true"></section>
-        <section class="kpi blackout" aria-hidden="true"></section>
-        <section class="kpi blackout" aria-hidden="true"></section>
+    <div class="jobs-kpis">
+        <section class="kpi"><span>Total</span><strong>@_dashboard.Schedules.Count</strong></section>
+        <section class="kpi kpi-green"><span>Ativos</span><strong>@_dashboard.ActiveCount</strong></section>
+        <section class="kpi kpi-amber"><span>Pausados</span><strong>@_dashboard.PausedCount</strong></section>
+        <section class="kpi @(_dashboard.FailureCount == 0 ? "kpi-green" : "kpi-red")"><span>Adiados / falhos</span><strong>@_dashboard.FailureCount</strong></section>
     </div>
 
     <section class="panel">
-        <div class="panel-head"><h2>Agendamentos</h2><button class="button-secondary" @onclick="LoadAsync" disabled="@_working">Atualizar</button></div>
+        <div class="panel-head"><h2>Agendamentos</h2></div>
         @if (_dashboard.Schedules.Count == 0)
         {
-            <p class="schedule-empty">NENHUM AGENDAMENTO CONFIGURADO.</p>
+            <p class="schedule-empty">Nenhum agendamento configurado.</p>
         }
         <div class="schedule-grid">
             @foreach (var schedule in _dashboard.Schedules)
             {
-                <article>
-                    <header><div><strong>@schedule.Name</strong><small>@schedule.WorkloadVersion</small></div><span class="@(schedule.Status == FarmScheduleStatus.Active ? "green" : "amber")">@schedule.Status.ToString().ToUpperInvariant()</span></header>
-                    <dl>
-                        <div><dt>INTERVALO</dt><dd>@FormatInterval(schedule.IntervalMinutes)</dd></div>
-                        <div><dt>PRÓXIMO UTC</dt><dd>@schedule.NextRunAtUtc.ToString("dd/MM HH:mm:ss")</dd></div>
-                        <div><dt>ÚLTIMO UTC</dt><dd>@(schedule.LastTriggeredAtUtc?.ToString("dd/MM HH:mm:ss") ?? "---")</dd></div>
-                        <div><dt>ID</dt><dd>@schedule.Id.ToString("N")[..8]</dd></div>
+                <article style="padding: 0; border: 1.5px solid #111111; background: #FFFFFF; box-shadow: 3px 3px 0 #111111; display: flex; flex-direction: column">
+                    <header style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1.5px solid #111111; background: #F4F1EA">
+                        <strong style="font-size: 13px">@schedule.Name</strong>
+                        <small class="muted">@schedule.WorkloadVersion</small>
+                        <span class="@(schedule.Status == FarmScheduleStatus.Active ? "green" : "amber")" style="margin-left: auto; font-size: 12px; font-weight: 600">@(schedule.Status == FarmScheduleStatus.Active ? "ATIVO" : "PAUSADO")</span>
+                    </header>
+                    <dl style="display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 12px 16px; border: 1.5px solid #111111">
+                        <div style="padding: 8px 10px; border-right: 1.5px solid #111111; border-bottom: 1.5px solid #111111"><dt>Repete a cada</dt><dd>@FormatInterval(schedule.IntervalMinutes)</dd></div>
+                        <div style="padding: 8px 10px; border-bottom: 1.5px solid #111111"><dt>Próxima (UTC)</dt><dd>@(schedule.Status == FarmScheduleStatus.Active ? schedule.NextRunAtUtc.ToString("dd/MM HH:mm:ss") : "—")</dd></div>
+                        <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><dt>Última (UTC)</dt><dd>@(schedule.LastTriggeredAtUtc?.ToString("dd/MM HH:mm:ss") ?? "—")</dd></div>
+                        <div style="padding: 8px 10px"><dt>Código</dt><dd>@schedule.Id.ToString("N")[..8]</dd></div>
                     </dl>
-                    <footer>
-                        <button type="button" @onclick="() => TriggerAsync(schedule.Id)" disabled="@_working">Executar agora</button>
-                        <button type="button" class="button-secondary" @onclick="() => ToggleAsync(schedule)" disabled="@_working">
-                            @(schedule.Status == FarmScheduleStatus.Active ? "PAUSAR" : "RETOMAR")
+                    <footer style="display: flex; justify-content: flex-end; gap: 10px; padding: 0 16px 14px; margin-top: auto">
+                        <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="() => TriggerAsync(schedule.Id)" disabled="@_working">Executar agora</button>
+                        <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="() => ToggleAsync(schedule)" disabled="@_working">
+                            @(schedule.Status == FarmScheduleStatus.Active ? "Pausar" : "Retomar")
                         </button>
                     </footer>
                 </article>
             }
         </div>
+        <footer style="display: flex; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line)">
+            <button class="btn primary" type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="LoadAsync" disabled="@_working">Atualizar</button>
+        </footer>
     </section>
 
     <section class="panel schedule-triggers">
-        <div class="panel-head"><h2>Disparos recentes</h2><small>últimos 50</small><span>ATRIBUIÇÃO EXPLÍCITA</span></div>
+        <div class="panel-head"><h2>Disparos recentes</h2></div>
         @if (_dashboard.RecentTriggers.Count == 0)
         {
-            <p class="schedule-empty">NENHUM DISPARO REGISTRADO.</p>
+            <p class="schedule-empty">Nenhum disparo registrado.</p>
         }
         @foreach (var trigger in _dashboard.RecentTriggers)
         {
             var schedule = _dashboard.Schedules.SingleOrDefault(x => x.Id == trigger.ScheduleId);
             <article>
                 <time>@trigger.ScheduledForUtc.ToString("dd/MM HH:mm:ss") UTC</time>
-                <div><strong>@(schedule?.Name ?? "AGENDAMENTO REMOVIDO")</strong><small>@(trigger.Detail ?? "Processando ocorrência.")</small></div>
+                <div><strong>@(schedule?.Name ?? "Agendamento removido")</strong><small>@(trigger.Detail ?? "Processando ocorrência.")</small></div>
                 @if (trigger.JobId is Guid jobId)
                 {
-                    <a href="/farm/jobs?jobId=@jobId">JOB @jobId.ToString("N")[..8]</a>
+                    <a href="/farm/jobs?jobId=@jobId">TAREFA @jobId.ToString("N")[..8]</a>
                 }
                 <span class="@TriggerClass(trigger.Status)">@TriggerLabel(trigger.Status)</span>
             </article>
@@ -149,15 +147,15 @@ else
         var next = schedule.Status == FarmScheduleStatus.Active
             ? FarmScheduleStatus.Paused : FarmScheduleStatus.Active;
         await Schedules.SetStatusAsync(schedule.Id, next);
-        Show($"Agendamento {schedule.Name}: {next.ToString().ToUpperInvariant()}.", false);
+        Show($"Agendamento {schedule.Name}: {(next == FarmScheduleStatus.Active ? "ATIVO" : "PAUSADO")}.", false);
     });
 
     private Task TriggerAsync(Guid scheduleId) => ExecuteAsync(async () =>
     {
         var trigger = await Schedules.TriggerNowAsync(scheduleId);
         Show(trigger.Status == FarmScheduleTriggerStatus.Submitted
-            ? "Workload submetido ao pipeline verificável."
-            : trigger.Detail ?? "O disparo não pôde ser submetido.",
+            ? "Tarefa enviada para a fila de trabalho."
+            : trigger.Detail ?? "O disparo não pôde ser enviado.",
             trigger.Status != FarmScheduleTriggerStatus.Submitted);
     });
 
@@ -181,7 +179,7 @@ else
     };
     private static string TriggerLabel(FarmScheduleTriggerStatus status) => status switch
     {
-        FarmScheduleTriggerStatus.Submitted => "SUBMETIDO",
+        FarmScheduleTriggerStatus.Submitted => "ENVIADO",
         FarmScheduleTriggerStatus.Deferred => "ADIADO",
         FarmScheduleTriggerStatus.Failed => "FALHOU",
         _ => "DESPACHANDO"

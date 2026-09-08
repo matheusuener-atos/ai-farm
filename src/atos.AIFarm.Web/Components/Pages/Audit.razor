@@ -3,16 +3,7 @@
 @attribute [Authorize]
 @inject IAuditTrail AuditTrail
 
-<PageTitle>Auditoria // atos AI Farm</PageTitle>
-
-<header class="page-head">
-    <div>
-        <p class="eyebrow">atos:/AUDIT/CENTER</p>
-        <h1>Centro de auditoria</h1>
-        <p>LEDGER // IRIS // FARM // ECONOMIA // REWARDS // SEGURANÇA</p>
-    </div>
-    <a class="audit-export" href="@ExportUrl">Exportar JSON</a>
-</header>
+<PageTitle>Registro de tudo // atos AI Farm</PageTitle>
 
 @if (_error is not null)
 {
@@ -20,68 +11,67 @@
 }
 
 <section class="panel audit-filter-panel">
-    <header class="panel-head"><h2>Consulta</h2><span class="tag">CONTA ISOLADA</span></header>
+    <header class="panel-head"><h2>Consulta</h2></header>
     <form class="audit-filters" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
-        <label>BUSCAR<input type="search" maxlength="120" placeholder="ação, status, referência ou digest" @bind="_searchDraft" /></label>
-        <label>CATEGORIA
+        <label>Buscar<input type="search" maxlength="120" placeholder="ação, situação, referência ou código" @bind="_searchDraft" /></label>
+        <label>Categoria
             <select @bind="_categoryDraft">
-                <option value="">TODAS</option>
+                <option value="">Todas</option>
                 @foreach (var category in Enum.GetValues<AuditCategory>())
                 {
                     <option value="@category">@CategoryLabel(category)</option>
                 }
             </select>
         </label>
-        <label>DE (UTC)<input type="datetime-local" @bind="_fromDraft" /></label>
-        <label>ATÉ (UTC)<input type="datetime-local" @bind="_toDraft" /></label>
+        <label>De (UTC)<input type="datetime-local" @bind="_fromDraft" /></label>
+        <label>Até (UTC)<input type="datetime-local" @bind="_toDraft" /></label>
         <div class="audit-filter-actions">
-            <button type="submit" disabled="@_loading">Aplicar</button>
-            <button type="button" class="button-secondary" @onclick="ClearAsync" disabled="@_loading">Limpar</button>
+            <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="ClearAsync" disabled="@_loading">Limpar</button>
+            <button type="submit" style="box-shadow: 2px 2px 0 #111111" disabled="@_loading">Aplicar</button>
         </div>
     </form>
 </section>
 
 @if (_loading && _page is null)
 {
-    <section class="terminal placeholder"><div class="terminal-title"><span>Consolidando trilhas</span></div></section>
+    <section class="terminal placeholder"><div class="terminal-title"><span>Juntando os registros</span></div></section>
 }
 else if (_page is not null)
 {
     <section class="kpi-grid cols-5 audit-kpis" aria-live="polite">
-        <article class="kpi kpi-purple"><span>EVENTOS</span><strong>@_page.Totals.Total</strong><small>FILTRO ATUAL</small></article>
-        <article class="kpi"><span>CORE + SEGURANÇA</span><strong>@(_page.Totals.Ledger + _page.Totals.Iris + _page.Totals.Security)</strong><small>@_page.Totals.Ledger LEDGER // @_page.Totals.Iris IRIS // @_page.Totals.Security SECURITY</small></article>
-        <article class="kpi kpi-amber"><span>FARM</span><strong>@_page.Totals.Farm</strong><small>JOBS E EVIDÊNCIAS</small></article>
-        <article class="kpi"><span>ECONOMIA + REWARD</span><strong>@(_page.Totals.Economics + _page.Totals.Reward)</strong><small>@_page.Totals.Economics CENÁRIOS // @_page.Totals.Reward PROPOSTAS</small></article>
-        <article class="kpi @(_page.Totals.IntegrityFailures == 0 ? "kpi-green" : "kpi-red")"><span>INTEGRIDADE</span><strong>@(_page.Totals.IntegrityFailures == 0 ? "OK" : $"{_page.Totals.IntegrityFailures} FALHA(S)")</strong><small>VALIDAÇÃO CRIPTOGRÁFICA E CONTÁBIL</small></article>
+        <article class="kpi kpi-purple"><span>Eventos</span><strong>@_page.Totals.Total</strong><small>no filtro atual</small></article>
+        <article class="kpi"><span>Créditos + segurança</span><strong>@(_page.Totals.Ledger + _page.Totals.Iris + _page.Totals.Security)</strong><small>@_page.Totals.Ledger extrato · @_page.Totals.Iris Iris · @_page.Totals.Security segurança</small></article>
+        <article class="kpi kpi-amber"><span>Farm</span><strong>@_page.Totals.Farm</strong><small>tarefas e comprovantes</small></article>
+        <article class="kpi"><span>Economia + recompensas</span><strong>@(_page.Totals.Economics + _page.Totals.Reward)</strong><small>@_page.Totals.Economics cenários · @_page.Totals.Reward propostas</small></article>
+        <article class="kpi @(_page.Totals.IntegrityFailures == 0 ? "kpi-green" : "kpi-red")"><span>Integridade</span><strong>@(_page.Totals.IntegrityFailures == 0 ? "OK" : $"{_page.Totals.IntegrityFailures} falha(s)")</strong><small>conferência automática</small></article>
     </section>
 
     @if (_page.IsScanTruncated)
     {
-        <div class="audit-warning" role="status">A CONSULTA ATINGIU O LIMITE DE 5.000 EVENTOS. REFINE O PERÍODO PARA UMA EXPORTAÇÃO COMPLETA.</div>
+        <div class="audit-warning" role="status">A consulta atingiu o limite de 5.000 eventos. Reduza o período para uma exportação completa.</div>
     }
 
     <section class="panel audit-timeline">
         <header class="panel-head">
             <h2>Linha do tempo</h2>
-            <span class="tag">PÁGINA @_page.Page / @_page.TotalPages</span>
         </header>
         @if (_page.Events.Count == 0)
         {
-            <div class="audit-empty"><strong>NENHUM EVENTO ENCONTRADO</strong><span>Ajuste os filtros ou amplie o período.</span></div>
+            <div class="audit-empty"><strong>Nenhum evento encontrado</strong><span>Ajuste os filtros ou amplie o período.</span></div>
         }
         else
         {
             <div class="table-wrap">
                 <table class="audit-table">
-                    <thead><tr><th>UTC</th><th>ORIGEM</th><th>AÇÃO / STATUS</th><th>REFERÊNCIA</th><th>VALOR</th><th>INTEGRIDADE</th></tr></thead>
+                    <thead><tr><th>Quando (UTC)</th><th>Origem</th><th>O que aconteceu</th><th>Referência</th><th>Valor</th><th>Integridade</th></tr></thead>
                     <tbody>
                         @foreach (var item in _page.Events)
                         {
                             <tr>
                                 <td><time datetime="@item.OccurredAtUtc.ToString("O")">@item.OccurredAtUtc.ToString("dd/MM/yyyy HH:mm:ss")</time></td>
                                 <td><span class="audit-category audit-@item.Category.ToString().ToLowerInvariant()">@CategoryLabel(item.Category)</span></td>
-                                <td><strong>@item.Action</strong><small>@item.Status // @item.Description</small></td>
-                                <td><code>@item.Reference</code>@if (item.Correlation is not null){<small>CORR // @item.Correlation</small>}@if (item.Digest is not null){<small title="@item.Digest">DIGEST // @ShortHash(item.Digest)</small>}</td>
+                                <td><strong>@item.Action</strong><small>@item.Status · @item.Description</small></td>
+                                <td><code>@item.Reference</code>@if (item.Correlation is not null){<small>ligação @item.Correlation</small>}@if (item.Digest is not null){<small title="@item.Digest">resumo @ShortHash(item.Digest)</small>}</td>
                                 <td>@FormatAmount(item)</td>
                                 <td><span class="audit-integrity @IntegrityClass(item.Integrity)">@IntegrityLabel(item.Integrity)</span></td>
                             </tr>
@@ -92,8 +82,9 @@ else if (_page is not null)
         }
         <footer class="audit-pagination">
             <button type="button" @onclick="PreviousAsync" disabled="@(_loading || !_page.HasPreviousPage)">← Anterior</button>
-            <span>@_page.Totals.Total EVENTO(S) // @_page.PageSize POR PÁGINA</span>
+            <span>Página @_page.Page de @_page.TotalPages · @_page.Totals.Total evento(s)</span>
             <button type="button" @onclick="NextAsync" disabled="@(_loading || !_page.HasNextPage)">Próxima →</button>
+            <a class="audit-export" href="@ExportUrl" style="margin-left: auto; box-shadow: 2px 2px 0 #111111">Exportar JSON</a>
         </footer>
     </section>
 }
@@ -154,7 +145,7 @@ else if (_page is not null)
         _loading = true;
         _error = null;
         try { _page = await AuditTrail.SearchAsync(_query); }
-        catch (Exception) { _error = "Não foi possível consolidar a trilha de auditoria."; }
+        catch (Exception) { _error = "Não foi possível montar o registro de tudo."; }
         finally { _loading = false; }
     }
 
@@ -163,19 +154,19 @@ else if (_page is not null)
         : new DateTimeOffset(DateTime.SpecifyKind(value.Value, DateTimeKind.Utc));
     private static string CategoryLabel(AuditCategory category) => category switch
     {
-        AuditCategory.Ledger => "LEDGER", AuditCategory.Iris => "IRIS", AuditCategory.Farm => "FARM",
-        AuditCategory.Economics => "ECONOMIA", AuditCategory.Reward => "REWARD",
+        AuditCategory.Ledger => "EXTRATO", AuditCategory.Iris => "IRIS", AuditCategory.Farm => "FARM",
+        AuditCategory.Economics => "ECONOMIA", AuditCategory.Reward => "RECOMPENSA",
         AuditCategory.Security => "SEGURANÇA", _ => category.ToString().ToUpperInvariant()
     };
     private static string IntegrityLabel(AuditIntegrityStatus status) => status switch
     {
-        AuditIntegrityStatus.Valid => "VÁLIDA", AuditIntegrityStatus.Invalid => "FALHA", _ => "N/A"
+        AuditIntegrityStatus.Valid => "CONFERE", AuditIntegrityStatus.Invalid => "FALHA", _ => "N/A"
     };
     private static string IntegrityClass(AuditIntegrityStatus status) => status switch
     {
         AuditIntegrityStatus.Valid => "valid", AuditIntegrityStatus.Invalid => "invalid", _ => "neutral"
     };
-    private static string FormatAmount(AuditEventSnapshot item) => item.AmountMinor is null ? "---" : item.Category switch
+    private static string FormatAmount(AuditEventSnapshot item) => item.AmountMinor is null ? "—" : item.Category switch
     {
         AuditCategory.Farm => $"{item.AmountMinor.Value / 1_000m:N3} CP",
         AuditCategory.Ledger or AuditCategory.Iris => Aic.Format(item.AmountMinor.Value),

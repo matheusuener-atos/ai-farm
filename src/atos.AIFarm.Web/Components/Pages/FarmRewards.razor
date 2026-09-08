@@ -6,27 +6,21 @@
 @inject IFarmRewardProposalStore ProposalStore
 @inject IFarmRewardSettlementService SettlementService
 
-<PageTitle>Propostas de Reward // atos AI Farm</PageTitle>
-
-<div class="page-heading">
-    <p class="eyebrow amber">atos:/FARM/REWARDS</p>
-    <h1>Antes do pagamento</h1>
-    <p>Transforme evidência técnica e cenário econômico em uma proposta auditável, pronta para liquidação financiada.</p>
-</div>
+<PageTitle>Recompensas // atos AI Farm</PageTitle>
 
 <section class="reward-guardrail @(_pool?.Policy.IsEnabled == true ? "funded" : null)" role="note">
     @if (_pool?.Policy.IsEnabled == true)
     {
-        <strong>Reward Pool financiado</strong>
-        <span>Política @_pool.Policy.Version: @Aic.Format(_pool.Policy.AicMinorPerThousandCp) por 1.000 CP, com orçamento mensal rígido e liquidação auditável.</span>
-        <button class="btn primary" type="button" @onclick="SettleAllAsync" disabled="@_working">
+        <strong>Pote de recompensas ativo</strong>
+        <span>Política @_pool.Policy.Version: @Aic.Format(_pool.Policy.AicMinorPerThousandCp) por 1.000 CP, com orçamento mensal fixo e resgate registrado no extrato.</span>
+        <button class="btn primary" type="button" style="box-shadow: 2px 2px 0 #111111" @onclick="SettleAllAsync" disabled="@_working">
             @(_working ? "Resgatando…" : "Resgatar tudo")
         </button>
     }
     else
     {
-        <strong>Liquidação bloqueada</strong>
-        <span>Nenhum AIC será emitido até uma política CP → AIC versionada e um orçamento mensal serem habilitados pela operação.</span>
+        <strong>Resgate bloqueado</strong>
+        <span>Nenhum crédito é criado até uma política de conversão e um orçamento mensal serem ativados pela operação.</span>
     }
 </section>
 
@@ -42,18 +36,18 @@
 @if (_loading)
 {
     <section class="terminal placeholder">
-        <div class="terminal-title"><span>Validando fontes</span></div>
+        <div class="terminal-title"><span>Conferindo as fontes</span></div>
     </section>
 }
 else if (_pool is not null)
 {
     <section class="terminal reward-pool">
-        <div class="terminal-title"><span>Reward Pool</span><small>@_pool!.PeriodStartUtc.ToString("MM/yyyy") · compartilhado</small></div>
+        <div class="terminal-title"><span>Pote do mês</span></div>
         <div class="reward-pool-grid">
             <article><span>ORÇAMENTO</span><strong>@Aic.Format(_pool.BudgetMinor)</strong></article>
-            <article><span>LIQUIDADO</span><strong>@Aic.Format(_pool.SpentMinor)</strong></article>
+            <article><span>JÁ PAGO</span><strong>@Aic.Format(_pool.SpentMinor)</strong></article>
             <article><span>DISPONÍVEL</span><strong>@Aic.Format(_pool.RemainingMinor)</strong></article>
-            <article><span>LIMITE / REWARD</span><strong>@Aic.Format(_pool.Policy.MaximumPerSettlementMinor)</strong></article>
+            <article><span>LIMITE POR RESGATE</span><strong>@Aic.Format(_pool.Policy.MaximumPerSettlementMinor)</strong></article>
         </div>
         <div class="reward-pool-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@PoolUsagePercent">
             <span style="width: @PoolUsagePercent.ToString(System.Globalization.CultureInfo.InvariantCulture)%"></span>
@@ -61,13 +55,13 @@ else if (_pool is not null)
     </section>
 
     <section class="terminal reward-sources">
-        <div class="terminal-title"><span>Fontes elegíveis</span><small>cenário medido + evidência válida</small></div>
+        <div class="terminal-title"><span>Prontos para virar proposta</span></div>
         @if (EligibleSources.Count == 0)
         {
             <div class="reward-empty">
-                <strong>NENHUMA FONTE ELEGÍVEL</strong>
-                <p>Execute um benchmark com evidência válida, use sua medição no simulador econômico e salve a fotografia.</p>
-                <a class="text-link" href="/farm/economy">ABRIR SIMULADOR →</a>
+                <strong>Nada elegível por enquanto</strong>
+                <p>Rode uma tarefa com comprovante válido, use a medição no simulador de ganhos e salve a fotografia.</p>
+                <a class="text-link" href="/farm/economy">Abrir simulador →</a>
             </div>
         }
         else
@@ -78,28 +72,30 @@ else if (_pool is not null)
                     <header>
                         <div>
                             <strong>@source.Scenario.Name</strong>
-                            <small>JOB @ShortId(source.Job.Id) // CENÁRIO @ShortId(source.Scenario.Id)</small>
+                            <small>TAREFA @ShortId(source.Job.Id) · CENÁRIO @ShortId(source.Scenario.Id)</small>
                         </div>
-                        <span class="green">Fontes válidas</span>
+                        <span class="green">Fontes conferidas</span>
                     </header>
                     <dl>
-                        <div><dt>PROCESSAMENTO</dt><dd>@FormatCp(source.Job.ComputeUnitsMilli)</dd></div>
+                        <div><dt>TRABALHO FEITO</dt><dd>@FormatCp(source.Job.ComputeUnitsMilli)</dd></div>
                         <div><dt>TETO / 1.000 CP</dt><dd>@Money(source.Scenario.Result.MaximumRewardPerThousandCu, 6)</dd></div>
-                        <div><dt>REWARD PROPOSTO</dt><dd>@Money(RecommendedReward(source), 6)</dd></div>
-                        <div><dt>EVIDÊNCIA</dt><dd title="@source.Scenario.SourceEvidenceDigest">@ShortHash(source.Scenario.SourceEvidenceDigest!)</dd></div>
+                        <div><dt>RECOMPENSA PROPOSTA</dt><dd>@Money(RecommendedReward(source), 6)</dd></div>
+                        <div><dt>COMPROVANTE</dt><dd title="@source.Scenario.SourceEvidenceDigest">@ShortHash(source.Scenario.SourceEvidenceDigest!)</dd></div>
                     </dl>
-                    <button type="button"
-                            @onclick="() => CreateProposalAsync(source)"
-                            disabled="@(_working || HasProposal(source.Scenario.Id))">
-                        @(HasProposal(source.Scenario.Id) ? "Proposta registrada" : "Registrar proposta")
-                    </button>
+                    <div style="display: flex; justify-content: flex-end">
+                        <button type="button" style="box-shadow: 2px 2px 0 #111111"
+                                @onclick="() => CreateProposalAsync(source)"
+                                disabled="@(_working || HasProposal(source.Scenario.Id))">
+                            @(HasProposal(source.Scenario.Id) ? "Proposta registrada" : "Registrar proposta")
+                        </button>
+                    </div>
                 </article>
             }
         }
     </section>
 
     <section class="terminal reward-history">
-        <div class="terminal-title"><span>Propostas imutáveis</span><small>últimas 20</small></div>
+        <div class="terminal-title"><span>Propostas registradas</span></div>
         @if (_proposals.Count == 0)
         {
             <p class="muted">Nenhuma proposta registrada nesta conta.</p>
@@ -111,47 +107,45 @@ else if (_pool is not null)
                 <article>
                     <header>
                         <div>
-                            <strong>PROPOSTA // @ShortId(proposal.Id)</strong>
-                            <small>@proposal.CreatedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") // @proposal.Version</small>
+                            <strong>PROPOSTA @ShortId(proposal.Id)</strong>
+                            <small>@proposal.CreatedAtUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") · @proposal.Version</small>
                         </div>
                         <span class="@(proposal.IsIntegrityValid ? "amber" : "error-text")">
-                            @(proposal.IsIntegrityValid ? "AGUARDANDO POLÍTICA + FUNDING" : "INTEGRIDADE INVÁLIDA")
+                            @(proposal.IsIntegrityValid ? "AGUARDANDO POLÍTICA + VERBA" : "COM PROBLEMA DE INTEGRIDADE")
                         </span>
                     </header>
                     <dl>
-                        <div><dt>JOB</dt><dd>@ShortId(proposal.JobId)</dd></div>
+                        <div><dt>TAREFA</dt><dd>@ShortId(proposal.JobId)</dd></div>
                         <div><dt>CENÁRIO</dt><dd>@ShortId(proposal.ScenarioId)</dd></div>
-                        <div><dt>PROCESSAMENTO</dt><dd>@FormatCp(proposal.ProcessingPointsMilli)</dd></div>
+                        <div><dt>TRABALHO</dt><dd>@FormatCp(proposal.ProcessingPointsMilli)</dd></div>
                         <div><dt>VALOR RECOMENDADO</dt><dd>@Money(proposal.RecommendedRewardBrl, 6)</dd></div>
-                        <div><dt>DIGEST</dt><dd title="@proposal.Digest">@ShortHash(proposal.Digest)</dd></div>
+                        <div><dt>RESUMO</dt><dd title="@proposal.Digest">@ShortHash(proposal.Digest)</dd></div>
                     </dl>
                     @if (SettlementFor(proposal.Id) is { } settlement)
                     {
                         <div class="reward-settled">
-                            <strong>@Aic.Format(settlement.RewardAmountMinor) creditado em Earned</strong>
-                            <span>@settlement.PolicyVersion · Ledger @ShortId(settlement.LedgerTransactionId)</span>
-                            <small class="@(settlement.IsIntegrityValid ? "green" : "error-text")">@(settlement.IsIntegrityValid ? "Settlement íntegro" : "Integridade inválida")</small>
+                            <strong>@Aic.Format(settlement.RewardAmountMinor) creditado nos seus ganhos</strong>
+                            <span>@settlement.PolicyVersion · extrato @ShortId(settlement.LedgerTransactionId)</span>
+                            <small class="@(settlement.IsIntegrityValid ? "green" : "error-text")">@(settlement.IsIntegrityValid ? "Resgate íntegro" : "Com problema de integridade")</small>
                         </div>
                     }
                     else
                     {
-                        <button type="button"
-                                class="primary"
-                                @onclick="() => SettleProposalAsync(proposal)"
-                                disabled="@(_working || _pool?.Policy.IsEnabled != true || !proposal.IsIntegrityValid || proposal.RecommendedRewardBrl <= 0)">
-                            Resgatar reward em AIC
-                        </button>
+                        <div style="display: flex; justify-content: flex-end">
+                            <button type="button"
+                                    class="primary"
+                                    style="box-shadow: 2px 2px 0 #111111"
+                                    @onclick="() => SettleProposalAsync(proposal)"
+                                    disabled="@(_working || _pool?.Policy.IsEnabled != true || !proposal.IsIntegrityValid || proposal.RecommendedRewardBrl <= 0)">
+                                Resgatar em créditos
+                            </button>
+                        </div>
                     }
                 </article>
             }
         }
     </section>
 }
-
-<div class="reward-links">
-    <a class="text-link" href="/farm">← COMPUTE LAB</a>
-    <a class="text-link" href="/saldo-farm">SALDO DA FARM →</a>
-</div>
 
 @code {
     private FarmDashboard? _dashboard;
@@ -208,7 +202,7 @@ else if (_pool is not null)
         {
             var proposal = await ProposalStore.CreateAsync(source.Job.Id, source.Scenario.Id);
             await ReloadAsync();
-            _notice = $"PROPOSTA {ShortId(proposal.Id)} REGISTRADA // NENHUM AIC EMITIDO";
+            _notice = $"Proposta {ShortId(proposal.Id)} registrada — nenhum crédito foi criado ainda.";
         }
         catch (InvalidOperationException exception)
         {
@@ -231,10 +225,10 @@ else if (_pool is not null)
             var batch = await SettlementService.SettleAllAsync();
             await ReloadAsync();
             _notice = batch.SettledCount == 0
-                ? (batch.StoppedReason ?? "Nenhuma proposta pendente para resgatar. As auto-propostas nascem quando um job completa com fotografia econômica salva.")
-                : $"{batch.SettledCount} RESGATE(S) // {Aic.Format(batch.TotalRewardMinor)} // EARNED" +
-                  (batch.StoppedReason is not null ? $" // PAROU: {batch.StoppedReason}" : string.Empty) +
-                  (batch.RemainingCount > 0 ? $" // {batch.RemainingCount} pendente(s)" : string.Empty);
+                ? (batch.StoppedReason ?? "Nenhuma proposta pendente para resgatar. As propostas nascem quando uma tarefa termina com fotografia econômica salva.")
+                : $"{batch.SettledCount} resgate(s) · {Aic.Format(batch.TotalRewardMinor)} · nos seus ganhos" +
+                  (batch.StoppedReason is not null ? $" · parou: {batch.StoppedReason}" : string.Empty) +
+                  (batch.RemainingCount > 0 ? $" · {batch.RemainingCount} pendente(s)" : string.Empty);
         }
         catch (InvalidOperationException exception)
         {
@@ -257,7 +251,7 @@ else if (_pool is not null)
         {
             var settlement = await SettlementService.SettleAsync(proposal.Id);
             await ReloadAsync();
-            _notice = $"REWARD {Aic.Format(settlement.RewardAmountMinor)} LIQUIDADO // EARNED // LEDGER {ShortId(settlement.LedgerTransactionId)}";
+            _notice = $"Recompensa {Aic.Format(settlement.RewardAmountMinor)} resgatada · extrato {ShortId(settlement.LedgerTransactionId)}";
         }
         catch (InvalidOperationException exception)
         {

@@ -8,17 +8,6 @@
 
 <PageTitle>Compute Lab // atos AI Farm</PageTitle>
 
-<div class="page-head">
-    <p class="eyebrow amber">atos:/FARM/COMPUTE_LAB</p>
-    <h1>Compute controlado</h1>
-    <p>Workloads determinísticos em host conhecido. CP verificado vira AIC pelo resgate de recompensas (ADRs 0022/0033).</p>
-    <a class="farm-economics-link" href="/farm/jobs">Abrir centro de jobs →</a>
-    <a class="farm-economics-link" href="/farm/demands">Enviar demanda útil →</a>
-    <a class="farm-economics-link" href="/farm/schedules">Automatizar workloads →</a>
-    <a class="farm-economics-link" href="/farm/economy">Simular economia →</a>
-    <a class="farm-economics-link" href="/saldo-farm">Ver saldo da farm →</a>
-</div>
-
 @if (_error is not null)
 {
     <div class="error" role="alert">@_error</div>
@@ -27,55 +16,69 @@
 @if (_dashboard is null)
 {
     <section class="terminal placeholder">
-        <div class="terminal-title"><span>Conectando ao node</span></div>
+        <div class="terminal-title"><span>Conectando às máquinas</span></div>
     </section>
 }
 else
 {
     <section class="terminal farm-workload-catalog">
-        <div class="terminal-title"><span>Catálogo de workloads</span><code>@FarmWorkloadCatalog.Version</code></div>
-        <div class="farm-workload-grid">
+        <div class="terminal-title"><span>Tipos de tarefa</span></div>
+        <div class="pool-grid" style="padding: 14px 16px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr))">
             @foreach (var workload in FarmWorkloadCatalog.Definitions.Where(x => x.InputSchema is null))
             {
-                <label class="farm-workload-card @(workload.Id == _selectedWorkloadId ? "selected" : null)">
-                    <input type="radio" name="farm-workload" value="@workload.Id"
-                           checked="@(workload.Id == _selectedWorkloadId)"
-                           @onchange="() => _selectedWorkloadId = workload.Id"
-                           disabled="@_working" />
-                    <span>@workload.DisplayName</span>
-                    <strong>@workload.Version</strong>
-                    <small>@workload.Description</small>
-                    <small>@workload.Iterations.ToString("N0") UNIDADES // @FormatCp(workload.ProcessingPointsMilli) // @workload.NetworkPolicy</small>
+                <label class="pool-card @(workload.Id == _selectedWorkloadId ? "selected" : null)" style="min-height: 0; cursor: pointer; color: #111111; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0">
+                    <header>
+                        <input type="radio" name="farm-workload" value="@workload.Id"
+                               checked="@(workload.Id == _selectedWorkloadId)"
+                               @onchange="() => _selectedWorkloadId = workload.Id"
+                               disabled="@_working"
+                               style="width: 14px; margin: 0; accent-color: #111111" />
+                        <b>@workload.DisplayName</b>
+                    </header>
+                    <p class="pool-state">@workload.Id</p>
+                    <small class="muted" style="line-height: 1.5">@workload.Description</small>
+                    <footer><span class="muted" style="font-size: 11px">@workload.Iterations.ToString("N0") repetições · sem internet</span><b style="font-size: 12px">vale @FormatCp(workload.ProcessingPointsMilli)</b></footer>
                 </label>
             }
+            <a class="pool-card pool-seat" href="/farm/jobs" style="min-height: 0; align-items: center; justify-content: center; gap: 6px; text-decoration: none; color: #111111">
+                <span class="pool-seat-plus" aria-hidden="true">→</span>
+                <b style="font-size: 13px">Ver histórico de tarefas</b>
+                <small class="muted" style="font-weight: 500">Tudo que suas máquinas já fizeram</small>
+            </a>
         </div>
     </section>
 
     <section class="terminal farm-pool">
-        <div class="terminal-title"><span>Compute pool</span><small>@_dashboard.AvailableNodeCount DISPONÍVEIS // @_dashboard.Nodes.Count TOTAL</small></div>
-        <div class="farm-pool-grid">
+        <div class="terminal-title"><span>Suas máquinas</span></div>
+        <div class="pool-grid" style="padding: 14px 16px; display: grid; grid-auto-flow: column; grid-auto-columns: max(230px, calc(25% - 10.5px)); overflow-x: auto">
             @foreach (var poolNode in _dashboard.Nodes)
             {
-                <article>
-                    <header><strong>@poolNode.Name</strong><span class="@(poolNode.AcceptJobs ? "green" : "amber")">@NodeStatusLabel(poolNode.Status)</span></header>
-                    <small>@ConnectionLabel(poolNode.ConnectionKind) // @(poolNode.AgentVersion ?? "HOST WEB")</small>
-                    <dl>
-                        <div><dt>CPU</dt><dd>@poolNode.AuthorizedLogicalProcessors / @poolNode.LogicalProcessors</dd></div>
-                        <div><dt>MEMÓRIA</dt><dd>@FormatBytes(poolNode.AuthorizedMemoryBytes)</dd></div>
-                        <div><dt>HEARTBEAT</dt><dd>@(poolNode.IsHeartbeatFresh ? "ATUAL" : "EXPIRADO")</dd></div>
-                        <div><dt>PERFIL</dt><dd>@VerificationLabel(poolNode.VerificationLevel)</dd></div>
-                    </dl>
-                    <button type="button" class="button-secondary"
-                            @onclick="() => ToggleNodeAsync(poolNode)" disabled="@_working">
-                        @(poolNode.Status == FarmNodeStatus.Paused ? "RETOMAR" : "PAUSAR")
-                    </button>
-                    @if (poolNode.ConnectionKind == FarmNodeConnectionKind.Agent)
-                    {
-                        <button type="button" class="button-secondary"
-                                @onclick="() => ToggleSharingAsync(poolNode)" disabled="@_working">
-                            @(poolNode.SharePlatformWork ? "SAIR DO POOL DA PLATAFORMA" : "COMPARTILHAR COM A PLATAFORMA")
+                <article class="pool-card @(poolNode.Status == FarmNodeStatus.Online ? "online" : "offline") @(poolNode.Id == SelectedNode?.Id ? "selected" : null)" style="cursor: pointer" @onclick="() => _selectedNodeId = poolNode.Id">
+                    <header>
+                        <input type="radio" name="farm-machine" checked="@(poolNode.Id == SelectedNode?.Id)" readonly style="width: 14px; margin: 0; accent-color: #111111; pointer-events: none" />
+                        <b>@poolNode.Name</b>
+                    </header>
+                    <p class="pool-state @(poolNode.AcceptJobs ? "on" : null)">@NodeStatusLabel(poolNode.Status)</p>
+                    <small class="muted">@(poolNode.ConnectionKind == FarmNodeConnectionKind.Agent ? $"Programa instalado (Agent) · {poolNode.AgentVersion}" : "Embutido · host da aplicação")</small>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; border: 1.5px solid #111111; margin: 4px 0 6px">
+                        <div style="padding: 6px 8px; border-right: 1.5px solid #111111; border-bottom: 1.5px solid #111111"><span class="label" style="font-size: 9px">CPU</span><br /><strong>@poolNode.AuthorizedLogicalProcessors / @poolNode.LogicalProcessors</strong></div>
+                        <div style="padding: 6px 8px; border-bottom: 1.5px solid #111111"><span class="label" style="font-size: 9px">MEMÓRIA</span><br /><strong>@FormatBytes(poolNode.AuthorizedMemoryBytes)</strong></div>
+                        <div style="padding: 6px 8px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">SINAL DE VIDA</span><br /><strong>@(poolNode.IsHeartbeatFresh ? "ATUAL" : "EXPIRADO")</strong></div>
+                        <div style="padding: 6px 8px"><span class="label" style="font-size: 9px">PERFIL</span><br /><strong>@VerificationLabel(poolNode.VerificationLevel)</strong></div>
+                    </div>
+                    <footer style="justify-content: flex-end; border-top: 0">
+                        @if (poolNode.ConnectionKind == FarmNodeConnectionKind.Agent)
+                        {
+                            <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111"
+                                    @onclick="() => ToggleSharingAsync(poolNode)" @onclick:stopPropagation disabled="@_working">
+                                @(poolNode.SharePlatformWork ? "Parar de ajudar" : "Ajudar a plataforma")
+                            </button>
+                        }
+                        <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111"
+                                @onclick="() => ToggleNodeAsync(poolNode)" @onclick:stopPropagation disabled="@_working">
+                            @(poolNode.Status == FarmNodeStatus.Paused ? "Retomar" : "Pausar")
                         </button>
-                    }
+                    </footer>
                 </article>
             }
         </div>
@@ -84,133 +87,91 @@ else
     <section class="farm-node-panel">
         <header class="farm-node-header">
             <div>
-                <span class="label">NODE</span>
-                <strong>@_dashboard.Node.Name</strong>
+                <span class="label">Máquina selecionada</span>
+                <strong>@(SelectedNode?.Name ?? _dashboard.Node.Name)</strong>
             </div>
             <span class="status @(IsOnline ? null : "amber")">
-                <span aria-hidden="true">●</span> @NodeStatusLabel(_dashboard.Node.Status)
+                <span aria-hidden="true">●</span> @NodeStatusLabel(SelectedNode?.Status ?? _dashboard.Node.Status)
             </span>
         </header>
 
         <div class="farm-metrics">
-            <article>
-                <span>VERIFICAÇÃO</span>
-                <strong>@VerificationLabel(_dashboard.Node.VerificationLevel)</strong>
-            </article>
-            <article>
-                <span>CPU LÓGICA</span>
-                <strong>@_dashboard.Node.LogicalProcessors</strong>
-            </article>
-            <article>
-                <span>MEMÓRIA DISPONÍVEL</span>
-                <strong>@FormatBytes(_dashboard.Node.MemoryBytes)</strong>
-            </article>
-            <article>
-                <span>CP VERIFICADO</span>
-                <strong>@FormatCp(_dashboard.VerifiedComputeUnitsMilli)</strong>
-            </article>
-            <article>
-                <span>CONEXÃO</span>
-                <strong>@ConnectionLabel(_dashboard.Node.ConnectionKind)</strong>
-            </article>
-            <article>
-                <span>POLÍTICA LOCAL</span>
-                <strong class="@(CanAcceptJobs ? null : "amber")">@(CanAcceptJobs ? "ACEITANDO JOBS" : "PAUSADA")</strong>
-            </article>
-            <article>
-                <span>CPU AUTORIZADA</span>
-                <strong>@_dashboard.Node.AuthorizedLogicalProcessors</strong>
-            </article>
-            <article>
-                <span>MEMÓRIA AUTORIZADA</span>
-                <strong>@FormatBytes(_dashboard.Node.AuthorizedMemoryBytes)</strong>
-            </article>
+            <article><span>Perfil</span><strong>@VerificationLabel(SelectedNode?.VerificationLevel ?? _dashboard.Node.VerificationLevel)</strong></article>
+            <article><span>Núcleos de CPU</span><strong>@(SelectedNode?.LogicalProcessors ?? _dashboard.Node.LogicalProcessors)</strong></article>
+            <article><span>Memória total</span><strong>@FormatBytes(SelectedNode?.MemoryBytes ?? _dashboard.Node.MemoryBytes)</strong></article>
+            <article><span>Pontos ganhos (CP)</span><strong class="amber">@FormatCp(_dashboard.VerifiedComputeUnitsMilli)</strong></article>
+            <article><span>Conexão</span><strong>@ConnectionLabel(SelectedNode?.ConnectionKind ?? _dashboard.Node.ConnectionKind)</strong></article>
+            <article><span>Aceitando tarefas?</span><strong class="@(CanAcceptJobs ? null : "amber")">@(CanAcceptJobs ? "SIM" : "NÃO")</strong></article>
+            <article><span>Núcleos liberados</span><strong>@(SelectedNode?.AuthorizedLogicalProcessors ?? _dashboard.Node.AuthorizedLogicalProcessors)</strong></article>
+            <article><span>Memória liberada</span><strong>@FormatBytes(SelectedNode?.AuthorizedMemoryBytes ?? _dashboard.Node.AuthorizedMemoryBytes)</strong></article>
         </div>
 
-        <p class="farm-runtime">
-            @_dashboard.Node.Runtime
-            @if (_dashboard.Node.ProfileVerifiedAtUtc is not null &&
-                 _dashboard.Node.VerifiedProfileHash is not null)
-            {
-                <text> // PERFIL @_dashboard.Node.VerifiedProfileHash[..12] // VERIFICADO @_dashboard.Node.ProfileVerifiedAtUtc.Value.ToLocalTime().ToString("dd/MM HH:mm")</text>
-            }
-            else
-            {
-                <text> // PERFIL AGUARDANDO EXECUÇÃO VERIFICADA</text>
-            }
-        </p>
-
-        <div class="farm-controls">
-            @if (IsOnline && IsEmbedded)
-            {
-                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">Pausar node</button>
-                <button type="button" @onclick="RunWorkloadAsync" disabled="@_working">
-                    @(_working ? "Executando..." : $"Executar {SelectedWorkload.DisplayName}")
-                </button>
-            }
-            else if (IsOnline)
-            {
-                <button type="button" class="button-secondary" @onclick="PauseAsync" disabled="@_working">Pausar agent</button>
-                <button type="button" @onclick="RunWorkloadAsync" disabled="@(_working || !CanAcceptJobs)">
-                    @(!CanAcceptJobs ? "Política local pausada" : _working ? "Despachando..." : $"Despachar {SelectedWorkload.DisplayName}")
-                </button>
-            }
-            else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
-            {
-                <button type="button" @onclick="ResumeAsync" disabled="@_working">Retomar node</button>
-            }
-            else
-            {
-                <button type="button" disabled>Aguardando heartbeat</button>
-            }
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-top: 1.5px solid #111111">
+            <small class="classification-note" style="margin: 0; flex: 1; min-width: 220px">Só tarefas do catálogo · sem comandos · sem internet · não gera créditos (AIC) sozinho</small>
+            <div style="display: flex; gap: 8px; flex: none">
+                @if (IsOnline && IsEmbedded)
+                {
+                    <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="PauseAsync" disabled="@_working">Pausar</button>
+                    <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="RunWorkloadAsync" disabled="@_working">
+                        @(_working ? "Executando..." : $"Enviar {SelectedWorkload.DisplayName}")
+                    </button>
+                }
+                else if (IsOnline)
+                {
+                    <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="PauseAsync" disabled="@_working">Pausar</button>
+                    <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="RunWorkloadAsync" disabled="@(_working || !CanAcceptJobs)">
+                        @(!CanAcceptJobs ? "Máquina pausada" : _working ? "Enviando..." : $"Enviar {SelectedWorkload.DisplayName}")
+                    </button>
+                }
+                else if (_dashboard.Node.Status == FarmNodeStatus.Paused)
+                {
+                    <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="ResumeAsync" disabled="@_working">Retomar</button>
+                }
+                else
+                {
+                    <button type="button" disabled>Aguardando sinal de vida</button>
+                }
+            </div>
         </div>
-        <small class="classification-note">ALLOWLIST // @SelectedWorkload.Workload // @SelectedWorkload.VerificationPolicy // SEM SHELL // SEM REDE // SEM AIC</small>
     </section>
 
     <section class="terminal farm-agent-panel">
-        <div class="terminal-title"><span>Compute agent</span><small>vínculo da máquina</small></div>
-        <div class="farm-agent-download">
-            <div>
-                <strong>Windows x64</strong>
-                <small>Executável autônomo // não exige .NET nem acesso ao repositório</small>
+        <div class="terminal-title"><span>Programa do computador</span></div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0">
+            <div style="min-width: 0; padding: 14px 16px; border-right: 1.5px solid #111111; display: flex; flex-direction: column; gap: 12px">
+                <div class="farm-agent-download" style="border: 1.5px solid #111111; margin: 0; padding: 12px 14px">
+                    <div>
+                        <strong>Windows x64</strong>
+                        <small>Programa único — não precisa instalar mais nada</small>
+                    </div>
+                    <a class="button-primary" href="/downloads/atos-compute-agent-win-x64.exe" download="atos-compute-agent-win-x64.exe">Baixar programa</a>
+                </div>
+                <p style="margin: 0; font-size: 12.5px; line-height: 1.55">Conectar é uma troca em duas etapas, para ninguém entrar no seu lugar: um código gerado aqui entra no programa; uma chave mostrada no programa volta para o site.</p>
+                <button type="button" class="button-secondary" style="align-self: flex-end; box-shadow: 2px 2px 0 #111111; margin-top: auto" @onclick="CreateEnrollmentAsync" disabled="@_working">Gerar código de conexão</button>
             </div>
-            <a class="button-primary" href="/downloads/atos-compute-agent-win-x64.exe" download="atos-compute-agent-win-x64.exe">
-                Baixar Agent
-            </a>
+            <div style="min-width: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+                <ol class="farm-agent-steps" style="margin: 0; padding-left: 18px">
+                    <li>Abra <a href="/meu-computador">Meu computador</a> e clique em "Adicionar máquina" — o código aparece no cartão.</li>
+                    <li>Abra o programa baixado, digite seu e-mail e o código. Ele mostra uma chave de confirmação (uma única vez).</li>
+                    <li>Digite essa chave de volta no cartão do site. Pronto: a máquina começa a receber tarefas.</li>
+                </ol>
+                @if (_enrollment is not null)
+                {
+                    <div class="farm-enrollment-secret" role="status" style="margin: auto 0 0">
+                        <strong>Código único · vale até @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</strong>
+                        <code>@_enrollment.Token</code>
+                        <small>Copie agora. Ele não será mostrado de novo — e o código anterior deixou de valer.</small>
+                    </div>
+                }
+            </div>
         </div>
-        <p>
-            @if (IsEmbedded)
-            {
-                <text>Modo EMBEDDED: o workload roda no mesmo host da aplicação. Gere um código para vincular um Agent separado.</text>
-            }
-            else
-            {
-                <text>Agent @_dashboard.Node.AgentVersion // último heartbeat @_dashboard.Node.LastSeenAtUtc.ToLocalTime().ToString("HH:mm:ss")</text>
-            }
-        </p>
-        <button type="button" class="button-secondary" @onclick="CreateEnrollmentAsync" disabled="@_working">
-            Gerar código para novo/re-vínculo
-        </button>
-        <ol class="farm-agent-steps">
-            <li>O vínculo é um handshake de mão dupla (ADR 0038): o caminho recomendado é o card-assento em <a href="/meu-computador">Meu computador</a> — código gerado no assento, e-mail + código na janela do programa, chave de confirmação de volta no card.</li>
-            <li>Por terminal: <code>.\atos-compute-agent-win-x64.exe enroll @FarmUrl</code> pede o e-mail da conta e o código, e imprime a chave de confirmação (exibida uma única vez) para digitar no card.</li>
-            <li><code>run</code> mantém o modo headless; sem argumentos, o programa abre o painel.</li>
-        </ol>
-        @if (_enrollment is not null)
-        {
-            <div class="farm-enrollment-secret" role="status">
-                <strong>CÓDIGO ÚNICO // EXPIRES @_enrollment.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</strong>
-                <code>@_enrollment.Token</code>
-                <small>Copie agora. O código não será exibido novamente e o anterior foi invalidado.</small>
-            </div>
-        }
     </section>
 
     <section class="terminal farm-jobs">
-        <div class="terminal-title"><span>Jobs recentes</span><small>últimos 10</small></div>
+        <div class="terminal-title"><span>Tarefas recentes</span></div>
         @if (_dashboard.RecentJobs.Count == 0)
         {
-            <p class="muted">Nenhum Job executado neste laboratório.</p>
+            <p class="muted">Nenhuma tarefa executada ainda.</p>
         }
         else
         {
@@ -218,17 +179,9 @@ else
             {
                 <article class="farm-job">
                     <header>
-                        <strong>@job.Workload // @ShortId(job.Id)</strong>
+                        <strong>@job.Workload · @ShortId(job.Id)</strong>
                         <div class="farm-job-actions">
                             <span class="@JobStatusClass(job.Status)">@JobStatusLabel(job.Status)</span>
-                            @if (job.Evidence?.IsValid == true)
-                            {
-                                <a class="farm-evidence-download"
-                                   href="@EvidenceUrl(job.Id)"
-                                   download="@EvidenceFileName(job.Id)">
-                                    Baixar evidência
-                                </a>
-                            }
                             @if (!IsEmbedded && CanCancel(job))
                             {
                                 <button type="button"
@@ -245,72 +198,72 @@ else
                         </div>
                     </header>
                     <dl>
-                        <div><dt>VERSÃO</dt><dd>@job.WorkloadVersion</dd></div>
-                        <div><dt>VERIFICAÇÃO</dt><dd>@job.VerificationPolicy</dd></div>
-                        <div><dt>CP</dt><dd>@FormatCp(job.ComputeUnitsMilli)</dd></div>
-                        <div><dt>DURAÇÃO</dt><dd>@(job.DurationMilliseconds is null ? "---" : $"{job.DurationMilliseconds} MS")</dd></div>
-                        <div><dt>DIGEST</dt><dd>@(job.ResultDigest is null ? "---" : job.ResultDigest[..12])</dd></div>
-                        <div><dt>PICO DE MEMÓRIA</dt><dd>@(job.WorkerPeakMemoryBytes is null ? "---" : FormatBytes(job.WorkerPeakMemoryBytes.Value))</dd></div>
-                        <div><dt>CPU DO WORKER</dt><dd>@(job.WorkerProcessorTimeMilliseconds is null ? "---" : $"{job.WorkerProcessorTimeMilliseconds} MS")</dd></div>
-                        <div><dt>CONTENÇÃO</dt><dd>@(job.WorkerEnforcement ?? "---")</dd></div>
+                        <div><dt>Versão</dt><dd>@job.WorkloadVersion</dd></div>
+                        <div><dt>Conferência</dt><dd>@job.VerificationPolicy</dd></div>
+                        <div><dt>Pontos</dt><dd>@FormatCp(job.ComputeUnitsMilli)</dd></div>
+                        <div><dt>Duração</dt><dd>@(job.DurationMilliseconds is null ? "—" : $"{job.DurationMilliseconds} MS")</dd></div>
+                        <div><dt>Resultado</dt><dd>@(job.ResultDigest is null ? "—" : job.ResultDigest[..12])</dd></div>
+                        <div><dt>Pico de memória</dt><dd>@(job.WorkerPeakMemoryBytes is null ? "—" : FormatBytes(job.WorkerPeakMemoryBytes.Value))</dd></div>
+                        <div><dt>CPU usada</dt><dd>@(job.WorkerProcessorTimeMilliseconds is null ? "—" : $"{job.WorkerProcessorTimeMilliseconds} MS")</dd></div>
+                        <div><dt>Limites aplicados</dt><dd>@(job.WorkerEnforcement ?? "—")</dd></div>
                     </dl>
                     @if (job.AgentLeaseExpiresAtUtc is not null && CanCancelStatus(job.Status))
                     {
                         <p class="farm-manifest-legacy">
-                            LEASE // RENOVADO ATÉ @job.AgentLeaseExpiresAtUtc.Value.ToLocalTime().ToString("HH:mm:ss")
+                            Reserva renovada até @job.AgentLeaseExpiresAtUtc.Value.ToLocalTime().ToString("HH:mm:ss")
                         </p>
                     }
                     @if (job.Manifest is null)
                     {
-                        <p class="farm-manifest-legacy">MANIFESTO // JOB LEGADO SEM ASSINATURA</p>
+                        <p class="farm-manifest-legacy">Contrato · tarefa antiga sem assinatura</p>
                     }
                     else
                     {
                         <details class="farm-manifest">
                             <summary>
-                                [ MANIFESTO @job.Manifest.Version //
+                                [ Contrato da tarefa @job.Manifest.Version ·
                                 <span class="@(job.Manifest.IsSignatureValid ? "green" : "error-text")">
                                     @(job.Manifest.IsSignatureValid ? "ASSINATURA VÁLIDA" : "ASSINATURA INVÁLIDA")
                                 </span> ]
                             </summary>
                             <dl>
-                                <div><dt>ATTEMPT</dt><dd>@ShortId(job.Manifest.AttemptId)</dd></div>
-                                <div><dt>VALIDADE</dt><dd>@job.Manifest.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</dd></div>
-                                <div><dt>TIMEOUT</dt><dd>@job.Manifest.TimeoutSeconds S</dd></div>
-                                <div><dt>ITERATIONS</dt><dd>@job.Manifest.Iterations.ToString("N0")</dd></div>
-                                <div><dt>CPU MÁX.</dt><dd>@job.Manifest.MaxLogicalProcessors</dd></div>
-                                <div><dt>MEMÓRIA MÁX.</dt><dd>@FormatBytes(job.Manifest.MaxMemoryBytes)</dd></div>
-                                <div><dt>REDE</dt><dd>@job.Manifest.NetworkPolicy</dd></div>
-                                <div><dt>DADOS</dt><dd>@job.Manifest.DataClassification</dd></div>
-                                <div><dt>PERFIL DO NODE</dt><dd title="@job.Manifest.NodeProfileHash">@(job.Manifest.NodeProfileHash is null ? "---" : ShortHash(job.Manifest.NodeProfileHash))</dd></div>
-                                <div><dt>MANIFEST DIGEST</dt><dd title="@job.Manifest.Digest">@ShortHash(job.Manifest.Digest)</dd></div>
-                                <div><dt>HMAC-SHA256</dt><dd title="@job.Manifest.Signature">@ShortHash(job.Manifest.Signature)</dd></div>
+                                <div><dt>Tentativa</dt><dd>@ShortId(job.Manifest.AttemptId)</dd></div>
+                                <div><dt>Vale até</dt><dd>@job.Manifest.ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss")</dd></div>
+                                <div><dt>Tempo máximo</dt><dd>@job.Manifest.TimeoutSeconds S</dd></div>
+                                <div><dt>Repetições</dt><dd>@job.Manifest.Iterations.ToString("N0")</dd></div>
+                                <div><dt>CPU máx.</dt><dd>@job.Manifest.MaxLogicalProcessors</dd></div>
+                                <div><dt>Memória máx.</dt><dd>@FormatBytes(job.Manifest.MaxMemoryBytes)</dd></div>
+                                <div><dt>Internet</dt><dd>@(job.Manifest.NetworkPolicy == "Denied" ? "BLOQUEADA" : job.Manifest.NetworkPolicy)</dd></div>
+                                <div><dt>Dados</dt><dd>@(job.Manifest.DataClassification == "Standard" ? "PADRÃO" : job.Manifest.DataClassification)</dd></div>
+                                <div><dt>Perfil da máquina</dt><dd title="@job.Manifest.NodeProfileHash">@(job.Manifest.NodeProfileHash is null ? "—" : ShortHash(job.Manifest.NodeProfileHash))</dd></div>
+                                <div><dt>Resumo (digest)</dt><dd title="@job.Manifest.Digest">@ShortHash(job.Manifest.Digest)</dd></div>
+                                <div><dt>Assinatura</dt><dd title="@job.Manifest.Signature">@ShortHash(job.Manifest.Signature)</dd></div>
                             </dl>
                         </details>
                     }
                     @if (job.Status == FarmJobStatus.Completed && job.Evidence is null)
                     {
-                        <p class="farm-manifest-legacy">EVIDÊNCIA // JOB LEGADO SEM BUNDLE</p>
+                        <p class="farm-manifest-legacy">Comprovante · tarefa antiga sem pacote</p>
                     }
                     else if (job.Evidence is not null)
                     {
                         <details class="farm-evidence">
                             <summary>
-                                [ BUNDLE @job.Evidence.Version //
+                                [ Comprovante @job.Evidence.Version ·
                                 <span class="@(job.Evidence.IsValid ? "green" : "error-text")">
-                                    @(job.Evidence.IsValid ? "INTEGRIDADE VÁLIDA" : "INTEGRIDADE INVÁLIDA")
+                                    @(job.Evidence.IsValid ? "TUDO CONFERIDO" : "COM PROBLEMA")
                                 </span> ]
                             </summary>
                             <dl>
-                                <div><dt>ALGORITMO</dt><dd>@job.Evidence.Algorithm</dd></div>
-                                <div><dt>KEY ID</dt><dd>@job.Evidence.KeyId</dd></div>
-                                <div><dt>EMITIDO</dt><dd>@job.Evidence.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</dd></div>
-                                <div><dt>PAYLOAD DIGEST</dt><dd title="@job.Evidence.Digest">@ShortHash(job.Evidence.Digest)</dd></div>
-                                <div><dt>ASSINATURA</dt><dd title="@job.Evidence.Signature">@ShortHash(job.Evidence.Signature)</dd></div>
-                                <div><dt>HMAC DO BUNDLE</dt><dd class="@IntegrityClass(job.Evidence.Verification.SignatureValid)">@IntegrityLabel(job.Evidence.Verification.SignatureValid)</dd></div>
-                                <div><dt>MANIFESTO</dt><dd class="@IntegrityClass(job.Evidence.Verification.ManifestValid)">@IntegrityLabel(job.Evidence.Verification.ManifestValid)</dd></div>
-                                <div><dt>VÍNCULO DO JOB</dt><dd class="@IntegrityClass(job.Evidence.Verification.JobBindingValid)">@IntegrityLabel(job.Evidence.Verification.JobBindingValid)</dd></div>
-                                <div><dt>LIFECYCLE</dt><dd class="@IntegrityClass(job.Evidence.Verification.LifecycleValid)">@IntegrityLabel(job.Evidence.Verification.LifecycleValid)</dd></div>
+                                <div><dt>Algoritmo</dt><dd>@job.Evidence.Algorithm</dd></div>
+                                <div><dt>Chave usada</dt><dd>@job.Evidence.KeyId</dd></div>
+                                <div><dt>Emitido</dt><dd>@job.Evidence.CreatedAtUtc.ToLocalTime().ToString("dd/MM HH:mm:ss")</dd></div>
+                                <div><dt>Resumo do conteúdo</dt><dd title="@job.Evidence.Digest">@ShortHash(job.Evidence.Digest)</dd></div>
+                                <div><dt>Assinatura</dt><dd title="@job.Evidence.Signature">@ShortHash(job.Evidence.Signature)</dd></div>
+                                <div><dt>Assinatura confere?</dt><dd class="@IntegrityClass(job.Evidence.Verification.SignatureValid)">@IntegrityLabel(job.Evidence.Verification.SignatureValid)</dd></div>
+                                <div><dt>Contrato confere?</dt><dd class="@IntegrityClass(job.Evidence.Verification.ManifestValid)">@IntegrityLabel(job.Evidence.Verification.ManifestValid)</dd></div>
+                                <div><dt>É desta tarefa?</dt><dd class="@IntegrityClass(job.Evidence.Verification.JobBindingValid)">@IntegrityLabel(job.Evidence.Verification.JobBindingValid)</dd></div>
+                                <div><dt>Etapas conferem?</dt><dd class="@IntegrityClass(job.Evidence.Verification.LifecycleValid)">@IntegrityLabel(job.Evidence.Verification.LifecycleValid)</dd></div>
                             </dl>
                         </details>
                     }
@@ -324,6 +277,16 @@ else
                             </li>
                         }
                     </ol>
+                    @if (job.Evidence?.IsValid == true)
+                    {
+                        <div style="display: flex; justify-content: flex-end">
+                            <a class="farm-evidence-download" style="box-shadow: 2px 2px 0 #111111"
+                               href="@EvidenceUrl(job.Id)"
+                               download="@EvidenceFileName(job.Id)">
+                                Baixar comprovante
+                            </a>
+                        </div>
+                    }
                 </article>
             }
         }
@@ -336,12 +299,16 @@ else
     private string? _error;
     private FarmAgentEnrollment? _enrollment;
     private string _selectedWorkloadId = FarmWorkloadCatalog.DefaultId;
+    private Guid? _selectedNodeId;
     private readonly CancellationTokenSource _pollCancellation = new();
     private Task? _pollTask;
     private bool IsOnline => _dashboard?.Node.Status == FarmNodeStatus.Online;
     private bool IsEmbedded => _dashboard?.Node.ConnectionKind == FarmNodeConnectionKind.Embedded;
     private bool CanAcceptJobs => _dashboard?.Node.AcceptJobs == true;
     private FarmWorkloadDefinition SelectedWorkload => FarmWorkloadCatalog.GetRequired(_selectedWorkloadId);
+    private FarmNodeSnapshot? SelectedNode =>
+        _dashboard is null ? null
+            : _dashboard.Nodes.FirstOrDefault(x => x.Id == _selectedNodeId) ?? _dashboard.Node;
 
     private string FarmUrl => Navigation.BaseUri.TrimEnd('/');
 
@@ -475,14 +442,14 @@ else
 
     private static string NodeStatusLabel(FarmNodeStatus status) => status switch
     {
-        FarmNodeStatus.Online => "ONLINE",
-        FarmNodeStatus.Paused => "PAUSADO",
-        FarmNodeStatus.Offline => "OFFLINE",
+        FarmNodeStatus.Online => "ENTREGANDO PODER",
+        FarmNodeStatus.Paused => "PAUSADA",
+        FarmNodeStatus.Offline => "DESLIGADA",
         _ => status.ToString().ToUpperInvariant()
     };
 
     private static string ConnectionLabel(FarmNodeConnectionKind kind) =>
-        kind == FarmNodeConnectionKind.Agent ? "AGENT" : "EMBEDDED";
+        kind == FarmNodeConnectionKind.Agent ? "AGENT" : "EMBUTIDO";
 
     private static string VerificationLabel(FarmVerificationLevel level) =>
         level == FarmVerificationLevel.Verified ? "VERIFICADO" : "DETECTADO";
@@ -490,16 +457,16 @@ else
     private static string JobStatusLabel(FarmJobStatus status) => status switch
     {
         FarmJobStatus.Queued => "NA FILA",
-        FarmJobStatus.Offered => "OFERECIDO",
-        FarmJobStatus.Accepted => "ACEITO",
+        FarmJobStatus.Offered => "OFERECIDA",
+        FarmJobStatus.Accepted => "ACEITA",
         FarmJobStatus.Running => "EXECUTANDO",
         FarmJobStatus.Uploading => "ENVIANDO",
         FarmJobStatus.Verifying => "VERIFICANDO",
-        FarmJobStatus.Completed => "CONCLUÍDO",
+        FarmJobStatus.Completed => "CONCLUÍDA",
         FarmJobStatus.Failed => "FALHOU",
-        FarmJobStatus.Cancelled => "CANCELADO",
-        FarmJobStatus.TimedOut => "TIMEOUT",
-        FarmJobStatus.Rejected => "REJEITADO",
+        FarmJobStatus.Cancelled => "CANCELADA",
+        FarmJobStatus.TimedOut => "TEMPO ESGOTADO",
+        FarmJobStatus.Rejected => "REJEITADA",
         _ => status.ToString().ToUpperInvariant()
     };
 
@@ -507,7 +474,7 @@ else
         status == FarmJobStatus.Completed ? "green" :
         status is FarmJobStatus.Failed or FarmJobStatus.TimedOut ? "error-text" : "amber";
 
-    private static string IntegrityLabel(bool valid) => valid ? "VÁLIDO" : "INVÁLIDO";
+    private static string IntegrityLabel(bool valid) => valid ? "SIM" : "NÃO";
     private static string IntegrityClass(bool valid) => valid ? "green" : "error-text";
 
     private static bool CanCancel(FarmJobSnapshot job) =>
@@ -527,7 +494,7 @@ else
     private static string ShortHash(string value) =>
         value.Length <= 16 ? value : $"{value[..12]}...{value[^4..]}";
     private static string FormatBytes(long bytes) =>
-        bytes <= 0 ? "---" :
+        bytes <= 0 ? "—" :
         bytes < 1024L * 1024 * 1024
             ? $"{bytes / 1024d / 1024d:0.0} MB"
             : $"{bytes / 1024d / 1024d / 1024d:0.0} GB";

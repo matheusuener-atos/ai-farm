@@ -4,13 +4,7 @@
 @inject IApiTokenService Tokens
 @inject IJSRuntime JavaScript
 
-<PageTitle>Tokens da Iris // atos AI Farm</PageTitle>
-
-<div class="page-head">
-    <p class="eyebrow">atos:/ACCOUNT/API_TOKENS</p>
-    <h1>Acesso programático</h1>
-    <p>SEGREDO ÚNICO // ESCOPOS MÍNIMOS // REVOGAÇÃO IMEDIATA</p>
-</div>
+<PageTitle>Chaves de acesso // atos AI Farm</PageTitle>
 
 @if (_error is not null)
 {
@@ -20,91 +14,94 @@
 @if (_createdSecret is not null)
 {
     <section class="token-secret" role="status">
-        <strong>Copie agora — o segredo não será exibido novamente</strong>
-        <code>@_createdSecret</code>
-        <div>
-            <button type="button" @onclick="CopySecretAsync">Copiar token</button>
-            <button type="button" class="button-secondary" @onclick="DismissSecret">Já guardei</button>
+        <strong>Copie agora — a chave não será mostrada de novo</strong>
+        <div style="display: flex; align-items: center; gap: 12px">
+            <code style="margin-right: auto">@_createdSecret</code>
+            <button type="button" class="button-secondary" style="box-shadow: 2px 2px 0 #111111" @onclick="DismissSecret">Já guardei</button>
+            <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="CopySecretAsync">Copiar chave</button>
         </div>
     </section>
 }
 
 <section class="panel token-create">
-    <div class="panel-head section-heading">
-        <div>
-            <h2>Emitir token</h2>
-            <p class="muted">USE SOMENTE OS ESCOPOS NECESSÁRIOS PARA A INTEGRAÇÃO</p>
-        </div>
-    </div>
+    <div class="panel-head"><h2>Criar chave</h2></div>
     <div class="token-form">
-        <label>NOME
-            <input maxlength="80" @bind="_name" placeholder="ex.: dashboard interno" disabled="@_working" />
+        <label>Nome
+            <input maxlength="80" @bind="_name" placeholder="ex.: painel interno da equipe" disabled="@_working" />
         </label>
-        <label>VALIDADE
+        <label>Validade
             <select @bind="_validityDays" disabled="@_working">
-                <option value="30">30 DIAS</option>
-                <option value="90">90 DIAS</option>
-                <option value="180">180 DIAS</option>
-                <option value="365">365 DIAS</option>
+                <option value="30">30 dias</option>
+                <option value="90">90 dias</option>
+                <option value="180">180 dias</option>
+                <option value="365">365 dias</option>
             </select>
         </label>
     </div>
     <fieldset class="token-scopes">
-        <legend>ESCOPOS DE LEITURA</legend>
-        <label><input type="checkbox" @bind="_profileRead" /> PERFIL <small>GET /api/v1/me</small></label>
-        <label><input type="checkbox" @bind="_usageRead" /> USO <small>GET /api/v1/usage</small></label>
-        <label><input type="checkbox" @bind="_incidentsRead" /> INCIDENTES <small>GET /api/v1/incidents</small></label>
-        <label><input type="checkbox" @bind="_auditRead" /> AUDITORIA <small>GET /api/v1/audit</small></label>
-        <label><input type="checkbox" @bind="_conversationsRead" /> CONVERSAS <small>GET /api/v1/conversations</small></label>
-        <label><input type="checkbox" @bind="_farmRead" /> FARM <small>ANALYTICS E CATÁLOGO DE WORKLOADS</small></label>
+        <legend>O que a chave pode LER</legend>
+        <label><input type="checkbox" @bind="_profileRead" /> PERFIL <small>dados da conta</small></label>
+        <label><input type="checkbox" @bind="_usageRead" /> USO <small>respostas e custos</small></label>
+        <label><input type="checkbox" @bind="_incidentsRead" /> ALERTAS <small>ocorrências da conta</small></label>
+        <label><input type="checkbox" @bind="_auditRead" /> REGISTROS <small>trilha de auditoria</small></label>
+        <label><input type="checkbox" @bind="_conversationsRead" /> CONVERSAS <small>histórico do chat</small></label>
+        <label><input type="checkbox" @bind="_farmRead" /> FARM <small>tarefas e capacidade</small></label>
     </fieldset>
     <fieldset class="token-scopes">
-        <legend>ESCOPOS DE EXECUÇÃO</legend>
-        <label><input type="checkbox" @bind="_irisExecute" /> EXECUTAR IRIS <small>POST /api/v1/iris/responses</small></label>
-        <label><input type="checkbox" @bind="_farmExecute" /> EXECUTAR FARM <small>SUBMETER E CANCELAR JOBS</small></label>
-        <label><input type="checkbox" @bind="_walletCredit" /> CREDITAR WALLET <small>POST /api/v1/wallet/credits // ADMINISTRATIVO</small></label>
-        <p class="muted">ATENÇÃO // EXECUTAR IRIS PODE CONSUMIR AIC. EXECUTAR FARM CONSOME PROCESSAMENTO; CP SÓ VIRA AIC PELO SETTLEMENT DA POLÍTICA FINANCIADA (ADR 0022, DESLIGADA POR PADRÃO). CREDITAR WALLET EMITE AIC NO BUCKET PURCHASED.</p>
+        <legend>O que a chave pode FAZER</legend>
+        <label><input type="checkbox" @bind="_irisExecute" /> USAR A IRIS <small>pode gastar créditos</small></label>
+        <label><input type="checkbox" @bind="_farmExecute" /> USAR A FARM <small>enviar e cancelar tarefas</small></label>
+        <label><input type="checkbox" @bind="_walletCredit" /> CREDITAR CARTEIRA <small>administrativo</small></label>
+        <p class="muted">Atenção: "usar a Iris" pode gastar créditos da conta. "Usar a farm" ocupa suas máquinas; pontos só viram créditos quando a política de recompensas está ativa.</p>
     </fieldset>
-    <button type="button" @onclick="CreateAsync" disabled="@_working">
-        @(_working ? "Emitindo..." : "Emitir token")
-    </button>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 0 16px 14px">
+        <small class="muted" style="margin-right: auto">Marque só as permissões que a integração realmente precisa.</small>
+        <button type="button" @onclick="CreateAsync" disabled="@_working">
+            @(_working ? "Criando..." : "Criar chave")
+        </button>
+    </div>
 </section>
 
 <section class="panel token-list">
-    <div class="panel-head section-heading">
-        <div><h2>Tokens da conta</h2><p class="muted">SEGREDOS NÃO SÃO ARMAZENADOS EM TEXTO PURO</p></div>
-        <button type="button" class="button-secondary" @onclick="LoadAsync" disabled="@_working">Atualizar</button>
+    <div class="panel-head">
+        <h2>Chaves da conta</h2>
     </div>
     @if (_loading)
     {
-        <p class="muted">CARREGANDO...</p>
+        <p class="muted" style="padding: 14px 16px; margin: 0">Carregando…</p>
     }
     else if (_tokens.Count == 0)
     {
-        <p class="muted">NENHUM TOKEN EMITIDO.</p>
+        <p class="muted" style="padding: 14px 16px; margin: 0">Nenhuma chave criada.</p>
     }
     else
     {
         @foreach (var token in _tokens)
         {
-            <article>
-                <header>
-                    <div><strong>@token.Name</strong><code>@token.Prefix</code></div>
-                    <span class="@StatusClass(token)">@Status(token)</span>
+            <article style="margin: 14px 16px 0; padding: 0; border: 1.5px solid #111111; background: #FFFFFF; box-shadow: 3px 3px 0 #111111">
+                <header style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1.5px solid #111111; background: #F4F1EA">
+                    <strong style="font-size: 13px; white-space: nowrap; flex-shrink: 0">@token.Name</strong>
+                    <code>@token.Prefix…</code>
+                    <span class="@StatusClass(token)" style="margin-left: auto; font-size: 12px; font-weight: 600">@Status(token)</span>
                 </header>
-                <dl>
-                    <div><dt>ESCOPOS</dt><dd>@FormatScopes(token.Scopes)</dd></div>
-                    <div><dt>CRIADO</dt><dd>@token.CreatedAtUtc.ToString("dd/MM/yyyy HH:mm") UTC</dd></div>
-                    <div><dt>EXPIRA</dt><dd>@token.ExpiresAtUtc.ToString("dd/MM/yyyy HH:mm") UTC</dd></div>
-                    <div><dt>ÚLTIMO USO</dt><dd>@(token.LastUsedAtUtc?.ToString("dd/MM/yyyy HH:mm 'UTC'") ?? "NUNCA")</dd></div>
-                </dl>
+                <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 12px 16px; border: 1.5px solid #111111">
+                    <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">Permissões</span><br /><strong>@FormatScopes(token.Scopes)</strong></div>
+                    <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">Criada</span><br /><strong>@token.CreatedAtUtc.ToString("dd/MM/yyyy HH:mm") UTC</strong></div>
+                    <div style="padding: 8px 10px; border-right: 1.5px solid #111111"><span class="label" style="font-size: 9px">Expira</span><br /><strong>@token.ExpiresAtUtc.ToString("dd/MM/yyyy HH:mm") UTC</strong></div>
+                    <div style="padding: 8px 10px"><span class="label" style="font-size: 9px">Último uso</span><br /><strong>@(token.LastUsedAtUtc?.ToString("dd/MM/yyyy HH:mm 'UTC'") ?? "NUNCA")</strong></div>
+                </div>
                 @if (!token.IsRevoked && !token.IsExpired(DateTimeOffset.UtcNow))
                 {
-                    <button type="button" class="danger-button" @onclick="() => RevokeAsync(token.Id)" disabled="@_working">Revogar</button>
+                    <footer style="display: flex; justify-content: flex-end; padding: 0 16px 14px">
+                        <button type="button" class="danger-button" style="box-shadow: 2px 2px 0 #111111" @onclick="() => RevokeAsync(token.Id)" disabled="@_working">Cortar acesso</button>
+                    </footer>
                 }
             </article>
         }
     }
+    <footer style="display: flex; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--line); margin-top: 14px">
+        <button type="button" class="btn primary" style="box-shadow: 2px 2px 0 #111111" @onclick="LoadAsync" disabled="@_working">Atualizar</button>
+    </footer>
 </section>
 
 @code {
@@ -132,7 +129,7 @@
         _loading = true;
         _error = null;
         try { _tokens = await Tokens.ListAsync(); }
-        catch (Exception) { _error = "Não foi possível carregar os tokens da conta."; }
+        catch (Exception) { _error = "Não foi possível carregar as chaves da conta."; }
         finally { _loading = false; }
     }
 
@@ -149,7 +146,7 @@
             await LoadAsync();
         }
         catch (ArgumentException exception) { _error = exception.Message; }
-        catch (Exception) { _error = "Não foi possível emitir o token."; }
+        catch (Exception) { _error = "Não foi possível criar a chave."; }
         finally { _working = false; }
     }
 
@@ -158,7 +155,7 @@
         _working = true;
         _error = null;
         try { await Tokens.RevokeAsync(id); await LoadAsync(); }
-        catch (Exception) { _error = "Não foi possível revogar o token."; }
+        catch (Exception) { _error = "Não foi possível cortar o acesso desta chave."; }
         finally { _working = false; }
     }
 
@@ -179,9 +176,22 @@
             await JavaScript.InvokeVoidAsync("navigator.clipboard.writeText", _createdSecret);
     }
     private void DismissSecret() => _createdSecret = null;
-    private static string Status(ApiTokenSnapshot token) => token.IsRevoked ? "REVOGADO" : token.IsExpired(DateTimeOffset.UtcNow) ? "EXPIRADO" : "ATIVO";
+    private static string Status(ApiTokenSnapshot token) => token.IsRevoked ? "CORTADA" : token.IsExpired(DateTimeOffset.UtcNow) ? "EXPIRADA" : "ATIVA";
     private static string StatusClass(ApiTokenSnapshot token) => token.IsRevoked || token.IsExpired(DateTimeOffset.UtcNow) ? "muted" : "green";
-    private static string FormatScopes(ApiTokenScope scopes) => string.Join(" // ", Enum.GetValues<ApiTokenScope>()
+    private static string ScopeLabel(ApiTokenScope scope) => scope switch
+    {
+        ApiTokenScope.ProfileRead => "PERFIL",
+        ApiTokenScope.UsageRead => "USO",
+        ApiTokenScope.IncidentsRead => "ALERTAS",
+        ApiTokenScope.AuditRead => "REGISTROS",
+        ApiTokenScope.ConversationsRead => "CONVERSAS",
+        ApiTokenScope.FarmRead => "FARM",
+        ApiTokenScope.FarmExecute => "USAR FARM",
+        ApiTokenScope.IrisExecute => "USAR IRIS",
+        ApiTokenScope.WalletCredit => "CREDITAR",
+        _ => scope.ToString().ToUpperInvariant()
+    };
+    private static string FormatScopes(ApiTokenScope scopes) => string.Join(" · ", Enum.GetValues<ApiTokenScope>()
         .Where(x => x is not ApiTokenScope.None and not ApiTokenScope.AllRead and not ApiTokenScope.All && scopes.HasFlag(x))
-        .Select(x => x.ToString().ToUpperInvariant()));
+        .Select(ScopeLabel));
 }
